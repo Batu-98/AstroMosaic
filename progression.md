@@ -9,7 +9,7 @@ Use this file for concise development history and handoff state. Detailed techni
 - **Current stage:** The Phase 1 headless FITS gate passed on Windows 11 x64. Linear mono/RGB TIFF validation follows before Phase 3 acceptance. Linux and macOS support is deferred.
 - **Available artifacts:** Tiled FITS mosaic CLI, the [Phase 1 reference and resource measurements](docs/phase-1.md), a local Windows CLI bundle at `dist/astromosaic-cli-phase1`, and the earlier ASTAP D05 and PySide6 viewport probes.
 - **Implementation / verification:** 28 tests, Ruff lint and format, mypy, and Poetry lock checks passed. The Windows CLI bundle rendered the two-panel reference and ran `inspect` and `smoke --spawn` from an unrelated directory. CFITSIO verified the output. Two larger runs verified identical pixels and coverage under different working budgets.
-- **Version control:** The initial `main` snapshot is prepared for the private [AstroMosaic GitHub repository](https://github.com/Batu-98/AstroMosaic).
+- **Version control:** Local `main` tracks `origin/main` in the private [AstroMosaic GitHub repository](https://github.com/Batu-98/AstroMosaic).
 - **Next action:** Define the linear mono/RGB TIFF data and metadata contract and its fixtures. Freeze the Phase 2 reference cases before tuning registration and photometry.
 - **Open dependencies:** Q-003 through Q-006, Q-009, and Q-010 track later numerical, resource, solver, distribution, and mixed-panel gates. Q-008 tracks deferred platforms and Q-011 tracks deferred visual fill. Q-007 is resolved for FITS export.
 
@@ -139,7 +139,8 @@ The table is a status summary, not a replacement for the full exit gates in Sect
 
 - **Changed:** Created the private GitHub repository and prepared the source code, tests, dependency lock, and documentation for the initial commit.
 - **Verified:** Reviewed the file list against the ignore rules for local tooling, images, catalogs, caches, and build outputs.
-- **Next:** Push `main` and verify the remote commit.
+- **Published:** Pushed `main` and verified the remote initial commit `7faa650`.
+- **Next:** Continue with the linear TIFF contract.
 
 ## Entry Template
 
