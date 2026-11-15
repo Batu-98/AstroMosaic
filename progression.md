@@ -6,12 +6,12 @@ Use this file for concise development history and handoff state. Detailed techni
 
 - **Last updated:** 2026-11-15
 - **Active baseline:** Python-first architecture revision 3.5. See [ADR-0003](docs/adr/0003-windows-first-platform-scope.md) for Windows scope, [ADR-0006](docs/adr/0006-dual-fits-and-tiff-workflow.md) for formats, and [ADR-0007](docs/adr/0007-sky-and-foreground-mosaics.md) for mixed panels.
-- **Current stage:** The Phase 1 headless FITS gate passed on Windows 11 x64. Linear mono/RGB TIFF validation follows before Phase 3 acceptance. Linux and macOS support is deferred.
-- **Available artifacts:** Tiled FITS mosaic CLI, the [Phase 1 reference and resource measurements](docs/phase-1.md), a local Windows CLI bundle at `dist/astromosaic-cli-phase1`, and the earlier ASTAP D05 and PySide6 viewport probes.
-- **Implementation / verification:** 28 tests, Ruff lint and format, mypy, and Poetry lock checks passed. The Windows CLI bundle rendered the two-panel reference and ran `inspect` and `smoke --spawn` from an unrelated directory. CFITSIO verified the output. Two larger runs verified identical pixels and coverage under different working budgets.
+- **Current stage:** The Phase 2 astronomy gate passed for the Windows 11 x64 FITS reference. Linear mono/RGB TIFF validation is due before Phase 3 acceptance. Linux and macOS support is deferred.
+- **Available artifacts:** Qt-free FITS CLI with local solving, WCS sidecars, supplied sky masks, and relative refinement. The [Phase 2 evidence](docs/phase-2.md) describes the local catalogs and the Windows development bundle at `dist/astromosaic-cli-phase2`.
+- **Implementation / verification:** 37 tests, Ruff lint and format, mypy, and Poetry lock checks passed. Real hinted and blind Gaia/ASTAP trials, masked sky verification, and held-out science checks passed. The frozen CLI solved and rendered from an unrelated working directory, and CFITSIO reopened the result.
 - **Version control:** Local `main` tracks `origin/main` in the private [AstroMosaic GitHub repository](https://github.com/Batu-98/AstroMosaic).
-- **Next action:** Define the linear mono/RGB TIFF data and metadata contract and its fixtures. Freeze the Phase 2 reference cases before tuning registration and photometry.
-- **Open dependencies:** Q-003 through Q-006, Q-009, and Q-010 track later numerical, resource, solver, distribution, and mixed-panel gates. Q-008 tracks deferred platforms and Q-011 tracks deferred visual fill. Q-007 is resolved for FITS export.
+- **Next action:** Define and verify the linear mono/RGB TIFF input/output contract, then proceed with the Phase 3 desktop workflow.
+- **Open dependencies:** Q-003 through Q-005, Q-009, and Q-010 track later numerical, resource, distribution, format, and mixed-panel gates. Q-008 tracks deferred platforms and Q-011 tracks deferred visual fill. Q-006 and Q-007 are resolved for the Windows solver and FITS export references.
 
 ## Phase Overview
 
@@ -22,7 +22,7 @@ The table is a status summary, not a replacement for the full exit gates in Sect
 | Preparation | Complete | Agent instructions, English documentation, tracking conventions, active-plan identification, and next task established. |
 | 0 - Compatibility and scope | Complete | Locked environment, initial fixtures/contracts, solver and PySide float-texture experiments, packaged skeleton, and a small job verified on Windows 11 x64. |
 | 1 - Headless reference | FITS gate passed | Correct two-panel FITS geometry, values, and coverage, independent reopening, bounded access, and a Qt-free CLI verified. Linear mono/RGB TIFF validation is due before Phase 3 acceptance. |
-| 2 - Robust astronomy engine | Not started | Local Gaia and ASTAP solving, masked sky checks, overlap registration, relative stellar scales, constrained backgrounds, held-out and injected-signal checks, and explicit weak or disconnected states. |
+| 2 - Robust astronomy engine | Complete | Verified local Gaia/ASTAP fallback, supplied sky masks, anchored overlap registration and stellar gains, offset/plane selection, held-out and injected-signal gates, and weak/disconnected diagnostics on Windows. |
 | 3 - Desktop workflow | Not started | Responsive projects and jobs, foreground tags and editable masks, separate foreground stitching, automatic and manual composition, preview/export agreement, recovery, and CPU fallback on Windows. |
 | 4 - Large mosaics and improved blends | Not started | Budgeted rendering of 12 FITS and TIFF panels at 6000 × 4000, including a mixed scene, incremental export, tile/halo correctness, and measured improvement for any optional multiband blend. |
 | 5 - Extended formats and channels | Not started | Format/channel/projection contracts and packaging checks for each added workflow. |
@@ -148,6 +148,33 @@ The table is a status summary, not a replacement for the full exit gates in Sect
 - **Verified:** Compared the license text with the reference project and checked the lock and built wheel metadata.
 - **Related:** [ADR-0009](docs/adr/0009-gpl-v3-application-license.md) records the decision. Q-005 remains open for third-party release notices and data terms.
 - **Next:** Continue the TIFF contract and review bundled materials during release preparation.
+
+### 2026-11-15 - Phase 2 - Started: astronomy acceptance cases
+
+- **Changed:** Set the reference thresholds for held-out alignment, relative stellar gain, faint emission, supplied sky masks, and offline solver evidence.
+- **Verified:** Reviewed the cases against the Phase 2 gate and the Phase 1 FITS input and memory contracts.
+- **Related:** [Phase 2 fixture criteria](docs/phase-2.md#acceptance-fixtures), Q-003, Q-006, and Q-010.
+- **Next:** Connect the solver adapters and build the deterministic masked FITS fixtures.
+
+### 2026-11-15 - Phase 2 - Implemented: masked offline solving and relative refinement
+
+- **Changed:** Added local Gaia and ASTAP stages, WCS sidecars, supplied sky FITS masks, and opt-in stellar and background refinement.
+- **Verified:** Windows M13 solves passed in hinted and blind modes with both backends. The full local fallback order, native ASTAP cancellation, and masked staging passed. Synthetic and DSS refinement checks passed, including the stellar and faint-emission gates.
+- **Related:** [ADR-0010](docs/adr/0010-seiza-gaia-backend.md), [Phase 2 evidence](docs/phase-2.md), Q-003, Q-006, and Q-010.
+- **Next:** Verify the updated headless Windows bundle and finish the phase handoff.
+
+### 2026-11-15 - Phase 2 - Completed: Windows astronomy gate
+
+- **Changed:** Recorded the solver matrix, catalog installation and update policy, and relative refinement results. Built the local headless Windows CLI with the optional Gaia binding.
+- **Verified:** 37 tests, Ruff, mypy, and lock validation passed. The bundle passed native Gaia and ASTAP solves, masked sidecar reimport, refinement, independent FITS reopening, and the spawned smoke case. Measured native Gaia index memory separately from render buffers.
+- **Related:** Q-006 is resolved for the offline solver and catalog deployment. [Phase 2 evidence](docs/phase-2.md) records Q-003 and Q-010 checks, with later format and desktop work still tracked.
+- **Next:** Validate linear mono/RGB TIFF input and output before Phase 3 desktop acceptance.
+
+### 2026-11-15 - Repository update - Phase 2 snapshot
+
+- **Changed:** Recorded the Phase 2 source, tests, lock, and documentation in the GitHub snapshot.
+- **Verified:** All 37 tests, Ruff, mypy, and Poetry lock checks passed before publication.
+- **Next:** Validate the linear TIFF workflow.
 
 ## Entry Template
 

@@ -16,6 +16,7 @@ dependencies = [
 
 [project.optional-dependencies]
 desktop = ["PySide6-Essentials>=6.10,<7"]
+gaia = ["seiza==0.48.2"]
 
 [project.scripts]
 astromosaic = "astromosaic.cli:main"
@@ -53,5 +54,5 @@ strict = true
 files = ["src", "tests"]
 
 [[tool.mypy.overrides]]
-module = ["astropy.*", "fitsio", "reproject.*", "scipy.*", "sep"]
+module = ["astropy.*", "fitsio", "reproject.*", "scipy.*", "seiza", "sep"]
 ignore_missing_imports = true

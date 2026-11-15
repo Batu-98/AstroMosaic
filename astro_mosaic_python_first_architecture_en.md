@@ -212,7 +212,7 @@ Extract stars with local noise/background estimates, reject saturation and blend
 
 Build an overlap graph from sampled full-WCS boundaries. Match stars through initial WCS predictions and spatial indexing. Refine globally with robust weights and an external/reference anchor. Add low-order SIP terms only when star count and spatial coverage support them. Report held-out relative alignment errors separately from catalog errors.
 
-TPS stays outside v1. Evaluate a compatible open-source Gaia backend and index before selecting the implementation.
+TPS stays outside v1. The Windows Phase 2 reference uses Seiza for local Gaia DR3 and fits relative translations on the anchored output grid. [Gaia backend decision](docs/adr/0010-seiza-gaia-backend.md) · [Phase 2 evidence](docs/phase-2.md)
 
 ### 6.4 Relative Gain and Background Correction
 

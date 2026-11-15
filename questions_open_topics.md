@@ -19,18 +19,18 @@ This register tracks unresolved decisions, problems, and risks. It is not a work
 - **Status / priority:** Investigating / P1
 - **Opened / updated:** 2026-11-15 / 2026-11-15
 - **Affected phase:** 0 fixture design; required for numerical gates in phases 1, 2, and 4.
-- **Impact and evidence:** The [Phase 1 fixtures](docs/phase-1.md) fix two-panel geometry, masks, weights, tolerances, and independent export truth. Exact pixels and coverage, analytic TAN and SIP checks, and the 1% solid-angle-weighted Gaussian flux check passed.
+- **Impact and evidence:** The [Phase 1 fixtures](docs/phase-1.md) verify independent FITS export truth. [Phase 2](docs/phase-2.md#acceptance-fixtures) fixes and verifies held-out alignment, stellar flux and profile, injected extended signal, masks, and weak or disconnected inputs.
 - **Current assumption:** Generate small deterministic same-filter FITS fixtures for development. Store provenance for external data with the validation procedure.
-- **Next action / responsibility:** Freeze injected-gradient, faint-signal, difficult-registration, and supplied sky-mask cases before Phase 2 algorithm tuning. Define dedicated TIFF test samples and Phase 4 tolerances with their workloads.
+- **Next action / responsibility:** Define dedicated TIFF test samples and freeze large, RGB, and mixed-scene tolerances for the Phase 4 workloads.
 - **Closure condition:** Freeze dataset-specific tolerances before algorithm tuning, including alignment, stellar profiles/flux, injected faint emission, and tiled/reference agreement. Link the fixture manifest and test results.
 
 ### Q-004 - Resource budgets and representative workload
 
 - **Status / priority:** Investigating / P1
 - **Opened / updated:** 2026-11-15 / 2026-11-15
-- **Affected phase:** 0 scheduling contracts; phases 1 and 4 bounded rendering; phase 3 preview performance.
-- **Impact and evidence:** The one-worker FITS renderer enforces a combined tile reservation with no queue. A two-panel 3328 × 1536 render peaked at 89.0 MiB working set and 101.5 MiB commit with one OpenBLAS thread. A tighter reservation produced identical output. Cancellation cleaned up the partial file and released handles. [Phase 1 working set](docs/phase-1.md#working-set-and-cancellation)
-- **Current assumption:** Default to 128-pixel tiles, an estimated 64 MiB tile working budget, and a 2048 MiB FITS output limit. Desktop preview and large-job budgets need measurements for their own workloads.
+- **Affected phase:** Phase 0 scheduling contracts, Phase 1 rendering, Phase 2 solvers and fitting, Phase 3 preview, and Phase 4 large-job scaling.
+- **Impact and evidence:** The one-worker FITS renderer enforces a combined tile reservation with no queue. A two-panel 3328 × 1536 render peaked at 89.0 MiB working set and 101.5 MiB commit with one OpenBLAS thread. An unhinted Gaia solve with the deep native index peaked at 1066 MiB working set and 281 MiB commit. [Phase 1 rendering measurements](docs/phase-1.md#working-set-and-cancellation) · [Phase 2 solver measurements](docs/phase-2.md#windows-solver-evidence)
+- **Current assumption:** Default to 128-pixel render tiles, an estimated 64 MiB working buffer budget, and a 2048 MiB FITS output limit. Budget native catalog mappings separately from science tiles. The [Phase 2 solver settings](docs/phase-2.md#offline-solvers) include a separate ASTAP staging limit.
 - **Next action / responsibility:** Account for GUI/GPU and cache use in Phase 3. Repeat bounded-render and cancellation checks in Phase 4 with 12 panels at 6000 × 4000 for FITS, TIFF, RGB, and mixed cases.
 - **Closure condition:** Document initial defaults and over-budget behavior; verify bounded queues, temporary allocations, cancellation, and peak usage for a named workload. Revisit defaults during the Phase 4 large-mosaic benchmark.
 
@@ -39,20 +39,10 @@ This register tracks unresolved decisions, problems, and risks. It is not a work
 - **Status / priority:** Open / P1
 - **Opened / updated:** 2026-11-15 / 2026-11-15
 - **Affected phase:** 0 dependency/license inventory and release packaging; required before license-sensitive code reuse or redistribution.
-- **Impact and evidence:** The owner chose `GPL-3.0-only` for the application. The [initial license inventory](docs/phase-0.md#license-inventory) covers SEP, Qt, PyInstaller, ASTAP, and separate D05 data. `fitsio` is a GPL-2.0-or-later development dependency. [License decision](docs/adr/0009-gpl-v3-application-license.md)
+- **Impact and evidence:** The owner chose `GPL-3.0-only` for the application. The [initial license inventory](docs/phase-0.md#license-inventory) covers SEP, Qt, PyInstaller, ASTAP, and separate D05 data. `fitsio` is a GPL-2.0-or-later development dependency. Seiza is an optional Apache-2.0 backend whose local data are installed separately. [License decision](docs/adr/0009-gpl-v3-application-license.md) · [Seiza decision](docs/adr/0010-seiza-gaia-backend.md)
 - **Current assumption:** Maintain original implementation. Obtain solver binaries and catalog data separately for experiments.
 - **Next action / responsibility:** Inventory bundled transitive notices and review catalog redistribution terms for the release.
 - **Closure condition:** Record the distribution decision, attribution/license inventory, and compatibility of any reused code or bundled materials. Independent development can continue while this decision is open.
-
-### Q-006 - Offline solver and catalog deployment
-
-- **Status / priority:** Investigating / P1
-- **Opened / updated:** 2026-11-15 / 2026-11-15
-- **Affected phase:** 0 adapter experiment and 2 offline astrometry; does not block Phase 1 fixtures with valid WCS.
-- **Impact and evidence:** [ASTAP CLI 2026.11.01 and D05](docs/phase-0.md#offline-astap-experiment) solved an M13 DSS cutout on Windows. Output agreed with the archive header to 0.36 arcseconds. Verified source hash, Unicode image basename, missing catalog, real timeout cleanup, and simulated interrupt cleanup.
-- **Current assumption:** Use validated WCS, local Gaia DR3, hinted ASTAP, then blind ASTAP. The verified D05 case used a hinted 0.92° field. Use explicit local catalogs and separate scratch files.
-- **Next action / responsibility:** Select an open-source Gaia backend and local index or catalog deployment. Test hinted and blind ASTAP and the full fallback order on representative Windows fixtures. Define catalog update and integrity checks.
-- **Closure condition:** Record a tested solver/version/catalog matrix and deployment/update policy, including ordered fallbacks, cancellation, missing-catalog diagnostics, exhausted-chain behavior, and unchanged-source checks.
 
 ### Q-008 - Linux and macOS support
 
@@ -79,9 +69,9 @@ This register tracks unresolved decisions, problems, and risks. It is not a work
 - **Status / priority:** Open / P1
 - **Opened / updated:** 2026-11-15 / 2026-11-15
 - **Affected phase:** Phase 2 masked sky processing, Phase 3 mixed-panel desktop workflow, and Phase 4 resource validation.
-- **Impact and evidence:** Mixed panels need a foreground tag, an editable sky mask, two registrations, and a reproducible horizon seam. Automatic classification, boundary accuracy, and alignment confidence have no measured baseline yet.
+- **Impact and evidence:** [Phase 2 checks](docs/phase-2.md) verify supplied sky-mask use for solving, stellar and background fitting, and sky export. The desktop workflow also needs foreground tags, editable masks, independent ground registration, and a reproducible horizon seam.
 - **Current assumption:** Use local thumbnail detection, separate segmentation, and image-space foreground registration. Derive an automatic composition proposal from a shared mixed panel and provide manual adjustment. Start with the overlap percentage convention in the [plan](astro_mosaic_python_first_architecture_en.md#67-mixed-sky-and-foreground-panels).
-- **Next action / responsibility:** Define mixed FITS and TIFF fixtures with known masks and overlaps. Measure detection latency and segmentation error on low-contrast and irregular horizons. Test manual corrections, mismatched frames, and seams with partial or zero common coverage before selecting backends.
+- **Next action / responsibility:** Extend the supplied-mask fixture to mixed FITS and TIFF workflow tests. Measure detection latency and segmentation error on low-contrast and irregular horizons. Test manual corrections, mismatched frames, and seams with partial or zero common coverage before selecting backends.
 - **Closure condition:** Verify the Phase 2 and 3 mixed-panel gates, including separate layer exports and saved edits, then run the Phase 4 mixed workload within measured memory and worker limits.
 
 ### Q-011 - Optional generative fill for a visual seam
@@ -128,6 +118,17 @@ This register tracks unresolved decisions, problems, and risks. It is not a work
 - **Next action / responsibility:** Apply independent reopen checks to future formats and channel layouts when their contracts are implemented.
 - **Closure condition:** Document and verify pixels, scaling, coverage, WCS, crop/rotation, and SIP removal with small fixtures and independent evidence.
 - **Resolution:** 2026-11-15. CFITSIO reopened the exact two-panel result, and the cropped and rotated export matched analytic TAN and SIP checks. [Phase 1 FITS validation](docs/phase-1.md#numerical-and-windows-checks)
+
+### Q-006 - Offline solver and catalog deployment
+
+- **Status / priority:** Resolved / P1
+- **Opened / updated:** 2026-11-15 / 2026-11-15
+- **Affected phase:** Phase 0 adapter experiment and Phase 2 offline astrometry.
+- **Impact and evidence:** The Windows M13 reference passed both hinted and blind Gaia DR3 and ASTAP, ordered fallback, real ASTAP cancellation, missing-catalog diagnostics, and unchanged-source checks. The catalog and index were verified against the versioned manifest.
+- **Current assumption:** Install explicit local Gaia and ASTAP files separately, keep the Gaia catalog and index version paired, and save solved WCS in a source-bound sidecar.
+- **Next action / responsibility:** Recheck the solver matrix on catalog updates and during release packaging. Release notices and data terms remain under Q-005.
+- **Closure condition:** Record a tested solver/version/catalog matrix and deployment/update policy, including ordered fallbacks, cancellation, missing-catalog diagnostics, exhausted-chain behavior, and unchanged-source checks.
+- **Resolution:** 2026-11-15. [ADR-0010](docs/adr/0010-seiza-gaia-backend.md) records the backend. The [Phase 2 solver matrix and setup](docs/phase-2.md#offline-solvers) record results, catalog provenance, and the update procedure.
 
 ## New Entry Template
 

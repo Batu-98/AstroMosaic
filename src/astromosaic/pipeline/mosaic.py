@@ -1,8 +1,8 @@
 """Render an ICRS TAN FITS mosaic with a bounded, synchronous tile loop."""
 
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from contextlib import ExitStack
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from importlib.metadata import version
 from math import isfinite
 from pathlib import Path
@@ -14,9 +14,14 @@ from astropy.io import fits
 from astropy.wcs import WCS
 
 from astromosaic.core import Region, Tile
+from astromosaic.core.job import DEFAULT_JOB_CONTEXT
+from astromosaic.core.job import JobContext as JobContext
+from astromosaic.core.job import MosaicCancelled as MosaicCancelled
 from astromosaic.geometry import PanelGeometry, TileSky, read_panel_geometry, tan_output_wcs
 from astromosaic.io.fits import FitsTileSource, fits_tile_bytes, open_fits_panel
 from astromosaic.io.fits_export import open_fits_mosaic
+from astromosaic.photometry import PanelCorrection
+from astromosaic.pipeline.refinement import RefinementReport, RefinementSpec, refine_panels
 from astromosaic.resampling import sample, source_window
 
 MIB = 1024**2
@@ -52,20 +57,6 @@ class RenderSpec:
         return crop
 
 
-class MosaicCancelled(RuntimeError):
-    """The job stopped before publishing a FITS file."""
-
-
-@dataclass(frozen=True, slots=True)
-class JobContext:
-    is_cancelled: Callable[[], bool] | None = None
-    on_progress: Callable[[int, int], None] | None = None
-
-    def check_cancelled(self) -> None:
-        if self.is_cancelled is not None and self.is_cancelled():
-            raise MosaicCancelled("The mosaic job was cancelled.")
-
-
 @dataclass(frozen=True, slots=True)
 class MosaicResult:
     width: int
@@ -76,6 +67,7 @@ class MosaicResult:
     peak_reserved_bytes: int
     rejected_coordinates: int
     backend: str = "cpu"
+    refinement: RefinementReport | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -83,6 +75,8 @@ class _Panel:
     source: FitsTileSource
     geometry: PanelGeometry
     weight: float
+    wcs_origin: str = "primary WCS"
+    correction: PanelCorrection | None = None
 
 
 def _export_header(
@@ -122,7 +116,21 @@ def _export_header(
         header.add_history(
             f"Input {index}: {fingerprint.size_bytes} bytes; weight {panel.weight:g}"
         )
-        header.add_history(f"Input {index}: mtime_ns {fingerprint.modified_ns}; primary WCS")
+        header.add_history(f"Input {index}: mtime_ns {fingerprint.modified_ns}; {panel.wcs_origin}")
+        mask = panel.source.sky_mask_fingerprint
+        if mask is not None:
+            header.add_history(
+                f"Input {index}: sky mask {mask.size_bytes} bytes; mtime_ns {mask.modified_ns}"
+            )
+        correction = panel.correction
+        if correction is not None:
+            dx, dy = correction.shift
+            offset, gradient_x, gradient_y = correction.background
+            header.add_history(f"Input {index}: TAN shift ({dx:.8g}, {dy:.8g}) px")
+            header.add_history(f"Input {index}: relative gain {correction.gain:.8g}")
+            header.add_history(
+                f"Input {index}: background {offset:.8g}, {gradient_x:.8g}, {gradient_y:.8g}"
+            )
     return header
 
 
@@ -163,7 +171,10 @@ def _try_tile(
     weight_scale = np.zeros_like(numerator)
     for panel in panels:
         context.check_cancelled()
-        px, py, usable = sky.in_panel(panel.geometry)
+        correction = panel.correction
+        px, py, usable = sky.in_panel(
+            panel.geometry, correction.shift if correction else (0.0, 0.0)
+        )
         rejected += count - int(np.count_nonzero(usable))
         descriptor = panel.source.descriptor
         window = source_window(px, py, usable, descriptor.width, descriptor.height)
@@ -173,6 +184,8 @@ def _try_tile(
         if not budget.reserve(reserved_bytes):
             return None
         indices, values = sample(panel.source.read_tile(window.region), window)
+        if correction is not None:
+            correction.apply(values, px[indices], py[indices], descriptor.width, descriptor.height)
 
         # Scale at each pixel so both very large and very small finite weights remain usable.
         scale = np.maximum(weight_scale[indices], panel.weight)
@@ -184,7 +197,10 @@ def _try_tile(
 
     valid = denominator > 0
     pixels = np.full(count, np.nan, dtype=np.float32)
-    np.divide(numerator, denominator, out=pixels, where=valid)
+    with np.errstate(over="ignore", invalid="ignore"):
+        np.divide(numerator, denominator, out=pixels, where=valid)
+    if np.any(valid & ~np.isfinite(pixels)):
+        raise ValueError("A corrected mosaic sample exceeds the supported float32 range.")
     shape = (region.height, region.width)
     return _RenderedTile(Tile(region, pixels.reshape(shape), valid.reshape(shape)), rejected)
 
@@ -231,7 +247,10 @@ def render_mosaic(
     weights: Sequence[float] | None = None,
     filter_name: str | None = None,
     assume_surface_brightness: bool = False,
-    context: JobContext = JobContext(),
+    sky_masks: Mapping[int, Path] | None = None,
+    wcs_sidecars: Mapping[int, Path] | None = None,
+    refinement: RefinementSpec | None = None,
+    context: JobContext = DEFAULT_JOB_CONTEXT,
 ) -> MosaicResult:
     """Reproject original FITS samples and publish the finished mosaic on success."""
     if not paths:
@@ -239,6 +258,10 @@ def render_mosaic(
     weights = [1.0] * len(paths) if weights is None else weights
     if len(weights) != len(paths) or any(not isfinite(w) or w <= 0 for w in weights):
         raise ValueError("Supply one positive finite weight per input panel.")
+    sky_masks = {} if sky_masks is None else sky_masks
+    wcs_sidecars = {} if wcs_sidecars is None else wcs_sidecars
+    if any(index not in range(len(paths)) for index in (*sky_masks, *wcs_sidecars)):
+        raise ValueError("Sky mask and WCS sidecar indices must refer to input panels.")
 
     crop = spec.output_region()
     output = tan_output_wcs(spec.center, spec.size, spec.scale_arcsec, spec.rotation_deg, crop)
@@ -246,22 +269,55 @@ def render_mosaic(
     budget = _WorkingBudget(spec.max_working_bytes)
     width, height = crop.width, crop.height
     total = width * height
+    if total * 5 > spec.max_output_bytes:
+        raise ValueError("The FITS mosaic exceeds the configured output byte limit.")
+    if destination.exists() or destination.is_symlink():
+        raise FileExistsError(f"The output file already exists: {destination}")
     covered = completed = tiles = rejected = 0
+    report = None
     with ExitStack() as inputs:
         panels = []
-        for index, (path, weight) in enumerate(zip(paths, weights, strict=True), start=1):
+        for index, (path, weight) in enumerate(zip(paths, weights, strict=True)):
             context.check_cancelled()
             try:
                 source = inputs.enter_context(
-                    open_fits_panel(path, max_tile_bytes=spec.max_working_bytes, memmap=False)
+                    open_fits_panel(
+                        path,
+                        max_tile_bytes=spec.max_working_bytes,
+                        memmap=False,
+                        sky_mask=sky_masks.get(index),
+                    )
                 )
                 panel = source.descriptor
-                geometry = read_panel_geometry(source.header, panel.width, panel.height)
+                provenance = "primary WCS"
+                if index in wcs_sidecars:
+                    from astromosaic.astrometry.solve import load_solution
+
+                    geometry, provenance = load_solution(wcs_sidecars[index], source)
+                else:
+                    geometry = read_panel_geometry(source.header, panel.width, panel.height)
             except ValueError as error:
-                raise ValueError(f"Input panel {index}: {error}") from error
-            panels.append(_Panel(source, geometry, weight))
+                raise ValueError(f"Input panel {index + 1}: {error}") from error
+            panels.append(_Panel(source, geometry, weight, provenance))
 
         header = _export_header(output, panels, filter_name, assume_surface_brightness)
+        if refinement is not None:
+            report = refine_panels(
+                [(panel.source, panel.geometry) for panel in panels],
+                target,
+                refinement,
+                spec.max_working_bytes,
+                context,
+            )
+            panels = [
+                replace(panel, correction=correction)
+                for panel, correction in zip(panels, report.corrections, strict=True)
+            ]
+            header = _export_header(output, panels, filter_name, assume_surface_brightness)
+            if report.background is not None:
+                header.add_history(
+                    f"Anchored relative refinement: {report.background.model} background."
+                )
         with open_fits_mosaic(destination, width, height, header, spec.max_output_bytes) as writer:
             step = spec.tile_size
             for y in range(0, height, step):
@@ -280,4 +336,6 @@ def render_mosaic(
             if not covered:
                 raise ValueError("The requested output grid has no valid input coverage.")
 
-    return MosaicResult(width, height, covered, len(panels), tiles, budget.peak, rejected)
+    return MosaicResult(
+        width, height, covered, len(panels), tiles, budget.peak, rejected, refinement=report
+    )

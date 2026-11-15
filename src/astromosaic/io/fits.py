@@ -1,13 +1,17 @@
 """Read bounded sections of uncompressed monochrome FITS images."""
 
+from __future__ import annotations
+
 import os
 from collections.abc import Iterator
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from math import isfinite
 from pathlib import Path
+from typing import cast
 
 import numpy as np
 from astropy.io import fits
+from numpy.typing import NDArray
 
 from astromosaic.core import PanelDescriptor, Region, SourceFingerprint, Tile
 
@@ -30,11 +34,17 @@ class FitsTileSource:
         descriptor: PanelDescriptor,
         max_tile_bytes: int,
         coverage: fits.ImageHDU | None = None,
+        sky_mask: FitsTileSource | None = None,
     ) -> None:
         self._hdu = hdu
         self.descriptor = descriptor
         self._max_tile_bytes = max_tile_bytes
         self._coverage = coverage
+        self._sky_mask = sky_mask
+
+    @property
+    def sky_mask_fingerprint(self) -> SourceFingerprint | None:
+        return self._sky_mask.descriptor.fingerprint if self._sky_mask is not None else None
 
     @property
     def header(self) -> fits.Header:
@@ -64,10 +74,9 @@ class FitsTileSource:
         if panel.blank is not None:
             valid &= raw != panel.blank
         if self._coverage is not None:
-            covered = self._coverage.section[actual.slices]
-            if np.any(covered > 1):
-                raise ValueError("Expected binary values in the FITS COVERAGE image.")
-            valid &= covered == 1
+            valid &= _binary_pixels(self._coverage.section[actual.slices], "COVERAGE image")
+        if self._sky_mask is not None:
+            valid &= _binary_pixels(self._sky_mask._hdu.section[actual.slices], "sky mask")
         with np.errstate(over="ignore", invalid="ignore"):
             if panel.bscale != 1.0 or panel.bzero != 0.0:
                 scaled = np.multiply(raw, panel.bscale, dtype=np.float64)
@@ -81,6 +90,12 @@ class FitsTileSource:
             )
         pixels[~valid] = np.nan
         return Tile(actual, pixels, valid)
+
+
+def _binary_pixels(values: NDArray[np.uint8], label: str) -> NDArray[np.bool_]:
+    if np.any(values > 1):
+        raise ValueError(f"Expected binary values in the FITS {label}.")
+    return cast(NDArray[np.bool_], values == 1)
 
 
 def _optional_text(header: fits.Header, keyword: str) -> str | None:
@@ -116,13 +131,17 @@ def _coverage_hdu(hdus: fits.HDUList, shape: tuple[int, int], size: int) -> fits
 
 @contextmanager
 def open_fits_panel(
-    path: Path, *, max_tile_bytes: int = _DEFAULT_TILE_BUDGET, memmap: bool = True
+    path: Path,
+    *,
+    max_tile_bytes: int = _DEFAULT_TILE_BUDGET,
+    memmap: bool = True,
+    sky_mask: Path | None = None,
 ) -> Iterator[FitsTileSource]:
     """Open a local input read-only and release its handle when the caller leaves the context."""
     if max_tile_bytes < 1:
         raise ValueError("The FITS tile byte budget must be positive.")
 
-    with path.open("rb") as stream:
+    with path.open("rb") as stream, ExitStack() as masks:
         if stream.read(9) != b"SIMPLE  =":
             raise ValueError("Expected an uncompressed FITS file with a standard primary header.")
         stream.seek(0)
@@ -161,6 +180,20 @@ def open_fits_panel(
                 mask_provenance += ("primary-header-blank",)
             if coverage is not None:
                 mask_provenance += ("coverage-extension",)
+            mask = None
+            if sky_mask is not None:
+                mask = masks.enter_context(open_fits_panel(sky_mask, memmap=memmap))
+                mask_descriptor = mask.descriptor
+                if (
+                    (mask_descriptor.width, mask_descriptor.height) != (width, height)
+                    or (mask_descriptor.bitpix, mask_descriptor.bscale, mask_descriptor.bzero)
+                    != (8, 1, 0)
+                    or mask_descriptor.mask_provenance != ("finite-raw-pixels",)
+                ):
+                    raise ValueError(
+                        "Expected a single unscaled byte sky mask matching the panel shape."
+                    )
+                mask_provenance += ("supplied-sky-mask",)
             descriptor = PanelDescriptor(
                 fingerprint=SourceFingerprint(stat.st_size, stat.st_mtime_ns),
                 width=width,
@@ -177,4 +210,4 @@ def open_fits_panel(
                 blank=blank,
                 mask_provenance=mask_provenance,
             )
-            yield FitsTileSource(hdu, descriptor, max_tile_bytes, coverage)
+            yield FitsTileSource(hdu, descriptor, max_tile_bytes, coverage, mask)

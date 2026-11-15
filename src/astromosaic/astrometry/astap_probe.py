@@ -7,16 +7,20 @@ import re
 import shutil
 import subprocess
 import sys
+from collections.abc import Callable
 from math import isclose, isfinite
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from time import monotonic
 
 import numpy as np
 from astropy.io import fits
 from astropy.wcs import WCS
 
+from astromosaic.core.job import DEFAULT_JOB_CONTEXT, JobContext
 
-def _read_solution(workdir: Path) -> dict[str, float]:
+
+def _read_solution_header(workdir: Path) -> fits.Header:
     status_file = workdir / "result.ini"
     if not status_file.is_file():
         raise ValueError("ASTAP did not write a status file.")
@@ -58,6 +62,17 @@ def _read_solution(workdir: Path) -> dict[str, float]:
         or determinant == 0
     ):
         raise ValueError("ASTAP returned a nonfinite or singular WCS geometry.")
+    return header
+
+
+def _read_solution(workdir: Path) -> dict[str, float]:
+    return _summarize_header(_read_solution_header(workdir))
+
+
+def _summarize_header(header: fits.Header) -> dict[str, float]:
+    wcs = WCS(header).celestial
+    longitude, latitude = wcs.wcs.crval
+    x_fits, y_fits = wcs.wcs.crpix
     return {
         "ra_deg": float(longitude) % 360.0,
         "dec_deg": float(latitude),
@@ -77,18 +92,50 @@ def solve_d05(
     timeout_seconds: float = 30.0,
 ) -> dict[str, float]:
     """Run one one-threaded, hinted solve and read its WCS from scratch storage."""
+    header, _ = solve_astap(
+        executable,
+        catalog,
+        image,
+        position=(ra_deg, dec_deg),
+        field_height_deg=field_height_deg,
+        timeout_seconds=timeout_seconds,
+    )
+    return _summarize_header(header)
+
+
+def solve_astap(
+    executable: Path,
+    catalog: Path,
+    image: Path | Callable[[Path], None],
+    *,
+    position: tuple[float, float] | None = None,
+    field_height_deg: float = 0,
+    timeout_seconds: float = 60,
+    database: str = "d05",
+    context: JobContext = DEFAULT_JOB_CONTEXT,
+) -> tuple[fits.Header, str | None]:
+    """Run a hinted or blind ASTAP attempt with an explicit local database."""
+    context.check_cancelled()
     if not executable.is_file():
         raise ValueError("Provide the local ASTAP CLI executable.")
-    if not any(catalog.glob("d05_*.1476")):
-        raise ValueError("The supplied directory does not contain ASTAP D05 catalog tiles.")
-    if not (0 <= ra_deg < 360 and -90 <= dec_deg <= 90 and 0 < field_height_deg <= 180):
-        raise ValueError("Expected valid sky coordinates and image height in degrees.")
+    if database not in {"d05", "d20", "d50", "d80"}:
+        raise ValueError("Expected an ASTAP D05, D20, D50, or D80 database name.")
+    if not any(catalog.glob(f"{database}_*.1476")):
+        raise ValueError(
+            f"The supplied directory does not contain ASTAP {database.upper()} catalog tiles."
+        )
+    if not 0 <= field_height_deg <= 180:
+        raise ValueError("Expected an ASTAP field height between 0 and 180 degrees.")
     if not isfinite(timeout_seconds) or timeout_seconds <= 0:
         raise ValueError("The solver timeout must be positive and finite.")
 
     with TemporaryDirectory(prefix="astromosaic-astap-") as directory:
         scratch = Path(directory)
-        shutil.copyfile(image, scratch / "input.fits")
+        staged = scratch / "input.fits"
+        if isinstance(image, Path):
+            shutil.copyfile(image, staged)
+        else:
+            image(staged)
         # Use an ASCII scratch name to give ASTAP a portable path to the copied input.
         command = [
             str(executable.resolve()),
@@ -97,15 +144,11 @@ def solve_d05(
             "-d",
             str(catalog.resolve()),
             "-D",
-            "d05",
-            "-ra",
-            str(ra_deg / 15),
-            "-spd",
-            str(dec_deg + 90),
+            database,
             "-fov",
             str(field_height_deg),
             "-r",
-            "3",
+            "3" if position is not None else "180",
             "-z",
             "0",
             "-threads",
@@ -114,6 +157,12 @@ def solve_d05(
             "result",
             "-wcs",
         ]
+        if position is not None:
+            ra_deg, dec_deg = position
+            if not (0 <= ra_deg < 360 and -90 <= dec_deg <= 90):
+                raise ValueError("Expected valid ASTAP sky coordinates in degrees.")
+            command.extend(("-ra", str(ra_deg / 15), "-spd", str(dec_deg + 90)))
+        context.check_cancelled()
         with subprocess.Popen(
             command,
             cwd=scratch,
@@ -126,15 +175,34 @@ def solve_d05(
             creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
         ) as process:
             try:
-                output, _ = process.communicate(timeout=timeout_seconds)
-            except (subprocess.TimeoutExpired, KeyboardInterrupt):
+                output = _wait_for_astap(process, timeout_seconds, context)
+            except BaseException:
                 process.kill()
                 process.communicate()
                 raise
             if process.returncode:
                 detail = output.strip().splitlines()[-1] if output.strip() else "No solver details."
                 raise ValueError(f"ASTAP exited with code {process.returncode}. {detail}")
-        return _read_solution(scratch)
+        context.check_cancelled()
+        version = re.search(r"solver version ([A-Za-z0-9.-]+)", output, flags=re.IGNORECASE)
+        return _read_solution_header(scratch), version[1] if version else None
+
+
+def _wait_for_astap(
+    process: subprocess.Popen[str], timeout_seconds: float, context: JobContext
+) -> str:
+    if context.is_cancelled is None:
+        return process.communicate(timeout=timeout_seconds)[0]
+    deadline = monotonic() + timeout_seconds
+    while True:
+        context.check_cancelled()
+        remaining = deadline - monotonic()
+        if remaining <= 0:
+            raise subprocess.TimeoutExpired(process.args, timeout_seconds)
+        try:
+            return process.communicate(timeout=min(remaining, 0.2))[0]
+        except subprocess.TimeoutExpired:
+            continue
 
 
 def main(argv: list[str] | None = None) -> int:

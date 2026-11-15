@@ -101,20 +101,26 @@ class TileSky:
     @classmethod
     def from_output(cls, output: PanelGeometry, region: Region) -> Self:
         y, x = np.indices((region.height, region.width), dtype=np.float64)
-        x = x.ravel() + region.x
-        y = y.ravel() + region.y
+        return cls.from_pixels(output, x.ravel() + region.x, y.ravel() + region.y)
+
+    @classmethod
+    def from_pixels(
+        cls, output: PanelGeometry, x: NDArray[np.float64], y: NDArray[np.float64]
+    ) -> Self:
         return cls(x, y, output.forward(x, y), output)
 
     def in_panel(
-        self, geometry: PanelGeometry
+        self, geometry: PanelGeometry, shift: tuple[float, float] = (0.0, 0.0)
     ) -> tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.bool_]]:
-        source_x, source_y = geometry.inverse(self.sky).T
+        dx, dy = shift
+        sky = self.sky if shift == (0.0, 0.0) else self.geometry.forward(self.x - dx, self.y - dy)
+        source_x, source_y = geometry.inverse(sky).T
         sky_back = geometry.forward(source_x, source_y)
         check_x, check_y = self.geometry.inverse(sky_back).T
         usable = (
             np.isfinite(source_x)
             & np.isfinite(source_y)
-            & (np.abs(check_x - self.x) <= ROUND_TRIP_TOLERANCE)
-            & (np.abs(check_y - self.y) <= ROUND_TRIP_TOLERANCE)
+            & (np.abs(check_x + dx - self.x) <= ROUND_TRIP_TOLERANCE)
+            & (np.abs(check_y + dy - self.y) <= ROUND_TRIP_TOLERANCE)
         )
         return source_x, source_y, usable
