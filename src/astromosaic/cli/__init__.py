@@ -26,7 +26,7 @@ def _panel_files(values: list[str], count: int) -> dict[int, Path]:
 def _run_solve(arguments: argparse.Namespace) -> tuple[dict[str, object], int]:
     os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
     from astromosaic.astrometry.solve import SolveOptions, solve_panel, write_solution
-    from astromosaic.io.fits import open_fits_panel
+    from astromosaic.io import open_panel
 
     options = SolveOptions(
         gaia_catalog=arguments.gaia_catalog,
@@ -40,10 +40,9 @@ def _run_solve(arguments: argparse.Namespace) -> tuple[dict[str, object], int]:
         max_working_bytes=arguments.memory_mib * 1024**2,
         max_scratch_bytes=arguments.scratch_mib * 1024**2,
     )
-    with open_fits_panel(
+    with open_panel(
         arguments.path,
         max_tile_bytes=options.max_working_bytes,
-        memmap=False,
         sky_mask=arguments.sky_mask,
     ) as panel:
         solution = solve_panel(panel, options)
@@ -129,17 +128,17 @@ def _run_mosaic(arguments: argparse.Namespace) -> tuple[dict[str, object], int]:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        prog="astromosaic", description="Work with linear FITS panels."
+        prog="astromosaic", description="Work with linear FITS and TIFF panels."
     )
     parser.add_argument("--version", action="version", version=version("astromosaic"))
     commands = parser.add_subparsers(dest="command", required=True)
 
-    inspect = commands.add_parser("inspect", help="Read primary FITS image metadata.")
+    inspect = commands.add_parser("inspect", help="Read FITS or TIFF image metadata.")
     inspect.add_argument("path", type=Path)
     smoke = commands.add_parser("smoke", help="Run a small synthetic FITS/WCS processing job.")
     smoke.add_argument("--spawn", action="store_true", help="Run the job in a spawned worker.")
-    solve = commands.add_parser("solve", help="Resolve a FITS panel with local astrometry.")
-    solve.add_argument("path", type=Path, help="Monochrome input FITS panel.")
+    solve = commands.add_parser("solve", help="Resolve a FITS or TIFF panel with local astrometry.")
+    solve.add_argument("path", type=Path, help="Linear mono FITS or mono/RGB TIFF panel.")
     solve.add_argument("-o", "--output", type=Path, help="Save a new JSON WCS sidecar on success.")
     solve.add_argument("--sky-mask", type=Path, help="Binary FITS sky mask in source coordinates.")
     solve.add_argument("--gaia-catalog", type=Path, help="Local Seiza Gaia DR3 catalog file.")
@@ -154,9 +153,13 @@ def main(argv: list[str] | None = None) -> int:
     )
     solve.add_argument("--memory-mib", type=int, default=64, help="Working buffer budget in MiB.")
     solve.add_argument("--scratch-mib", type=int, default=1024, help="ASTAP staging limit in MiB.")
-    mosaic = commands.add_parser("mosaic", help="Render a linear FITS mosaic with resolved WCS.")
-    mosaic.add_argument("panels", nargs="+", type=Path, help="Calibrated monochrome FITS inputs.")
-    mosaic.add_argument("-o", "--output", required=True, type=Path, help="A new FITS output path.")
+    mosaic = commands.add_parser("mosaic", help="Render a linear mosaic with resolved WCS.")
+    mosaic.add_argument(
+        "panels", nargs="+", type=Path, help="Linear inputs with a common channel layout."
+    )
+    mosaic.add_argument(
+        "-o", "--output", required=True, type=Path, help="A new FITS (mono) or TIFF output path."
+    )
     mosaic.add_argument(
         "--center",
         required=True,
@@ -211,7 +214,9 @@ def main(argv: list[str] | None = None) -> int:
         help="Use a binary FITS sky mask for the given one-based input number.",
     )
     mosaic.add_argument(
-        "--refine", action="store_true", help="Fit relative stellar shifts and gains."
+        "--refine",
+        action="store_true",
+        help="Fit relative stellar shifts and gains for mono inputs.",
     )
     mosaic.add_argument(
         "--match-radius",
@@ -234,7 +239,7 @@ def main(argv: list[str] | None = None) -> int:
         "--memory-mib", type=int, metavar="MIB", help="Estimated working buffer budget (64 MiB)."
     )
     mosaic.add_argument(
-        "--output-limit-mib", type=int, metavar="MIB", help="Maximum FITS file size (2048 MiB)."
+        "--output-limit-mib", type=int, metavar="MIB", help="Maximum output file size (2048 MiB)."
     )
     mosaic.add_argument("--progress", action="store_true", help="Report tile progress to stderr.")
     arguments = parser.parse_args(argv)
@@ -243,9 +248,9 @@ def main(argv: list[str] | None = None) -> int:
     status = 0
     try:
         if arguments.command == "inspect":
-            from astromosaic.io.fits import open_fits_panel
+            from astromosaic.io import open_panel
 
-            with open_fits_panel(arguments.path) as panel:
+            with open_panel(arguments.path) as panel:
                 result = asdict(panel.descriptor)
         elif arguments.command == "mosaic":
             result, status = _run_mosaic(arguments)

@@ -1,4 +1,4 @@
-"""Publish a complete new file without clobbering another writer's output."""
+"""Publish a complete file after flushing its temporary copy."""
 
 import os
 from collections.abc import Iterator
@@ -9,9 +9,9 @@ from typing import IO
 
 
 @contextmanager
-def atomic_binary_file(path: Path) -> Iterator[IO[bytes]]:
+def atomic_binary_file(path: Path, *, replace_existing: bool = False) -> Iterator[IO[bytes]]:
     path = path.absolute()
-    if path.exists() or path.is_symlink():
+    if not replace_existing and (path.exists() or path.is_symlink()):
         raise FileExistsError(f"The output file already exists: {path}")
     temporary = None
     try:
@@ -23,7 +23,9 @@ def atomic_binary_file(path: Path) -> Iterator[IO[bytes]]:
             stream.flush()
             os.fsync(stream.fileno())
 
-        if os.name == "nt":
+        if replace_existing:
+            temporary.replace(path)
+        elif os.name == "nt":
             # Windows rename rejects an existing destination.
             temporary.rename(path)
         else:

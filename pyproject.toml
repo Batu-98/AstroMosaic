@@ -13,6 +13,7 @@ dependencies = [
     "sep>=1.4,<2",
     "reproject>=0.16,<1",
     "imagecodecs (>=2026.11.11,<2027.0.0)",
+    "tifffile>=2026.11.12,<2027",
 ]
 
 [project.optional-dependencies]

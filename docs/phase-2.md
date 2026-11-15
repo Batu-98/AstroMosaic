@@ -71,4 +71,4 @@ The input buffers, star extraction, and background sampling use bounded windows.
 
 The one-directory PyInstaller build used a clean Windows x64 environment with the locked `main,build` groups and `gaia` extra. It copied AstroMosaic and Seiza package metadata. From an unrelated working directory the frozen CLI ran real hinted Gaia and ASTAP solves, saved and reimported a masked WCS sidecar, rendered the three-panel refinement, and passed the spawned smoke job. CFITSIO independently reopened the refined FITS and coverage. Qt, `fitsio`, ASTAP, and catalog data were outside the bundled runtime.
 
-The source suite passed 37 tests, Ruff lint and format, mypy, and Poetry lock validation. Linear mono and RGB TIFF interoperability is the next checkpoint before Phase 3 acceptance.
+The source suite passed 37 tests, Ruff lint and format, mypy, and Poetry lock validation. The [Phase 3A reference](phase-3a.md) extends the headless workflow to mono and RGB TIFF.

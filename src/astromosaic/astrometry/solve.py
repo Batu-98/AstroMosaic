@@ -14,12 +14,12 @@ import numpy as np
 from astropy.io import fits
 
 from astromosaic.astrometry.astap_probe import solve_astap
-from astromosaic.astrometry.stars import measure_stars
+from astromosaic.astrometry.stars import astrometry_pixels, measure_stars
 from astromosaic.core import Region
 from astromosaic.core.job import DEFAULT_JOB_CONTEXT, JobContext, MosaicCancelled
 from astromosaic.geometry import PanelGeometry, read_panel_geometry
+from astromosaic.io import PanelSource
 from astromosaic.io.atomic import atomic_binary_file
-from astromosaic.io.fits import FitsTileSource, fits_tile_bytes
 
 Stage = Literal["existing-wcs", "gaia-dr3", "astap-hinted", "astap-blind"]
 _STAGES: tuple[Stage, ...] = ("existing-wcs", "gaia-dr3", "astap-hinted", "astap-blind")
@@ -65,7 +65,7 @@ class SolveResult:
 
 
 def _pointing(
-    source: FitsTileSource, options: SolveOptions
+    source: PanelSource, options: SolveOptions
 ) -> tuple[tuple[float, float] | None, float | None]:
     position, scale = options.position, options.scale_arcsec
     if position is not None and not (0 <= position[0] < 360 and -90 <= position[1] <= 90):
@@ -85,7 +85,7 @@ def _pointing(
 
 
 def _stage_astap_input(
-    source: FitsTileSource, path: Path, options: SolveOptions, context: JobContext
+    source: PanelSource, path: Path, options: SolveOptions, context: JobContext
 ) -> None:
     width, height = source.descriptor.width, source.descriptor.height
     staged_bytes = 2880 + ((4 * width * height + 2879) // 2880) * 2880
@@ -94,7 +94,7 @@ def _stage_astap_input(
 
     rows = min(height, 128)
     buffer_budget = options.max_working_bytes - 128 * 1024
-    while fits_tile_bytes(Region(0, 0, width, rows)) + 8 * width * rows > buffer_budget:
+    while source.tile_bytes(Region(0, 0, width, rows)) + 8 * width * rows > buffer_budget:
         if rows == 1:
             raise ValueError("The working budget cannot fit a solver input row.")
         rows //= 2
@@ -106,7 +106,7 @@ def _stage_astap_input(
         for x in sorted({0, (width - sample_width) // 2, width - sample_width}):
             context.check_cancelled()
             tile = source.read_tile(Region(x, y, sample_width, sample_height))
-            pixels = tile.pixels[tile.valid]
+            pixels = astrometry_pixels(tile)[tile.valid]
             samples[count : count + pixels.size] = pixels
             count += pixels.size
     fill = float(np.median(samples[:count])) if count else 0.0
@@ -121,14 +121,15 @@ def _stage_astap_input(
         for y in range(0, height, rows):
             context.check_cancelled()
             tile = source.read_tile(Region(0, y, width, min(rows, height - y)))
-            np.copyto(tile.pixels, fill, where=~tile.valid)
-            stream.write(tile.pixels)
+            pixels = np.ascontiguousarray(astrometry_pixels(tile))
+            np.copyto(pixels, fill, where=~tile.valid)
+            stream.write(pixels)
     finally:
         stream.close()
 
 
 def _solve_gaia(
-    source: FitsTileSource,
+    source: PanelSource,
     options: SolveOptions,
     catalog_path: Path,
     position: tuple[float, float] | None,
@@ -226,7 +227,7 @@ def _catalog_identity(path: Path) -> str:
 
 
 def solve_panel(
-    source: FitsTileSource, options: SolveOptions, context: JobContext = DEFAULT_JOB_CONTEXT
+    source: PanelSource, options: SolveOptions, context: JobContext = DEFAULT_JOB_CONTEXT
 ) -> SolveResult:
     """Stop at the first validated local WCS and report each attempted stage."""
     if not isfinite(options.timeout_seconds) or options.timeout_seconds <= 0:
@@ -255,7 +256,12 @@ def solve_panel(
         try:
             if stage == "existing-wcs":
                 header = source.header
-                attempt = SolverAttempt(stage, "solved", "Validated primary FITS WCS.")
+                detail = (
+                    "Validated embedded TIFF WCS."
+                    if source.descriptor.wcs_provenance == "tiff-description"
+                    else "Validated primary FITS WCS."
+                )
+                attempt = SolverAttempt(stage, "solved", detail)
             elif stage == "gaia-dr3":
                 assert catalog is not None
                 header, attempt = _solve_gaia(source, options, catalog, position, scale, context)
@@ -292,7 +298,7 @@ def solve_panel(
     return SolveResult(None, None, tuple(attempts))
 
 
-def _source_identity(source: FitsTileSource) -> dict[str, object]:
+def _source_identity(source: PanelSource) -> dict[str, object]:
     descriptor = source.descriptor
     mask = source.sky_mask_fingerprint
     return {
@@ -302,7 +308,7 @@ def _source_identity(source: FitsTileSource) -> dict[str, object]:
     }
 
 
-def write_solution(path: Path, source: FitsTileSource, solution: SolveResult) -> None:
+def write_solution(path: Path, source: PanelSource, solution: SolveResult) -> None:
     if solution.geometry is None:
         raise ValueError("A WCS sidecar requires a solved panel.")
     header = solution.geometry.wcs.to_header(relax=True)
@@ -316,7 +322,7 @@ def write_solution(path: Path, source: FitsTileSource, solution: SolveResult) ->
         stream.write((json.dumps(record, indent=2, allow_nan=False) + "\n").encode("utf-8"))
 
 
-def load_solution(path: Path, source: FitsTileSource) -> tuple[PanelGeometry, str]:
+def load_solution(path: Path, source: PanelSource) -> tuple[PanelGeometry, str]:
     with path.open("rb") as stream:
         payload = stream.read(128 * 1024 + 1)
     if len(payload) > 128 * 1024:

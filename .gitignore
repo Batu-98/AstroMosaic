@@ -24,6 +24,7 @@ __pycache__/
 *.tiff
 *.npy
 *.npz
+*.astromosaic
 .astromosaic-*.part
 .env
 .env.*

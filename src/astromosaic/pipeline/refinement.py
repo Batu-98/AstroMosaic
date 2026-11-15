@@ -9,7 +9,7 @@ from astromosaic.astrometry.registration import EdgeReport, Residuals, project_f
 from astromosaic.astrometry.stars import measure_stars
 from astromosaic.core.job import JobContext
 from astromosaic.geometry import PanelGeometry
-from astromosaic.io.fits import FitsTileSource
+from astromosaic.io import PanelSource
 from astromosaic.photometry import PanelCorrection
 from astromosaic.photometry.background import (
     BackgroundMode,
@@ -52,12 +52,14 @@ class RefinementRejected(ValueError):
 
 
 def refine_panels(
-    panels: Sequence[tuple[FitsTileSource, PanelGeometry]],
+    panels: Sequence[tuple[PanelSource, PanelGeometry]],
     target: PanelGeometry,
     spec: RefinementSpec,
     budget: int,
     context: JobContext,
 ) -> RefinementReport:
+    if any(source.descriptor.channel_layout != "mono" for source, _ in panels):
+        raise ValueError("Relative refinement currently requires mono panels.")
     if len(panels) < 2:
         raise ValueError("Relative refinement requires at least two panels.")
     exclusions = []

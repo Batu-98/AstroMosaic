@@ -19,9 +19,9 @@ This register tracks unresolved decisions, problems, and risks. It is not a work
 - **Status / priority:** Investigating / P1
 - **Opened / updated:** 2026-11-15 / 2026-11-15
 - **Affected phase:** 0 fixture design; required for numerical gates in phases 1, 2, and 4.
-- **Impact and evidence:** The [Phase 1 fixtures](docs/phase-1.md) verify independent FITS export truth. [Phase 2](docs/phase-2.md#acceptance-fixtures) fixes and verifies held-out alignment, stellar flux and profile, injected extended signal, masks, and weak or disconnected inputs.
+- **Impact and evidence:** The [Phase 1 fixtures](docs/phase-1.md) verify independent FITS export truth. [Phase 2](docs/phase-2.md#acceptance-fixtures) fixes and verifies held-out alignment, stellar flux and profile, injected extended signal, masks, and weak or disconnected inputs. [Phase 3A fixtures](docs/phase-3a.md#acceptance-fixtures) fix sample, channel, coverage, and WCS tolerances for linear TIFF.
 - **Current assumption:** Generate small deterministic same-filter FITS fixtures for development. Store provenance for external data with the validation procedure.
-- **Next action / responsibility:** Define dedicated TIFF test samples and freeze large, RGB, and mixed-scene tolerances for the Phase 4 workloads.
+- **Next action / responsibility:** Freeze large-mosaic, RGB photometry, and mixed-scene tolerances for the Phase 4 workloads.
 - **Closure condition:** Freeze dataset-specific tolerances before algorithm tuning, including alignment, stellar profiles/flux, injected faint emission, and tiled/reference agreement. Link the fixture manifest and test results.
 
 ### Q-004 - Resource budgets and representative workload
@@ -30,8 +30,8 @@ This register tracks unresolved decisions, problems, and risks. It is not a work
 - **Opened / updated:** 2026-11-15 / 2026-11-15
 - **Affected phase:** Phase 0 scheduling contracts, Phase 1 rendering, Phase 2 solvers and fitting, Phase 3 preview, and Phase 4 large-job scaling.
 - **Impact and evidence:** The one-worker FITS renderer enforces a combined tile reservation with no queue. A two-panel 3328 × 1536 render peaked at 89.0 MiB working set and 101.5 MiB commit with one OpenBLAS thread. An unhinted Gaia solve with the deep native index peaked at 1066 MiB working set and 281 MiB commit. [Phase 1 rendering measurements](docs/phase-1.md#working-set-and-cancellation) · [Phase 2 solver measurements](docs/phase-2.md#windows-solver-evidence)
-- **Current assumption:** Default to 128-pixel render tiles, an estimated 64 MiB working buffer budget, and a 2048 MiB FITS output limit. Budget native catalog mappings separately from science tiles. The [Phase 2 solver settings](docs/phase-2.md#offline-solvers) include a separate ASTAP staging limit.
-- **Next action / responsibility:** Account for GUI/GPU and cache use in Phase 3. Repeat bounded-render and cancellation checks in Phase 4 with 12 panels at 6000 × 4000 for FITS, TIFF, RGB, and mixed cases.
+- **Current assumption:** Default to 128-pixel render tiles, an estimated 64 MiB working buffer budget, and a 2048 MiB output limit. [TIFF](docs/phase-3a.md#sample-and-metadata-contract) reserves compressed-segment decode buffers as well as the requested window. Budget native catalog mappings separately from science tiles. The [Phase 2 solver settings](docs/phase-2.md#offline-solvers) include a separate ASTAP staging limit.
+- **Next action / responsibility:** Account for GUI/GPU and cache use in Phase 3C. The [Phase 3B worker tests](docs/phase-3b.md#verification) cover one desktop job, progress, and cancelled-job cleanup. Repeat bounded-render and cancellation checks in Phase 4 with 12 panels at 6000 × 4000 for FITS, TIFF, RGB, and mixed cases.
 - **Closure condition:** Document initial defaults and over-budget behavior; verify bounded queues, temporary allocations, cancellation, and peak usage for a named workload. Revisit defaults during the Phase 4 large-mosaic benchmark.
 
 ### Q-005 - Application licensing and distribution model
@@ -39,7 +39,7 @@ This register tracks unresolved decisions, problems, and risks. It is not a work
 - **Status / priority:** Open / P1
 - **Opened / updated:** 2026-11-15 / 2026-11-15
 - **Affected phase:** 0 dependency/license inventory and release packaging; required before license-sensitive code reuse or redistribution.
-- **Impact and evidence:** The owner chose `GPL-3.0-only` for the application. The [initial license inventory](docs/phase-0.md#license-inventory) covers SEP, Qt, PyInstaller, ASTAP, and separate D05 data. `fitsio` is a GPL-2.0-or-later development dependency. Seiza is an optional Apache-2.0 backend whose local data are installed separately. [License decision](docs/adr/0009-gpl-v3-application-license.md) · [Seiza decision](docs/adr/0010-seiza-gaia-backend.md)
+- **Impact and evidence:** The owner chose `GPL-3.0-only` for the application. The [initial license inventory](docs/phase-0.md#license-inventory) covers SEP, Qt, PyInstaller, ASTAP, and separate D05 data. `fitsio` is a GPL-2.0-or-later development dependency. Seiza is an optional Apache-2.0 backend whose local data are installed separately. TIFF uses BSD-3-Clause tifffile and imagecodecs. [License decision](docs/adr/0009-gpl-v3-application-license.md) · [Seiza decision](docs/adr/0010-seiza-gaia-backend.md) · [tifffile license](https://github.com/cgohlke/tifffile/blob/master/LICENSE) · [imagecodecs license](https://github.com/cgohlke/imagecodecs/blob/master/LICENSE)
 - **Current assumption:** Maintain original implementation. Obtain solver binaries and catalog data separately for experiments.
 - **Next action / responsibility:** Inventory bundled transitive notices and review catalog redistribution terms for the release.
 - **Closure condition:** Record the distribution decision, attribution/license inventory, and compatibility of any reused code or bundled materials. Independent development can continue while this decision is open.
@@ -59,16 +59,16 @@ This register tracks unresolved decisions, problems, and risks. It is not a work
 - **Status / priority:** Open / P1
 - **Opened / updated:** 2026-11-15 / 2026-11-15
 - **Affected phase:** Dual FITS and TIFF workflows throughout phases 1-4; optional camera RAW import after a future scope decision.
-- **Impact and evidence:** Both FITS and TIFF are primary, first-class workflows. Camera RAW is deferred and may be revisited as an import-only feature.
+- **Impact and evidence:** The [Phase 3A Windows fixtures](docs/phase-3a.md#windows-evidence) verified mono and RGB TIFF import and export, including samples, channel order, WCS, and coverage. The [Phase 3B desktop workflow](docs/phase-3b.md#verification) reopens a mixed FITS/TIFF project and renders it to TIFF. Camera RAW is deferred as an import-only feature.
 - **Current assumption:** Provide first-class support for both scientific FITS panels and linear TIFF panels across the pipeline. If camera RAW is requested later, use an open-source linear decoder and preserve relevant sensor and color metadata.
-- **Next action / responsibility:** Define TIFF scaling, channel layout, WCS/coverage metadata, and sample fixtures alongside the [verified FITS contract](docs/phase-1.md#render-and-export-contract). Verify linear mono and RGB TIFF input and output before Phase 3 acceptance. Revisit camera models and decoder compatibility when camera RAW import is requested.
+- **Next action / responsibility:** Carry the [linear TIFF contract](docs/phase-3a.md) through the desktop workflow and packaged Windows acceptance. Define and verify channel-specific calibration before enabling RGB photometric refinement. Revisit camera models and decoder compatibility when camera RAW import is requested.
 - **Closure condition:** Validate FITS and TIFF sample integrity, metadata, memory, and reproducible import-to-mosaic workflows on Windows. If camera RAW is activated, establish separate acceptance criteria for the selected models.
 
 ### Q-010 - Foreground recognition, masks, and composition
 
 - **Status / priority:** Open / P1
 - **Opened / updated:** 2026-11-15 / 2026-11-15
-- **Affected phase:** Phase 2 masked sky processing, Phase 3 mixed-panel desktop workflow, and Phase 4 resource validation.
+- **Affected phase:** Phase 2 masked sky processing, Phase 3D mask editing, Phase 3E foreground alignment and composition, Phase 3F packaged acceptance, and Phase 4 resource validation.
 - **Impact and evidence:** [Phase 2 checks](docs/phase-2.md) verify supplied sky-mask use for solving, stellar and background fitting, and sky export. The desktop workflow also needs foreground tags, editable masks, independent ground registration, and a reproducible horizon seam.
 - **Current assumption:** Use local thumbnail detection, separate segmentation, and image-space foreground registration. Derive an automatic composition proposal from a shared mixed panel and provide manual adjustment. Start with the overlap percentage convention in the [plan](astro_mosaic_python_first_architecture_en.md#67-mixed-sky-and-foreground-panels).
 - **Next action / responsibility:** Extend the supplied-mask fixture to mixed FITS and TIFF workflow tests. Measure detection latency and segmentation error on low-contrast and irregular horizons. Test manual corrections, mismatched frames, and seams with partial or zero common coverage before selecting backends.

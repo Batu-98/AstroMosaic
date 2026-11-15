@@ -1751,4 +1751,4 @@ gaia = ["seiza"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.13,<3.14"
-content-hash = "87c8d6f13e89d1c3107ab3beb6ab2ebef7cc48b92a0c7d9bd24c932b1fadb082"
+content-hash = "c348b0e107d764eef3cc91a0e44c12a92550a91b10c80961d4b61d08404de647"

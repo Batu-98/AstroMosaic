@@ -45,4 +45,4 @@ The benchmark used Windows 11 x64 build 26200, CPython 3.13.18, and an Intel Cor
 
 On the same workload a progress callback requested cancellation at 524,288 written pixels. Cancellation and cleanup completed in about 2.0 ms from that tile boundary. The tests also verify handle release, retry, insufficient budgets, and a destination publication race. [Job tests](../tests/integration/test_mosaic_job.py)
 
-The next format checkpoint is linear mono and RGB TIFF input and output before Phase 3 acceptance. The Phase 4 benchmark will revisit memory and disk budgets for 12 panels at 6000 × 4000. [Open topics](../questions_open_topics.md)
+The [Phase 3A reference](phase-3a.md) adds linear mono and RGB TIFF input and output. The Phase 4 benchmark will revisit memory and disk budgets for 12 panels at 6000 × 4000. [Open topics](../questions_open_topics.md)

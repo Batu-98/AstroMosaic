@@ -5,7 +5,7 @@ These rules apply to the whole AstroMosaic project. Keep development focused, un
 ## 1. Language and Plan
 
 - Write all project Markdown, code identifiers, comments, logs, and default UI text in English. Conversation may follow the user's language.
-- Follow [the Python-first plan](astro_mosaic_python_first_architecture_en.md), revision 3.5. The earlier .NET/Avalonia plan is historical.
+- Follow [the Python-first plan](astro_mosaic_python_first_architecture_en.md), revision 3.6. The earlier .NET/Avalonia plan is historical.
 - Use the plan for detailed technical requirements and phase acceptance criteria. Follow explicit owner instructions and keep affected documentation consistent.
 
 ## 2. Before Starting

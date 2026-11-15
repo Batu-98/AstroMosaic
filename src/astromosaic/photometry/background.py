@@ -18,7 +18,7 @@ from astromosaic.astrometry.registration import (
 )
 from astromosaic.core.job import JobContext
 from astromosaic.geometry import PanelGeometry, TileSky
-from astromosaic.io.fits import FitsTileSource, fits_tile_bytes
+from astromosaic.io import PanelSource
 from astromosaic.photometry import normalized_pixel
 from astromosaic.resampling import sample, source_window
 
@@ -29,7 +29,7 @@ _MIN_PAIR_SAMPLES = 32
 
 @dataclass(frozen=True, slots=True)
 class BackgroundPanel:
-    source: FitsTileSource
+    source: PanelSource
     geometry: PanelGeometry
     bounds: Bounds | None
     exclusions: FloatArray
@@ -64,7 +64,7 @@ def _shifted_bounds(panel: BackgroundPanel) -> Bounds | None:
 
 
 def _sample_group(
-    source: FitsTileSource,
+    source: PanelSource,
     x: FloatArray,
     y: FloatArray,
     selected: NDArray[np.intp],
@@ -83,7 +83,7 @@ def _sample_group(
     )
     if window is None:
         return
-    if fits_tile_bytes(window.region) + 512 * selected.size <= budget:
+    if source.tile_bytes(window.region) + 512 * selected.size <= budget:
         indices, samples = sample(source.read_tile(window.region), window)
         out[selected[indices]] = samples
         return

@@ -4,13 +4,11 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 from shutil import disk_usage
-from typing import IO
 
-import numpy as np
 from astropy.io import fits
 
-from astromosaic.core import Region, Tile
 from astromosaic.io.atomic import atomic_binary_file
+from astromosaic.io.raster import RasterMosaicWriter
 
 _FITS_BLOCK_SIZE = 2880
 
@@ -28,35 +26,10 @@ def _image_header(header: fits.Header, width: int, height: int, bitpix: int) -> 
     return encoded.encode("ascii")
 
 
-class FitsMosaicWriter:
-    def __init__(self, stream: IO[bytes], width: int, pixels: int, coverage: int) -> None:
-        self._stream = stream
-        self._width = width
-        self._pixels_offset = pixels
-        self._coverage_offset = coverage
-
-    def _write_rectangle(self, offset: int, region: Region, raw: memoryview, itemsize: int) -> None:
-        stride = region.width * itemsize
-        start = offset + (region.y * self._width + region.x) * itemsize
-        if region.width == self._width:
-            self._stream.seek(start)
-            self._stream.write(raw)
-            return
-        for row in range(region.height):
-            self._stream.seek(start + row * self._width * itemsize)
-            self._stream.write(raw[row * stride : (row + 1) * stride])
-
-    def write(self, tile: Tile) -> None:
-        pixels = np.ascontiguousarray(tile.pixels, dtype=">f4")
-        coverage = np.ascontiguousarray(tile.valid, dtype=np.uint8)
-        self._write_rectangle(self._pixels_offset, tile.region, memoryview(pixels).cast("B"), 4)
-        self._write_rectangle(self._coverage_offset, tile.region, memoryview(coverage).cast("B"), 1)
-
-
 @contextmanager
 def open_fits_mosaic(
     path: Path, width: int, height: int, header: fits.Header, max_output_bytes: int
-) -> Iterator[FitsMosaicWriter]:
+) -> Iterator[RasterMosaicWriter]:
     """Publish only after all tiles are written and flushed, without replacing an existing file."""
     path = path.absolute()
     if path.suffix.lower() not in {".fits", ".fit", ".fts"}:
@@ -86,4 +59,4 @@ def open_fits_mosaic(
         coverage_end = coverage_offset + pixel_count
         stream.seek(coverage_end)
         stream.write(bytes(total_size - coverage_end))
-        yield FitsMosaicWriter(stream, width, len(pixels_header), coverage_offset)
+        yield RasterMosaicWriter(stream, width, len(pixels_header), coverage_offset, ">f4")

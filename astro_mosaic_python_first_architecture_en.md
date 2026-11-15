@@ -4,7 +4,7 @@
 
 # AstroMosaic v1: Python-First Architecture and Implementation Plan
 
-- **Revision:** 3.5
+- **Revision:** 3.6
 - **Date:** November 15, 2026
 - **Status:** Proposed implementation baseline following local source inspection
 - **Initial target:** Windows 11 x64
@@ -118,7 +118,7 @@ If a later recorded decision returns to a .NET frontend, the previously requeste
 
 The engine initially depends on NumPy, SciPy, Astropy, SEP, and reproject. The desktop extra adds PySide6. The development group adds testing, linting, typing, and packaging tools.
 
-Keep Numba, OpenCV-headless, image-format adapters, Zarr, and alternative solvers out of the initial FITS dependency set. Evaluate TIFF first. Revisit camera RAW when camera support is requested. Treat transitive compiled libraries as part of the package compatibility matrix even when our authored code remains Python.
+Keep optional acceleration and extra format dependencies out of the initial processing stack until their planned stages. Phase 3A uses tifffile and imagecodecs for [linear TIFF interoperability](docs/phase-3a.md). Revisit camera RAW when camera support is requested. Treat transitive compiled libraries as part of the package compatibility matrix even when our authored code remains Python.
 
 AstroMosaic will be distributed as open source and will use open-source libraries, codecs, and solver executables for supported workflows. Review exact licenses and bundled notices before redistribution. Track catalog and fixture data terms separately. Keep unrelated reference-suite dependencies outside the initial application.
 
@@ -342,11 +342,22 @@ Record selected backend, fallback reason, dtype conversions, failed coordinate c
 | 0: Compatibility and scope | Small locked environment, initial fixtures, solver adapter experiment, PySide float-texture test, and packaged skeleton | Start and run a small processing job and the packaged skeleton on Windows 11 x64. Establish the Python minor version and package compatibility on that target. |
 | 1: Headless reference | FITS tile access, masks, WCS reuse, Gnomonic reprojection, weighted blending, FITS export | Two-panel FITS output with correct geometry and values, independently reopened, and a Qt-free CLI. Then verify linear mono and RGB TIFF input and output before Phase 3 desktop acceptance. |
 | 2: Robust astronomy engine | Offline Gaia/ASTAP chain, masked sky processing, overlap graph, robust global registration, stellar scale, offset/plane corrections | Verify WCS reuse, fallback order, cancellation, and exhausted-chain diagnostics. Pass held-out alignment and injected-signal gates, including a mixed fixture with supplied masks, and report weak or disconnected cases. |
-| 3: Desktop workflow | Project/panel UI, cancellation, display STF, CPU preview, GPU projection/framing, dual FITS and TIFF workflows, foreground detection and mask editing, image-space foreground stitching, and layer composition | Verify auto and manual foreground tags, editable masks, ground stitching without WCS, automatic and manual composition, and saved crop and overlap controls. Verify responsive jobs, preview/export agreement, recovery, and CPU fallback on Windows. |
+| 3: Desktop workflow | Six delivery stages covering TIFF interoperability, project and job management, preview and export, sky masks, foreground composition, and Windows acceptance. | Meet the [Phase 3A–3F gates](#101-phase-3-delivery-stages). |
 | 4: Large mosaics and improved blends | Enforced memory budget, 12-panel 6000 x 4000 FITS and TIFF renders including RGB and a mixed sky and foreground case, optional multiband blending, and incremental export | Output-tile correctness, no halo seams, bounded memory/queue growth, and measured quality improvement for any optional blend. |
 | 5: Extended formats and channels | Optional XISF, projections, and per-band outputs | Format, geometry, mask, unit, packaging, and channel-consistency checks pass for each added workflow. |
 
 Memory and portability contracts begin in Phase 0; Phase 4 scales and verifies them. Do not postpone their architectural design until after the GUI or blend engine is complete.
+
+### 10.1 Phase 3 Delivery Stages
+
+| Stage | Deliverable | Acceptance evidence |
+| --- | --- | --- |
+| 3A | Linear mono and RGB TIFF interoperability | Define sample scaling, channel order, and how WCS and coverage travel with the image. Verify input and output with Windows fixtures that check sample values, channel order, WCS coordinates, and coverage after reopening. |
+| 3B | PySide6 project and job workflow | Create, save, and reopen a project, then add and relink panels. Run a mosaic job off the UI thread. Verify responsive progress, cancellation, and cleanup of partial output. |
+| 3C | Sky preview and export | Verify pan, zoom, and display-only stretch on the GPU viewport and CPU fallback. Export a sky mosaic using the same geometry as the preview and verify their agreement. This is the first usable desktop milestone. |
+| 3D | Foreground tags and editable sky masks | Verify automatic tag and mask proposals plus manual overrides on mixed panels. Save and reopen a project with those edits. Verify that foreground features stay out of sky solving and fitting. |
+| 3E | Foreground stitching and layer composition | Verify image-space foreground alignment without WCS and independent sky and foreground exports. Propose a composition from a shared mixed panel. Verify that manual placement, seam overlap, and sky-edge crop edits survive reopening. |
+| 3F | Packaged Windows 11 x64 acceptance | Exercise the full FITS and TIFF workflows in the packaged app, including mixed panels. Verify preview/export agreement, project recovery and relinking, cancelled-job cleanup, and CPU fallback. Close Phase 3 after the cumulative checks pass. |
 
 ## 11. Validation and Acceptance Criteria
 
@@ -378,7 +389,7 @@ Performance targets must name hardware, data dimensions, filters/channels, panel
 6. Integrate the offline Gaia DR3 and ASTAP chain without mutating source images.
 7. Establish independent WCS, negative/zero pixel, and injected-gradient fixtures.
 8. Implement robust stellar normalization and constrained overlap background matching.
-9. Connect the UI to the existing pipeline through cancellable jobs. Add foreground detection, mask editing, image-space stitching, and layer composition in Phase 3.
+9. Start with the linear TIFF contract and fixtures in Phase 3A, then follow the [desktop delivery stages](#101-phase-3-delivery-stages).
 10. Profile a representative large dataset before choosing Numba, custom resampling, or GPU compute.
 
 ## 13. Traceability and References

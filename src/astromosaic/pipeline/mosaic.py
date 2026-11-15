@@ -1,4 +1,4 @@
-"""Render an ICRS TAN FITS mosaic with a bounded, synchronous tile loop."""
+"""Render an ICRS TAN mosaic with a bounded, synchronous tile loop."""
 
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import ExitStack
@@ -18,7 +18,7 @@ from astromosaic.core.job import DEFAULT_JOB_CONTEXT
 from astromosaic.core.job import JobContext as JobContext
 from astromosaic.core.job import MosaicCancelled as MosaicCancelled
 from astromosaic.geometry import PanelGeometry, TileSky, read_panel_geometry, tan_output_wcs
-from astromosaic.io.fits import FitsTileSource, fits_tile_bytes, open_fits_panel
+from astromosaic.io import TIFF_SUFFIXES, PanelSource, open_panel
 from astromosaic.io.fits_export import open_fits_mosaic
 from astromosaic.photometry import PanelCorrection
 from astromosaic.pipeline.refinement import RefinementReport, RefinementSpec, refine_panels
@@ -72,7 +72,7 @@ class MosaicResult:
 
 @dataclass(frozen=True, slots=True)
 class _Panel:
-    source: FitsTileSource
+    source: PanelSource
     geometry: PanelGeometry
     weight: float
     wcs_origin: str = "primary WCS"
@@ -158,17 +158,18 @@ def _try_tile(
     panels: Sequence[_Panel],
     budget: _WorkingBudget,
     context: JobContext,
+    channels: int,
 ) -> _RenderedTile | None:
     count = region.width * region.height
-    output_bytes = _TILE_FIXED_BYTES + count * _OUTPUT_BYTES_PER_PIXEL
+    output_bytes = _TILE_FIXED_BYTES + count * (_OUTPUT_BYTES_PER_PIXEL + 64 * (channels - 1))
     if not budget.reserve(output_bytes):
         return None
 
     rejected = 0
     sky = TileSky.from_output(target, region)
-    numerator = np.zeros(count, dtype=np.float64)
-    denominator = np.zeros_like(numerator)
-    weight_scale = np.zeros_like(numerator)
+    numerator = np.zeros((count, channels), dtype=np.float64)
+    denominator = np.zeros(count, dtype=np.float64)
+    weight_scale = np.zeros(count, dtype=np.float64)
     for panel in panels:
         context.check_cancelled()
         correction = panel.correction
@@ -180,7 +181,7 @@ def _try_tile(
         window = source_window(px, py, usable, descriptor.width, descriptor.height)
         if window is None:
             continue
-        reserved_bytes = output_bytes + fits_tile_bytes(window.region)
+        reserved_bytes = output_bytes + panel.source.tile_bytes(window.region)
         if not budget.reserve(reserved_bytes):
             return None
         indices, values = sample(panel.source.read_tile(window.region), window)
@@ -191,18 +192,23 @@ def _try_tile(
         scale = np.maximum(weight_scale[indices], panel.weight)
         previous = weight_scale[indices] / scale
         current = panel.weight / scale
-        numerator[indices] = numerator[indices] * previous + values * current
+        numerator[indices] = (
+            numerator[indices] * previous[:, None]
+            + values.reshape(indices.size, channels) * current[:, None]
+        )
         denominator[indices] = denominator[indices] * previous + current
         weight_scale[indices] = scale
 
     valid = denominator > 0
-    pixels = np.full(count, np.nan, dtype=np.float32)
+    pixels = np.full(numerator.shape, np.nan, dtype=np.float32)
+    channel_valid = valid[:, None]
     with np.errstate(over="ignore", invalid="ignore"):
-        np.divide(numerator, denominator, out=pixels, where=valid)
-    if np.any(valid & ~np.isfinite(pixels)):
+        np.divide(numerator, denominator[:, None], out=pixels, where=channel_valid)
+    if np.any(channel_valid & ~np.isfinite(pixels)):
         raise ValueError("A corrected mosaic sample exceeds the supported float32 range.")
     shape = (region.height, region.width)
-    return _RenderedTile(Tile(region, pixels.reshape(shape), valid.reshape(shape)), rejected)
+    pixel_shape = shape if channels == 1 else (*shape, channels)
+    return _RenderedTile(Tile(region, pixels.reshape(pixel_shape), valid.reshape(shape)), rejected)
 
 
 def _split(region: Region) -> tuple[Region, Region]:
@@ -229,14 +235,15 @@ def _fit_tile(
     panels: Sequence[_Panel],
     budget: _WorkingBudget,
     context: JobContext,
+    channels: int,
 ) -> Iterator[_RenderedTile]:
     context.check_cancelled()
-    rendered = _try_tile(region, target, panels, budget, context)
+    rendered = _try_tile(region, target, panels, budget, context, channels)
     if rendered is not None:
         yield rendered
         return
     for smaller in _split(region):
-        yield from _fit_tile(smaller, target, panels, budget, context)
+        yield from _fit_tile(smaller, target, panels, budget, context, channels)
 
 
 def render_mosaic(
@@ -252,9 +259,9 @@ def render_mosaic(
     refinement: RefinementSpec | None = None,
     context: JobContext = DEFAULT_JOB_CONTEXT,
 ) -> MosaicResult:
-    """Reproject original FITS samples and publish the finished mosaic on success."""
+    """Reproject original linear samples and publish the finished mosaic on success."""
     if not paths:
-        raise ValueError("Supply at least one FITS panel.")
+        raise ValueError("Supply at least one FITS or TIFF panel.")
     weights = [1.0] * len(paths) if weights is None else weights
     if len(weights) != len(paths) or any(not isfinite(w) or w <= 0 for w in weights):
         raise ValueError("Supply one positive finite weight per input panel.")
@@ -269,8 +276,10 @@ def render_mosaic(
     budget = _WorkingBudget(spec.max_working_bytes)
     width, height = crop.width, crop.height
     total = width * height
+    is_tiff = destination.suffix.lower() in TIFF_SUFFIXES
+    format_name = "TIFF" if is_tiff else "FITS"
     if total * 5 > spec.max_output_bytes:
-        raise ValueError("The FITS mosaic exceeds the configured output byte limit.")
+        raise ValueError(f"The {format_name} mosaic exceeds the configured output byte limit.")
     if destination.exists() or destination.is_symlink():
         raise FileExistsError(f"The output file already exists: {destination}")
     covered = completed = tiles = rejected = 0
@@ -281,15 +290,18 @@ def render_mosaic(
             context.check_cancelled()
             try:
                 source = inputs.enter_context(
-                    open_fits_panel(
+                    open_panel(
                         path,
                         max_tile_bytes=spec.max_working_bytes,
-                        memmap=False,
                         sky_mask=sky_masks.get(index),
                     )
                 )
                 panel = source.descriptor
-                provenance = "primary WCS"
+                provenance = (
+                    "TIFF description WCS"
+                    if panel.wcs_provenance == "tiff-description"
+                    else "primary WCS"
+                )
                 if index in wcs_sidecars:
                     from astromosaic.astrometry.solve import load_solution
 
@@ -299,6 +311,15 @@ def render_mosaic(
             except ValueError as error:
                 raise ValueError(f"Input panel {index + 1}: {error}") from error
             panels.append(_Panel(source, geometry, weight, provenance))
+
+        layout = panels[0].source.descriptor.channel_layout
+        if any(panel.source.descriptor.channel_layout != layout for panel in panels):
+            raise ValueError("Supply either all mono or all RGB panels.")
+        channels = 3 if layout == "rgb" else 1
+        if channels == 3 and not is_tiff:
+            raise ValueError("RGB mosaics require TIFF output.")
+        if total * (4 * channels + 1) > spec.max_output_bytes:
+            raise ValueError(f"The {format_name} mosaic exceeds the configured output byte limit.")
 
         header = _export_header(output, panels, filter_name, assume_surface_brightness)
         if refinement is not None:
@@ -318,12 +339,22 @@ def render_mosaic(
                 header.add_history(
                     f"Anchored relative refinement: {report.background.model} background."
                 )
-        with open_fits_mosaic(destination, width, height, header, spec.max_output_bytes) as writer:
+        if is_tiff:
+            from astromosaic.io.tiff_export import open_tiff_mosaic
+
+            writer_context = open_tiff_mosaic(
+                destination, width, height, channels, header, spec.max_output_bytes
+            )
+        else:
+            writer_context = open_fits_mosaic(
+                destination, width, height, header, spec.max_output_bytes
+            )
+        with writer_context as writer:
             step = spec.tile_size
             for y in range(0, height, step):
                 for x in range(0, width, step):
                     region = Region(x, y, min(step, width - x), min(step, height - y))
-                    for rendered in _fit_tile(region, target, panels, budget, context):
+                    for rendered in _fit_tile(region, target, panels, budget, context, channels):
                         writer.write(rendered.tile)
                         covered += int(np.count_nonzero(rendered.tile.valid))
                         completed += rendered.tile.region.width * rendered.tile.region.height

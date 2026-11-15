@@ -12,7 +12,7 @@ from scipy.spatial import cKDTree
 
 from astromosaic.core import Region, Tile
 from astromosaic.core.job import JobContext
-from astromosaic.io.fits import FitsTileSource, fits_tile_bytes
+from astromosaic.io import PanelSource
 
 _HALO = 24
 _STAR_LIMIT = 1500
@@ -34,13 +34,18 @@ class StarField:
     exclusions: NDArray[np.float64]
 
 
+def astrometry_pixels(tile: Tile) -> NDArray[np.float32]:
+    """Use green as the astrometry signal for RGB while preserving the original channels."""
+    return tile.pixels if tile.pixels.ndim == 2 else tile.pixels[..., 1]
+
+
 def _detect_tile(
     tile: Tile, owned: Region, saturation: float | None
 ) -> tuple[list[Star], list[Star]]:
     if np.count_nonzero(tile.valid) < 32:
         return [], []
     masked = ~tile.valid
-    data = np.where(tile.valid, tile.pixels, np.float32(0))
+    data = np.where(tile.valid, astrometry_pixels(tile), np.float32(0))
     sky = sep.Background(data, mask=masked, bw=32, bh=32)
     residual = data - sky.back()
     rms = np.maximum(sky.rms(), np.finfo(np.float32).eps)
@@ -120,7 +125,7 @@ def _detect_tile(
     ], exclusions
 
 
-def measure_stars(source: FitsTileSource, max_working_bytes: int, context: JobContext) -> StarField:
+def measure_stars(source: PanelSource, max_working_bytes: int, context: JobContext) -> StarField:
     """Read tiled sky, keeping the brightest usable measurements and exclusion positions."""
     descriptor = source.descriptor
     width, height = descriptor.width, descriptor.height
@@ -133,7 +138,7 @@ def measure_stars(source: FitsTileSource, max_working_bytes: int, context: JobCo
     step = 192
     while True:
         window = Region(0, 0, min(width, step + 2 * _HALO), min(height, step + 2 * _HALO))
-        estimate = fits_tile_bytes(window) + 112 * window.width * window.height
+        estimate = source.tile_bytes(window) + 112 * window.width * window.height
         if estimate + _DETECTION_OVERHEAD <= max_working_bytes:
             break
         step //= 2

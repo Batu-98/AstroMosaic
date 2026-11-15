@@ -5,12 +5,12 @@ Use this file for concise development history and handoff state. Detailed techni
 ## Current State
 
 - **Last updated:** 2026-11-15
-- **Active baseline:** Python-first architecture revision 3.5. See [ADR-0003](docs/adr/0003-windows-first-platform-scope.md) for Windows scope, [ADR-0006](docs/adr/0006-dual-fits-and-tiff-workflow.md) for formats, and [ADR-0007](docs/adr/0007-sky-and-foreground-mosaics.md) for mixed panels.
-- **Current stage:** The Phase 2 astronomy gate passed for the Windows 11 x64 FITS reference. Linear mono/RGB TIFF validation is due before Phase 3 acceptance. Linux and macOS support is deferred.
-- **Available artifacts:** Qt-free FITS CLI with local solving, WCS sidecars, supplied sky masks, and relative refinement. The [Phase 2 evidence](docs/phase-2.md) describes the local catalogs and the Windows development bundle at `dist/astromosaic-cli-phase2`.
-- **Implementation / verification:** 37 tests, Ruff lint and format, mypy, and Poetry lock checks passed. Real hinted and blind Gaia/ASTAP trials, masked sky verification, and held-out science checks passed. The frozen CLI solved and rendered from an unrelated working directory, and CFITSIO reopened the result.
+- **Active baseline:** Python-first architecture revision 3.6, with [Phase 3A–3F delivery stages](astro_mosaic_python_first_architecture_en.md#101-phase-3-delivery-stages). See [ADR-0003](docs/adr/0003-windows-first-platform-scope.md) for Windows scope, [ADR-0006](docs/adr/0006-dual-fits-and-tiff-workflow.md) for formats, and [ADR-0007](docs/adr/0007-sky-and-foreground-mosaics.md) for mixed panels.
+- **Current stage:** Phase 3B passed on Windows 11 x64. Project files and cancellable desktop jobs are available for linear FITS and TIFF. Linux and macOS support is deferred.
+- **Available artifacts:** [PySide6 project window](docs/phase-3b.md) and Qt-free CLI with offline solving, WCS sidecars, supplied sky masks, mono relative refinement, and float32 FITS/TIFF export. The existing [Phase 2 development bundle](docs/phase-2.md#windows-development-bundle) covers the FITS reference.
+- **Implementation / verification:** All 58 tests passed on Windows 11 x64 with native Qt, along with Ruff, mypy, Poetry lock validation, and documentation link checks. The [Phase 3B workflow](docs/phase-3b.md#verification) verified persistence, relinking, responsive progress, cancellation, and retry. The [Phase 3A fixtures](docs/phase-3a.md#windows-evidence) verify TIFF samples, WCS, and coverage.
 - **Version control:** Local `main` tracks `origin/main` in the private [AstroMosaic GitHub repository](https://github.com/Batu-98/AstroMosaic).
-- **Next action:** Define and verify the linear mono/RGB TIFF input/output contract, then proceed with the Phase 3 desktop workflow.
+- **Next action:** Start Phase 3C with a sky viewport, GPU and CPU preview paths, and preview/export geometry agreement.
 - **Open dependencies:** Q-003 through Q-005, Q-009, and Q-010 track later numerical, resource, distribution, format, and mixed-panel gates. Q-008 tracks deferred platforms and Q-011 tracks deferred visual fill. Q-006 and Q-007 are resolved for the Windows solver and FITS export references.
 
 ## Phase Overview
@@ -21,9 +21,14 @@ The table is a status summary, not a replacement for the full exit gates in Sect
 | --- | --- | --- |
 | Preparation | Complete | Agent instructions, English documentation, tracking conventions, active-plan identification, and next task established. |
 | 0 - Compatibility and scope | Complete | Locked environment, initial fixtures/contracts, solver and PySide float-texture experiments, packaged skeleton, and a small job verified on Windows 11 x64. |
-| 1 - Headless reference | FITS gate passed | Correct two-panel FITS geometry, values, and coverage, independent reopening, bounded access, and a Qt-free CLI verified. Linear mono/RGB TIFF validation is due before Phase 3 acceptance. |
+| 1 - Headless reference | Complete | Correct two-panel FITS geometry, values, and coverage, independent reopening, bounded access, and a Qt-free CLI. The deferred TIFF checkpoint passed in Phase 3A. |
 | 2 - Robust astronomy engine | Complete | Verified local Gaia/ASTAP fallback, supplied sky masks, anchored overlap registration and stellar gains, offset/plane selection, held-out and injected-signal gates, and weak/disconnected diagnostics on Windows. |
-| 3 - Desktop workflow | Not started | Responsive projects and jobs, foreground tags and editable masks, separate foreground stitching, automatic and manual composition, preview/export agreement, recovery, and CPU fallback on Windows. |
+| 3A - Linear TIFF | Complete | Mono/RGB input and output verified on Windows for samples, channels, WCS, and coverage. |
+| 3B - Projects and jobs | Complete | Project save/reopen, panel relinking, responsive progress, and cancellation verified on native Windows Qt. |
+| 3C - Preview and export | Not started | First usable sky-mosaic desktop workflow, with shared preview/export geometry and GPU/CPU paths. |
+| 3D - Sky masks | Not started | Automatic proposals and manual tag/mask edits that survive project reopen. |
+| 3E - Foreground and composition | Not started | Independent layer alignment and export, plus saved placement, overlap, and crop edits. |
+| 3F - Windows acceptance | Not started | Packaged FITS/TIFF workflows, recovery, cancellation cleanup, and CPU fallback verified. |
 | 4 - Large mosaics and improved blends | Not started | Budgeted rendering of 12 FITS and TIFF panels at 6000 × 4000, including a mixed scene, incremental export, tile/halo correctness, and measured improvement for any optional multiband blend. |
 | 5 - Extended formats and channels | Not started | Format/channel/projection contracts and packaging checks for each added workflow. |
 
@@ -182,6 +187,39 @@ The table is a status summary, not a replacement for the full exit gates in Sect
 - **Verified:** Verified `imagecodecs` 2026.11.11 import and codec availability (LZW, ZSTD). All 37 existing tests, Ruff, mypy, and `poetry check --lock` passed cleanly.
 - **Related:** [ADR-0006](docs/adr/0006-dual-fits-and-tiff-workflow.md), Q-009.
 - **Next:** Define and verify the linear mono/RGB TIFF input/output contract.
+
+### 2026-11-15 - Phase 3 - Planned A–F delivery stages
+
+- **Changed:** Updated the architecture to revision 3.6 with separate acceptance gates for TIFF, projects and jobs, preview and export, masks, composition, and Windows acceptance.
+- **Verified:** Reviewed the stages against the existing Phase 3 requirements and checked the documentation links.
+- **Next:** Begin Phase 3A with the linear TIFF contract and fixtures.
+
+### 2026-11-15 - Phase 3A - Implemented the headless TIFF path
+
+- **Changed:** Defined the [linear TIFF contract](docs/phase-3a.md) and added bounded mono/RGB source windows, shared rendering, and single-file float32 TIFF export with embedded WCS and coverage.
+- **Verified:** The existing 37-test FITS regression suite, mypy, and lock validation passed after integration. A TIFF writer probe reopened interleaved float32 science samples through libtiff and located the coverage SubIFD through tifffile.
+- **Related:** [ADR-0011](docs/adr/0011-linear-tiff-interchange.md), Q-003, Q-004, and Q-009.
+- **Next:** Run the mono and RGB acceptance fixtures on Windows, including output reopen, resource limits, and cancellation.
+
+### 2026-11-15 - Phase 3A - Completed: linear TIFF Windows verification
+
+- **Changed:** Added deterministic mono and RGB TIFF fixtures, including exact two-panel blends, crop and rotation, compressed and raw windows, mixed mono input formats, bounded failure, and cancellation cleanup.
+- **Verified:** All 51 tests, lint, format, mypy, and lock validation passed. libtiff reopened both TIFF science layouts. The Windows M13 RGB TIFF matched the FITS Gaia solution. With a sky mask, Gaia exhausted its match search and hinted ASTAP produced the WCS used for a successful TIFF export.
+- **Related:** [Windows evidence](docs/phase-3a.md#windows-evidence), [ADR-0011](docs/adr/0011-linear-tiff-interchange.md), Q-003 through Q-005, and Q-009.
+- **Next:** Start Phase 3B. Verify packaged interoperability in Phase 3F and the representative TIFF resource workload in Phase 4.
+
+### 2026-11-15 - Phase 3B - Implemented project persistence and desktop job controls
+
+- **Changed:** Added versioned project manifests with file fingerprints, relative paths, mosaic settings, and atomic saves. Added the PySide6 project window and a cancellable render thread.
+- **Verified:** The new window launched with the Windows PySide6 installation using the offscreen platform plugin. The empty project disables rendering and cancellation.
+- **Next:** Exercise reopen, relinking, responsive progress, cancellation, retry, and cleanup with generated panels.
+
+### 2026-11-15 - Phase 3B - Completed: project and render workflow
+
+- **Changed:** Finished the desktop entry point, project and panel settings, file relinking, and a background worker with progress and cancellation. Closing during a job now defers window teardown until cleanup.
+- **Verified:** All 58 tests passed on native Windows Qt. The desktop test saved and reopened a mixed-format project, relinked a moved panel, and rendered with its saved WCS and sky mask. A GUI timer fired during the live job. Cancellation and closing removed partial output, and the cancelled render could be retried successfully.
+- **Related:** [Phase 3B evidence](docs/phase-3b.md), [ADR-0012](docs/adr/0012-project-manifest-and-render-worker.md), Q-004, and Q-009.
+- **Next:** Add the interactive sky preview and compare its geometry with export in Phase 3C.
 
 ## Entry Template
 

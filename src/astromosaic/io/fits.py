@@ -50,22 +50,17 @@ class FitsTileSource:
     def header(self) -> fits.Header:
         return self._hdu.header.copy()
 
+    @staticmethod
+    def tile_bytes(region: Region) -> int:
+        return fits_tile_bytes(region)
+
+    def read_binary_mask(self, region: Region) -> NDArray[np.bool_]:
+        return _binary_pixels(self._hdu.section[region.slices], "sky mask")
+
     def read_tile(self, region: Region, *, halo: int = 0) -> Tile:
         """Read an in-bounds region with a halo clipped to the image edges."""
         panel = self.descriptor
-        right = region.x + region.width
-        bottom = region.y + region.height
-        if (
-            not (0 <= region.x < right <= panel.width and 0 <= region.y < bottom <= panel.height)
-            or halo < 0
-        ):
-            raise ValueError("Expected a nonempty in-bounds tile and a nonnegative halo.")
-
-        x = max(0, region.x - halo)
-        y = max(0, region.y - halo)
-        actual = Region(
-            x, y, min(panel.width, right + halo) - x, min(panel.height, bottom + halo) - y
-        )
+        actual = region.with_halo(panel.width, panel.height, halo)
         if fits_tile_bytes(actual) > self._max_tile_bytes:
             raise ValueError("The FITS tile exceeds the configured byte budget.")
 
@@ -76,7 +71,7 @@ class FitsTileSource:
         if self._coverage is not None:
             valid &= _binary_pixels(self._coverage.section[actual.slices], "COVERAGE image")
         if self._sky_mask is not None:
-            valid &= _binary_pixels(self._sky_mask._hdu.section[actual.slices], "sky mask")
+            valid &= self._sky_mask.read_binary_mask(actual)
         with np.errstate(over="ignore", invalid="ignore"):
             if panel.bscale != 1.0 or panel.bzero != 0.0:
                 scaled = np.multiply(raw, panel.bscale, dtype=np.float64)
@@ -98,7 +93,7 @@ def _binary_pixels(values: NDArray[np.uint8], label: str) -> NDArray[np.bool_]:
     return cast(NDArray[np.bool_], values == 1)
 
 
-def _optional_text(header: fits.Header, keyword: str) -> str | None:
+def optional_header_text(header: fits.Header, keyword: str) -> str | None:
     value = header.get(keyword)
     return value.strip() or None if isinstance(value, str) else None
 
@@ -182,32 +177,39 @@ def open_fits_panel(
                 mask_provenance += ("coverage-extension",)
             mask = None
             if sky_mask is not None:
-                mask = masks.enter_context(open_fits_panel(sky_mask, memmap=memmap))
-                mask_descriptor = mask.descriptor
-                if (
-                    (mask_descriptor.width, mask_descriptor.height) != (width, height)
-                    or (mask_descriptor.bitpix, mask_descriptor.bscale, mask_descriptor.bzero)
-                    != (8, 1, 0)
-                    or mask_descriptor.mask_provenance != ("finite-raw-pixels",)
-                ):
-                    raise ValueError(
-                        "Expected a single unscaled byte sky mask matching the panel shape."
-                    )
+                mask = masks.enter_context(
+                    open_fits_sky_mask(sky_mask, width, height, memmap=memmap)
+                )
                 mask_provenance += ("supplied-sky-mask",)
             descriptor = PanelDescriptor(
                 fingerprint=SourceFingerprint(stat.st_size, stat.st_mtime_ns),
                 width=width,
                 height=height,
                 channel_layout="mono",
-                filter_name=_optional_text(header, "FILTER"),
-                unit=_optional_text(header, "BUNIT"),
+                filter_name=optional_header_text(header, "FILTER"),
+                unit=optional_header_text(header, "BUNIT"),
                 bitpix=bitpix,
                 bscale=bscale,
                 bzero=bzero,
                 wcs_provenance="primary-header"
-                if _optional_text(header, "CTYPE1") and _optional_text(header, "CTYPE2")
+                if optional_header_text(header, "CTYPE1") and optional_header_text(header, "CTYPE2")
                 else None,
                 blank=blank,
                 mask_provenance=mask_provenance,
             )
             yield FitsTileSource(hdu, descriptor, max_tile_bytes, coverage, mask)
+
+
+@contextmanager
+def open_fits_sky_mask(
+    path: Path, width: int, height: int, *, memmap: bool = False
+) -> Iterator[FitsTileSource]:
+    with open_fits_panel(path, memmap=memmap) as mask:
+        descriptor = mask.descriptor
+        if (
+            (descriptor.width, descriptor.height) != (width, height)
+            or (descriptor.bitpix, descriptor.bscale, descriptor.bzero) != (8, 1, 0)
+            or descriptor.mask_provenance != ("finite-raw-pixels",)
+        ):
+            raise ValueError("Expected a single unscaled byte sky mask matching the panel shape.")
+        yield mask

@@ -1,1 +1,1 @@
-"""Optional PySide6 desktop experiments."""
+"""Optional PySide6 desktop interface."""

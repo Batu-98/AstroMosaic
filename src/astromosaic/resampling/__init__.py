@@ -60,8 +60,21 @@ def sample(tile: Tile, window: SamplingWindow) -> tuple[NDArray[np.intp], NDArra
     )
     has_support = support >= 1 - _SUPPORT_TOLERANCE
     # Zero the missing payloads for interpolation. The separate mask gates each sample.
-    np.copyto(tile.pixels, 0, where=~tile.valid)
-    values = map_coordinates(
-        tile.pixels, window.coordinates[:, has_support], order=1, output=np.float64, prefilter=False
-    )
-    return window.indices[has_support], cast(NDArray[np.float64], values / support[has_support])
+    coordinates = window.coordinates[:, has_support]
+    normalization = support[has_support]
+    if tile.pixels.ndim == 2:
+        np.copyto(tile.pixels, 0, where=~tile.valid)
+        values = map_coordinates(
+            tile.pixels, coordinates, order=1, output=np.float64, prefilter=False
+        )
+    else:
+        np.copyto(tile.pixels, 0, where=~tile.valid[..., None])
+        values = np.stack(
+            [
+                map_coordinates(plane, coordinates, order=1, output=np.float64, prefilter=False)
+                for plane in np.moveaxis(tile.pixels, -1, 0)
+            ],
+            axis=-1,
+        )
+        normalization = normalization[:, None]
+    return window.indices[has_support], cast(NDArray[np.float64], values / normalization)
