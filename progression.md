@@ -142,6 +142,13 @@ The table is a status summary, not a replacement for the full exit gates in Sect
 - **Published:** Pushed `main` and verified the remote initial commit `7faa650`.
 - **Next:** Continue with the linear TIFF contract.
 
+### 2026-11-15 - Licensing - Adopted GPL version 3
+
+- **Changed:** Added the GPL v3 text and declared `GPL-3.0-only` in the README and Python package metadata.
+- **Verified:** Compared the license text with the reference project and checked the lock and built wheel metadata.
+- **Related:** [ADR-0009](docs/adr/0009-gpl-v3-application-license.md) records the decision. Q-005 remains open for third-party release notices and data terms.
+- **Next:** Continue the TIFF contract and review bundled materials during release preparation.
+
 ## Entry Template
 
 Copy this format into a new entry immediately above this template, preserving chronological order:

@@ -39,9 +39,9 @@ This register tracks unresolved decisions, problems, and risks. It is not a work
 - **Status / priority:** Open / P1
 - **Opened / updated:** 2026-11-15 / 2026-11-15
 - **Affected phase:** 0 dependency/license inventory and release packaging; required before license-sensitive code reuse or redistribution.
-- **Impact and evidence:** The [initial license inventory](docs/phase-0.md#license-inventory) identifies LGPL-licensed SEP, Qt for Python options, PyInstaller's exception, external ASTAP, and separate D05 data. `fitsio` is scoped to development tests and carries GPL-2.0-or-later. The owner confirmed open-source distribution and open-source components. The exact application license and distribution notices remain undecided. [Phase 1 dependency evidence](docs/phase-1.md#numerical-and-windows-checks)
+- **Impact and evidence:** The owner chose `GPL-3.0-only` for the application. The [initial license inventory](docs/phase-0.md#license-inventory) covers SEP, Qt, PyInstaller, ASTAP, and separate D05 data. `fitsio` is a GPL-2.0-or-later development dependency. [License decision](docs/adr/0009-gpl-v3-application-license.md)
 - **Current assumption:** Maintain original implementation. Obtain solver binaries and catalog data separately for experiments.
-- **Next action / responsibility:** Inventory bundled transitive notices and catalog redistribution terms. Evaluate compatible open-source license options. The owner selects the exact application license.
+- **Next action / responsibility:** Inventory bundled transitive notices and review catalog redistribution terms for the release.
 - **Closure condition:** Record the distribution decision, attribution/license inventory, and compatibility of any reused code or bundled materials. Independent development can continue while this decision is open.
 
 ### Q-006 - Offline solver and catalog deployment

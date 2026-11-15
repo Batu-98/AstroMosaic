@@ -18,6 +18,10 @@ A Windows-first desktop application in development for assembling linear astrono
 
 All project Markdown, source comments, identifiers, logs, and default application text are written in English.
 
+## License
+
+AstroMosaic is licensed under the [GNU General Public License version 3](LICENSE) (`GPL-3.0-only`).
+
 ## Initial Product Boundary
 
 The first headless reference processes calibrated, integrated, unstretched monochrome FITS panels from the same filter, using validated existing WCS, Gnomonic reprojection, weighted blending, and linear float32 FITS export. Robust solving, registration, and photometric matching follow in Phase 2; the full desktop workflow follows in Phase 3.
