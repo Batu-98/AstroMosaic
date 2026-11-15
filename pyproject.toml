@@ -12,6 +12,7 @@ dependencies = [
     "astropy>=7,<9",
     "sep>=1.4,<2",
     "reproject>=0.16,<1",
+    "imagecodecs (>=2026.11.11,<2027.0.0)",
 ]
 
 [project.optional-dependencies]

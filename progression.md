@@ -176,6 +176,13 @@ The table is a status summary, not a replacement for the full exit gates in Sect
 - **Verified:** All 37 tests, Ruff, mypy, and Poetry lock checks passed before publication.
 - **Next:** Validate the linear TIFF workflow.
 
+### 2026-11-15 - Dependencies - Completed: imagecodecs added for TIFF codecs
+
+- **Changed:** Added `imagecodecs` to `pyproject.toml` and updated `poetry.lock` to provide fast C decoders (LZW, Deflate, ZSTD) for the linear TIFF workflow.
+- **Verified:** Verified `imagecodecs` 2026.11.11 import and codec availability (LZW, ZSTD). All 37 existing tests, Ruff, mypy, and `poetry check --lock` passed cleanly.
+- **Related:** [ADR-0006](docs/adr/0006-dual-fits-and-tiff-workflow.md), Q-009.
+- **Next:** Define and verify the linear mono/RGB TIFF input/output contract.
+
 ## Entry Template
 
 Copy this format into a new entry immediately above this template, preserving chronological order:
