@@ -1,0 +1,55 @@
+[project]
+name = "astromosaic"
+version = "0.1.0"
+description = "Assemble linear astronomical image panels into reproducible mosaics."
+readme = "README.md"
+requires-python = ">=3.13,<3.14"
+dependencies = [
+    "numpy>=2,<3",
+    "scipy>=1.15,<2",
+    "astropy>=7,<9",
+    "sep>=1.4,<2",
+    "reproject>=0.16,<1",
+]
+
+[project.optional-dependencies]
+desktop = ["PySide6-Essentials>=6.10,<7"]
+
+[project.scripts]
+astromosaic = "astromosaic.cli:main"
+
+[dependency-groups]
+dev = [
+    "fitsio>=1.4.2,<2",
+    "pytest>=8,<10",
+    "ruff>=0.12,<1",
+    "mypy>=1.15,<3",
+]
+build = ["pyinstaller>=6.14,<7"]
+
+[tool.poetry.group.build]
+optional = true
+
+[build-system]
+requires = ["poetry-core>=2,<3"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--strict-markers --strict-config"
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I", "UP", "B"]
+
+[tool.mypy]
+python_version = "3.13"
+strict = true
+files = ["src", "tests"]
+
+[[tool.mypy.overrides]]
+module = ["astropy.*", "fitsio", "reproject.*", "scipy.*", "sep"]
+ignore_missing_imports = true
