@@ -99,9 +99,16 @@ class TileSky:
     geometry: PanelGeometry
 
     @classmethod
-    def from_output(cls, output: PanelGeometry, region: Region) -> Self:
+    def from_output(
+        cls, output: PanelGeometry, region: Region, scale: tuple[float, float] = (1.0, 1.0)
+    ) -> Self:
         y, x = np.indices((region.height, region.width), dtype=np.float64)
-        return cls.from_pixels(output, x.ravel() + region.x, y.ravel() + region.y)
+        # Map raster centers onto the same pixel-edge rectangle as the exported grid.
+        return cls.from_pixels(
+            output,
+            (x.ravel() + region.x + 0.5) * scale[0] - 0.5,
+            (y.ravel() + region.y + 0.5) * scale[1] - 0.5,
+        )
 
     @classmethod
     def from_pixels(

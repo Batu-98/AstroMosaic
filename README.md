@@ -2,7 +2,7 @@
 
 A Windows-first desktop application in development for assembling linear astronomical image panels into reproducible mosaics.
 
-**Current state:** The Windows 11 x64 desktop app can save and reopen mosaic projects, relink moved panels, and run cancellable FITS/TIFF jobs. The CLI supports offline solving and mono relative refinement. Linux and macOS support is deferred.
+**Current state:** The Windows 11 x64 desktop app can save and relink projects, preview sky mosaics on OpenGL or CPU, and export float32 FITS and TIFF. The CLI supports offline solving and mono relative refinement. Linux and macOS support is deferred.
 
 ## Start Here
 
@@ -17,6 +17,7 @@ A Windows-first desktop application in development for assembling linear astrono
 | [Phase 2 astronomy reference](docs/phase-2.md) | Offline catalog setup, WCS sidecars, masks, refinement, and acceptance evidence. |
 | [Phase 3A linear TIFF](docs/phase-3a.md) | Sample formats, WCS and coverage layout, interoperability limits, and Windows fixtures. |
 | [Phase 3B projects and jobs](docs/phase-3b.md) | Desktop setup, project save and relinking, worker progress, and cancellation. |
+| [Phase 3C sky preview and export](docs/phase-3c.md) | Preview controls, display backends, and comparison against reopened exports. |
 | [ADR-0001](docs/adr/0001-python-first-baseline.md) | Records which architecture is active and which decisions remain unverified. |
 
 All project Markdown, source comments, identifiers, logs, and default application text are written in English.
@@ -69,7 +70,7 @@ poetry sync -E desktop
 poetry run python -m astromosaic.ui
 ```
 
-Add panels, enter a mosaic grid, and save the project. **Run Mosaic** starts a background job with progress and cancellation. [Desktop workflow](docs/phase-3b.md#desktop-workflow)
+Add panels, set the mosaic grid, and save the project. Use **Build Preview** to pan, zoom, and stretch the sky image. Choose **Export Mosaic** for linear FITS or TIFF output. Both jobs report progress and support cancellation. [Desktop workflow](docs/phase-3c.md#desktop-workflow)
 
 ## Develop and Verify
 

@@ -21,7 +21,7 @@ from phase2_reference import (
 from astromosaic.astrometry.registration import ProjectedField, register
 from astromosaic.cli import main
 from astromosaic.core.job import JobContext
-from astromosaic.pipeline.mosaic import RenderSpec, render_mosaic
+from astromosaic.pipeline.mosaic import RenderSpec, preview_mosaic, render_mosaic
 from astromosaic.pipeline.refinement import RefinementSpec
 
 
@@ -77,6 +77,15 @@ def test_three_panel_refinement_preserves_stars_emission_and_sky_mask(tmp_path: 
             assert coverage[60, 180] == 1
             assert np.nanmax(pixels) < 150  # The supplied ground is at least 300 brightness units.
             products.append(pixels)
+        if injected:
+            preview = preview_mosaic(
+                fixture.paths,
+                RenderSpec(CENTER, SIZE, ARCSEC, tile_size=37),
+                sky_masks={1: fixture.mask},
+                refinement=RefinementSpec(background="plane"),
+            )
+            np.testing.assert_array_equal(preview.tile.pixels, pixels)
+            np.testing.assert_array_equal(preview.tile.valid, coverage)
         assert {path: path.read_bytes() for path in originals} == originals
 
     y, x = np.indices(products[0].shape, dtype=np.float64)

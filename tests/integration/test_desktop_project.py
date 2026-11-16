@@ -12,9 +12,9 @@ from astromosaic.core import Region
 from astromosaic.core.job import JobContext
 from astromosaic.geometry import tan_output_wcs
 from astromosaic.io import open_panel
-from astromosaic.pipeline.mosaic import MosaicResult
+from astromosaic.pipeline.mosaic import MosaicResult, PreviewFrame
 from astromosaic.pipeline.smoke import write_smoke_panel
-from astromosaic.storage.project import MosaicProject, load_project, render_project
+from astromosaic.storage.project import MosaicProject, load_project, preview_project, render_project
 
 
 def test_desktop_project_roundtrip_progress_cancel_and_retry(
@@ -33,7 +33,9 @@ def test_desktop_project_roundtrip_progress_cancel_and_retry(
 
     if "QT_QPA_PLATFORM" not in os.environ:
         monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
-    app = QApplication([])
+    app = QApplication.instance()
+    if not isinstance(app, QApplication):
+        app = QApplication([])
     app.setQuitOnLastWindowClosed(False)
 
     source = tmp_path / "light.fits"
@@ -93,7 +95,7 @@ def test_desktop_project_roundtrip_progress_cancel_and_retry(
         assert isinstance(button, QPushButton)
         QTest.mouseClick(button, Qt.MouseButton.LeftButton)
 
-    def pause_after_tile(project: MosaicProject, path: Path, context: JobContext) -> MosaicResult:
+    def pause_on_progress(context: JobContext) -> JobContext:
         assert get_ident() != main_thread
         report = context.on_progress
         assert report is not None
@@ -105,7 +107,15 @@ def test_desktop_project_roundtrip_progress_cancel_and_retry(
                 if not release.wait(12):
                     raise RuntimeError("The test did not release the worker.")
 
-        return render_project(project, path, JobContext(context.is_cancelled, progress))
+        return JobContext(context.is_cancelled, progress)
+
+    def pause_after_tile(project: MosaicProject, path: Path, context: JobContext) -> MosaicResult:
+        return render_project(project, path, pause_on_progress(context))
+
+    def pause_preview(
+        project: MosaicProject, context: JobContext, on_proxy: Callable[[PreviewFrame], None]
+    ) -> PreviewFrame:
+        return preview_project(project, pause_on_progress(context), on_proxy)
 
     def set_geometry() -> None:
         dialog = QApplication.activeModalWidget()
@@ -151,6 +161,23 @@ def test_desktop_project_roundtrip_progress_cancel_and_retry(
         save.trigger()
         assert load_project(manifest).panels[0].source.path == moved
 
+        with monkeypatch.context() as patch:
+            patch.setattr(mosaic_job, "preview_project", pause_preview)
+            click(window.preview_button)
+            until(lambda: entered.is_set() and 0 < window.progress.value() < 100)
+            assert window.cancel_button.isEnabled() and not window.start_button.isEnabled()
+            click(window.cancel_button)
+            release.set()
+            until(lambda: window.job is None)
+        assert window.viewport.frame is None and window.status.text() == "Preview cancelled."
+        click(window.preview_button)
+        until(lambda: window.job is None)
+        preview = window.viewport.frame
+        assert preview is not None and preview.has_coverage and preview.size == (140, 140)
+        assert window.status.text().startswith("Sky preview")
+        entered.clear()
+        release.clear()
+
         save_target = output
         with monkeypatch.context() as patch:
             patch.setattr(mosaic_job, "render_project", pause_after_tile)
@@ -173,6 +200,7 @@ def test_desktop_project_roundtrip_progress_cancel_and_retry(
         assert window.progress.value() == 100 and window.status.text().startswith(
             "Saved mosaic.tiff"
         )
+        assert window.viewport.frame is preview
         with open_panel(output) as panel:
             assert panel.descriptor.width == panel.descriptor.height == 140
             assert panel.read_tile(Region(65, 66, 10, 10)).valid.any()

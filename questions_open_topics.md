@@ -17,9 +17,9 @@ This register tracks unresolved decisions, problems, and risks. It is not a work
 ### Q-003 - Reference datasets and frozen acceptance thresholds
 
 - **Status / priority:** Investigating / P1
-- **Opened / updated:** 2026-11-15 / 2026-11-15
+- **Opened / updated:** 2026-11-15 / 2026-11-16
 - **Affected phase:** 0 fixture design; required for numerical gates in phases 1, 2, and 4.
-- **Impact and evidence:** The [Phase 1 fixtures](docs/phase-1.md) verify independent FITS export truth. [Phase 2](docs/phase-2.md#acceptance-fixtures) fixes and verifies held-out alignment, stellar flux and profile, injected extended signal, masks, and weak or disconnected inputs. [Phase 3A fixtures](docs/phase-3a.md#acceptance-fixtures) fix sample, channel, coverage, and WCS tolerances for linear TIFF.
+- **Impact and evidence:** The [Phase 1 fixtures](docs/phase-1.md) verify independent FITS export truth. [Phase 2](docs/phase-2.md#acceptance-fixtures) fixes and verifies held-out alignment, stellar flux and profile, injected extended signal, masks, and weak or disconnected inputs. [Phase 3A fixtures](docs/phase-3a.md#acceptance-fixtures) fix sample, channel, coverage, and WCS tolerances for linear TIFF. [Phase 3C](docs/phase-3c.md#windows-verification) confirms preview and export agreement at coincident sample positions.
 - **Current assumption:** Generate small deterministic same-filter FITS fixtures for development. Store provenance for external data with the validation procedure.
 - **Next action / responsibility:** Freeze large-mosaic, RGB photometry, and mixed-scene tolerances for the Phase 4 workloads.
 - **Closure condition:** Freeze dataset-specific tolerances before algorithm tuning, including alignment, stellar profiles/flux, injected faint emission, and tiled/reference agreement. Link the fixture manifest and test results.
@@ -27,11 +27,11 @@ This register tracks unresolved decisions, problems, and risks. It is not a work
 ### Q-004 - Resource budgets and representative workload
 
 - **Status / priority:** Investigating / P1
-- **Opened / updated:** 2026-11-15 / 2026-11-15
+- **Opened / updated:** 2026-11-15 / 2026-11-16
 - **Affected phase:** Phase 0 scheduling contracts, Phase 1 rendering, Phase 2 solvers and fitting, Phase 3 preview, and Phase 4 large-job scaling.
-- **Impact and evidence:** The one-worker FITS renderer enforces a combined tile reservation with no queue. A two-panel 3328 × 1536 render peaked at 89.0 MiB working set and 101.5 MiB commit with one OpenBLAS thread. An unhinted Gaia solve with the deep native index peaked at 1066 MiB working set and 281 MiB commit. [Phase 1 rendering measurements](docs/phase-1.md#working-set-and-cancellation) · [Phase 2 solver measurements](docs/phase-2.md#windows-solver-evidence)
-- **Current assumption:** Default to 128-pixel render tiles, an estimated 64 MiB working buffer budget, and a 2048 MiB output limit. [TIFF](docs/phase-3a.md#sample-and-metadata-contract) reserves compressed-segment decode buffers as well as the requested window. Budget native catalog mappings separately from science tiles. The [Phase 2 solver settings](docs/phase-2.md#offline-solvers) include a separate ASTAP staging limit.
-- **Next action / responsibility:** Account for GUI/GPU and cache use in Phase 3C. The [Phase 3B worker tests](docs/phase-3b.md#verification) cover one desktop job, progress, and cancelled-job cleanup. Repeat bounded-render and cancellation checks in Phase 4 with 12 panels at 6000 × 4000 for FITS, TIFF, RGB, and mixed cases.
+- **Impact and evidence:** The one-worker FITS renderer enforces a combined tile reservation with no queue. A two-panel 3328 × 1536 render peaked at 89.0 MiB working set and 101.5 MiB commit with one OpenBLAS thread. An unhinted Gaia solve with the deep native index peaked at 1066 MiB working set and 281 MiB commit. The desktop preview of the same two-panel workload peaked at 226.7/259.8 MiB on OpenGL and 175.9/164.0 MiB on CPU for working set and commit. [Phase 1 rendering measurements](docs/phase-1.md#working-set-and-cancellation) · [Phase 2 solver measurements](docs/phase-2.md#windows-solver-evidence) · [Phase 3C preview measurements](docs/phase-3c.md#resource-check)
+- **Current assumption:** Default to 128-pixel render tiles, an estimated 64 MiB working buffer budget, and a 2048 MiB output limit. Reserve the active preview raster in the job budget and cap its longest edge at 512 pixels. Account for the display buffers, Qt framebuffers, and driver allocation separately. [TIFF](docs/phase-3a.md#sample-and-metadata-contract) reserves compressed-segment decode buffers as well as the requested window. Budget native catalog mappings separately from science tiles. The [Phase 2 solver settings](docs/phase-2.md#offline-solvers) include a separate ASTAP staging limit.
+- **Next action / responsibility:** Recheck the packaged GUI paths in Phase 3F. Repeat bounded-render and cancellation checks in Phase 4 with 12 panels at 6000 × 4000 for FITS, TIFF, RGB, and mixed cases.
 - **Closure condition:** Document initial defaults and over-budget behavior; verify bounded queues, temporary allocations, cancellation, and peak usage for a named workload. Revisit defaults during the Phase 4 large-mosaic benchmark.
 
 ### Q-005 - Application licensing and distribution model
@@ -57,11 +57,11 @@ This register tracks unresolved decisions, problems, and risks. It is not a work
 ### Q-009 - Dual FITS and TIFF workflows and camera RAW import
 
 - **Status / priority:** Open / P1
-- **Opened / updated:** 2026-11-15 / 2026-11-15
+- **Opened / updated:** 2026-11-15 / 2026-11-16
 - **Affected phase:** Dual FITS and TIFF workflows throughout phases 1-4; optional camera RAW import after a future scope decision.
 - **Impact and evidence:** The [Phase 3A Windows fixtures](docs/phase-3a.md#windows-evidence) verified mono and RGB TIFF import and export, including samples, channel order, WCS, and coverage. The [Phase 3B desktop workflow](docs/phase-3b.md#verification) reopens a mixed FITS/TIFF project and renders it to TIFF. Camera RAW is deferred as an import-only feature.
 - **Current assumption:** Provide first-class support for both scientific FITS panels and linear TIFF panels across the pipeline. If camera RAW is requested later, use an open-source linear decoder and preserve relevant sensor and color metadata.
-- **Next action / responsibility:** Carry the [linear TIFF contract](docs/phase-3a.md) through the desktop workflow and packaged Windows acceptance. Define and verify channel-specific calibration before enabling RGB photometric refinement. Revisit camera models and decoder compatibility when camera RAW import is requested.
+- **Next action / responsibility:** Carry the verified [FITS and TIFF preview/export workflow](docs/phase-3c.md#windows-verification) through packaged Windows acceptance. Define and verify channel-specific calibration before enabling RGB photometric refinement. Revisit camera models and decoder compatibility when camera RAW import is requested.
 - **Closure condition:** Validate FITS and TIFF sample integrity, metadata, memory, and reproducible import-to-mosaic workflows on Windows. If camera RAW is activated, establish separate acceptance criteria for the selected models.
 
 ### Q-010 - Foreground recognition, masks, and composition

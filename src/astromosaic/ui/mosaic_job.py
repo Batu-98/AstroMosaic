@@ -8,18 +8,18 @@ from time import monotonic
 from PySide6.QtCore import QObject, QThread, Signal
 
 from astromosaic.core.job import JobContext, MosaicCancelled
-from astromosaic.pipeline.mosaic import MosaicResult
-from astromosaic.storage.project import MosaicProject, render_project
+from astromosaic.display import DisplayFrame, normalize_preview
+from astromosaic.pipeline.mosaic import MosaicResult, PreviewFrame
+from astromosaic.storage.project import MosaicProject, preview_project, render_project
 
 
-class MosaicJob(QThread):
+class _ProjectJob[Result](QThread):
     progress = Signal(object, object)
 
-    def __init__(self, project: MosaicProject, destination: Path, parent: QObject) -> None:
+    def __init__(self, project: MosaicProject, parent: QObject) -> None:
         super().__init__(parent)
         self.project = project
-        self.destination = destination
-        self.result: MosaicResult | None = None
+        self.result: Result | None = None
         self.error: str | None = None
         self.cancelled = False
         self._cancel = Event()
@@ -36,13 +36,35 @@ class MosaicJob(QThread):
 
     def run(self) -> None:
         try:
-            self.result = render_project(
-                self.project, self.destination, JobContext(self._cancel.is_set, self._progress)
-            )
+            self.result = self.perform(JobContext(self._cancel.is_set, self._progress))
         except MosaicCancelled:
             self.cancelled = True
         except (OSError, RuntimeError, ValueError) as error:
             self.error = str(error)
         except Exception as error:
-            logging.getLogger(__name__).error("Unexpected mosaic error (%s).", type(error).__name__)
-            self.error = f"Unexpected rendering error ({type(error).__name__})."
+            logging.getLogger(__name__).error("Unexpected job error (%s).", type(error).__name__)
+            self.error = f"Unexpected job error ({type(error).__name__})."
+
+    def perform(self, context: JobContext) -> Result:
+        raise NotImplementedError
+
+
+class MosaicJob(_ProjectJob[MosaicResult]):
+    def __init__(self, project: MosaicProject, destination: Path, parent: QObject) -> None:
+        super().__init__(project, parent)
+        self.destination = destination
+
+    def perform(self, context: JobContext) -> MosaicResult:
+        return render_project(self.project, self.destination, context)
+
+
+class PreviewJob(_ProjectJob[DisplayFrame]):
+    proxy_ready = Signal(object)
+
+    def _publish_proxy(self, preview: PreviewFrame) -> None:
+        self.proxy_ready.emit(normalize_preview(preview))
+
+    def perform(self, context: JobContext) -> DisplayFrame:
+        frame = normalize_preview(preview_project(self.project, context, self._publish_proxy))
+        context.check_cancelled()
+        return frame

@@ -2,18 +2,25 @@
 
 import json
 import os
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, replace
 from importlib.metadata import version
 from math import isfinite
 from pathlib import Path
 from stat import S_ISREG
-from typing import Any
+from typing import Any, TypedDict
 
 from astromosaic.core import Region, SourceFingerprint
 from astromosaic.core.job import JobContext
 from astromosaic.geometry import tan_output_wcs
 from astromosaic.io.atomic import atomic_binary_file
-from astromosaic.pipeline.mosaic import MosaicResult, RenderSpec, render_mosaic
+from astromosaic.pipeline.mosaic import (
+    MosaicResult,
+    PreviewFrame,
+    RenderSpec,
+    preview_mosaic,
+    render_mosaic,
+)
 from astromosaic.pipeline.refinement import RefinementSpec
 
 _SCHEMA_VERSION = 1
@@ -87,24 +94,55 @@ class MosaicProject:
         return replace(self, panels=self.panels[:index] + (updated,) + self.panels[index + 1 :])
 
 
-def render_project(project: MosaicProject, destination: Path, context: JobContext) -> MosaicResult:
+class _PanelInputs(TypedDict):
+    paths: list[Path]
+    weights: list[float]
+    filter_name: str | None
+    assume_surface_brightness: bool
+    sky_masks: dict[int, Path]
+    wcs_sidecars: dict[int, Path]
+    refinement: RefinementSpec | None
+
+
+def _verified_inputs(project: MosaicProject, context: JobContext) -> _PanelInputs:
     for panel in project.panels:
         for role, reference in panel.references():
             context.check_cancelled()
             status = reference.status()
             if status != "Ready":
                 raise ValueError(f"{role} file is {status.lower()}: {reference.path.name}")
+    return {
+        "paths": [panel.source.path for panel in project.panels],
+        "weights": [panel.weight for panel in project.panels],
+        "filter_name": project.filter_name,
+        "assume_surface_brightness": project.assume_surface_brightness,
+        "sky_masks": {i: p.sky_mask.path for i, p in enumerate(project.panels) if p.sky_mask},
+        "wcs_sidecars": {
+            i: p.wcs_sidecar.path for i, p in enumerate(project.panels) if p.wcs_sidecar
+        },
+        "refinement": project.refinement,
+    }
+
+
+def render_project(project: MosaicProject, destination: Path, context: JobContext) -> MosaicResult:
     return render_mosaic(
-        [panel.source.path for panel in project.panels],
-        destination,
-        project.render,
-        weights=[panel.weight for panel in project.panels],
-        filter_name=project.filter_name,
-        assume_surface_brightness=project.assume_surface_brightness,
-        sky_masks={i: p.sky_mask.path for i, p in enumerate(project.panels) if p.sky_mask},
-        wcs_sidecars={i: p.wcs_sidecar.path for i, p in enumerate(project.panels) if p.wcs_sidecar},
-        refinement=project.refinement,
+        destination=destination,
+        spec=project.render,
         context=context,
+        **_verified_inputs(project, context),
+    )
+
+
+def preview_project(
+    project: MosaicProject,
+    context: JobContext,
+    on_proxy: Callable[[PreviewFrame], None] | None = None,
+) -> PreviewFrame:
+    return preview_mosaic(
+        spec=project.render,
+        context=context,
+        on_proxy=on_proxy,
+        **_verified_inputs(project, context),
     )
 
 

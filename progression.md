@@ -4,13 +4,13 @@ Use this file for concise development history and handoff state. Detailed techni
 
 ## Current State
 
-- **Last updated:** 2026-11-15
+- **Last updated:** 2026-11-16
 - **Active baseline:** Python-first architecture revision 3.6, with [Phase 3A–3F delivery stages](astro_mosaic_python_first_architecture_en.md#101-phase-3-delivery-stages). See [ADR-0003](docs/adr/0003-windows-first-platform-scope.md) for Windows scope, [ADR-0006](docs/adr/0006-dual-fits-and-tiff-workflow.md) for formats, and [ADR-0007](docs/adr/0007-sky-and-foreground-mosaics.md) for mixed panels.
-- **Current stage:** Phase 3B passed on Windows 11 x64. Project files and cancellable desktop jobs are available for linear FITS and TIFF. Linux and macOS support is deferred.
-- **Available artifacts:** [PySide6 project window](docs/phase-3b.md) and Qt-free CLI with offline solving, WCS sidecars, supplied sky masks, mono relative refinement, and float32 FITS/TIFF export. The existing [Phase 2 development bundle](docs/phase-2.md#windows-development-bundle) covers the FITS reference.
-- **Implementation / verification:** All 58 tests passed on Windows 11 x64 with native Qt, along with Ruff, mypy, Poetry lock validation, and documentation link checks. The [Phase 3B workflow](docs/phase-3b.md#verification) verified persistence, relinking, responsive progress, cancellation, and retry. The [Phase 3A fixtures](docs/phase-3a.md#windows-evidence) verify TIFF samples, WCS, and coverage.
-- **Version control:** Local `main` tracks `origin/main` in the private [AstroMosaic GitHub repository](https://github.com/Batu-98/AstroMosaic).
-- **Next action:** Start Phase 3C with a sky viewport, GPU and CPU preview paths, and preview/export geometry agreement.
+- **Current stage:** Phase 3C passed on Windows 11 x64. The desktop workflow previews and exports sky mosaics. Linux and macOS support is deferred.
+- **Available artifacts:** [OpenGL and CPU sky preview](docs/phase-3c.md), [PySide6 project persistence and jobs](docs/phase-3b.md), and a Qt-free CLI with offline solving, WCS sidecars, supplied sky masks, mono relative refinement, and float32 FITS/TIFF export. The [Phase 2 development bundle](docs/phase-2.md#windows-development-bundle) covers the FITS reference.
+- **Implementation / verification:** All 62 tests passed on Windows 11 x64 with native Qt and OpenGL enabled, along with Ruff, mypy, Poetry lock validation, and documentation link checks. The [Phase 3C checks](docs/phase-3c.md#windows-verification) include CPU fallback, 2× device scaling, and linear samples, coverage, and coordinates compared with reopened exports.
+- **Version control:** This Phase 3C snapshot follows the published Phase 3A and 3B snapshot `1e3a05d` on `main`. [AstroMosaic GitHub repository](https://github.com/Batu-98/AstroMosaic)
+- **Next action:** Start Phase 3D with foreground tag proposals and source-coordinate sky masks. Verify manual overrides, persistence, and exclusion of ground features from sky solving and fitting.
 - **Open dependencies:** Q-003 through Q-005, Q-009, and Q-010 track later numerical, resource, distribution, format, and mixed-panel gates. Q-008 tracks deferred platforms and Q-011 tracks deferred visual fill. Q-006 and Q-007 are resolved for the Windows solver and FITS export references.
 
 ## Phase Overview
@@ -25,7 +25,7 @@ The table is a status summary, not a replacement for the full exit gates in Sect
 | 2 - Robust astronomy engine | Complete | Verified local Gaia/ASTAP fallback, supplied sky masks, anchored overlap registration and stellar gains, offset/plane selection, held-out and injected-signal gates, and weak/disconnected diagnostics on Windows. |
 | 3A - Linear TIFF | Complete | Mono/RGB input and output verified on Windows for samples, channels, WCS, and coverage. |
 | 3B - Projects and jobs | Complete | Project save/reopen, panel relinking, responsive progress, and cancellation verified on native Windows Qt. |
-| 3C - Preview and export | Not started | First usable sky-mosaic desktop workflow, with shared preview/export geometry and GPU/CPU paths. |
+| 3C - Preview and export | Complete | Verified shared preview/export geometry, pan and zoom, display-only stretch, and GPU/CPU fallback on Windows. |
 | 3D - Sky masks | Not started | Automatic proposals and manual tag/mask edits that survive project reopen. |
 | 3E - Foreground and composition | Not started | Independent layer alignment and export, plus saved placement, overlap, and crop edits. |
 | 3F - Windows acceptance | Not started | Packaged FITS/TIFF workflows, recovery, cancellation cleanup, and CPU fallback verified. |
@@ -220,6 +220,32 @@ The table is a status summary, not a replacement for the full exit gates in Sect
 - **Verified:** All 58 tests passed on native Windows Qt. The desktop test saved and reopened a mixed-format project, relinked a moved panel, and rendered with its saved WCS and sky mask. A GUI timer fired during the live job. Cancellation and closing removed partial output, and the cancelled render could be retried successfully.
 - **Related:** [Phase 3B evidence](docs/phase-3b.md), [ADR-0012](docs/adr/0012-project-manifest-and-render-worker.md), Q-004, and Q-009.
 - **Next:** Add the interactive sky preview and compare its geometry with export in Phase 3C.
+
+### 2026-11-15 - Repository update - Published the Phase 3A and 3B snapshot
+
+- **Changed:** Committed the linear TIFF workflow, project manifests, desktop jobs, and their documentation as `1e3a05d`.
+- **Verified:** All 58 tests, Ruff lint and format checks, mypy, and Poetry lock validation passed. `git ls-remote` confirmed that `origin/main` points to `1e3a05d`.
+- **Next:** Implement the Phase 3C sky preview against the cropped export grid.
+
+### 2026-11-16 - Phase 3C - Implemented the sky preview and export workflow
+
+- **Changed:** Shared the cropped TAN sampling path between export and the preview worker. Added a progressive viewport with pan, cursor-centered zoom, and a display-only stretch on OpenGL and CPU.
+- **Verified:** Reopened the cropped FITS and RGB TIFF outputs and compared their linear samples and coverage with the matching preview samples. Both display paths agreed within one 8-bit level on the native Windows framebuffer fixture. Using typed OpenGL uniform functions corrected a float uniform dispatch error exposed by that check.
+- **Related:** Q-003, Q-004, and Q-009.
+- **Next:** Run the full Windows regression suite and record the desktop memory and fallback checks.
+
+### 2026-11-16 - Phase 3C - Completed: Windows sky preview and export gate
+
+- **Changed:** Documented the viewport and shared export geometry. Set the preview's longest edge to 512 pixels, with a 160-pixel first pass for larger grids.
+- **Verified:** All 62 tests passed on Windows 11 x64 with native OpenGL enabled. Focused checks passed at 2× device scale and on the offscreen CPU path. Ruff, mypy, Poetry lock validation, and local documentation links passed. Reviewed the native desktop capture and measured both display backends on the two-panel FITS workload.
+- **Related:** [Phase 3C evidence](docs/phase-3c.md), [ADR-0013](docs/adr/0013-shared-preview-grid.md), Q-003, Q-004, and Q-009. Packaged acceptance remains in Phase 3F.
+- **Next:** Start Phase 3D with foreground tags, source-coordinate masks, and tests for editing, reopening, and sky processing.
+
+### 2026-11-16 - Repository update - Prepared the Phase 3C publication
+
+- **Changed:** Prepared the shared sky preview and export snapshot for `main`.
+- **Verified:** Re-ran all 62 tests on native Windows Qt with OpenGL required. Ruff lint and format checks, mypy, and Poetry lock validation passed.
+- **Next:** Confirm the remote revision, then implement Phase 3D foreground tags and sky masks.
 
 ## Entry Template
 

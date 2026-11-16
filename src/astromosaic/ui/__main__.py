@@ -10,9 +10,10 @@ def main() -> int:
 
     from astromosaic.ui.project_window import ProjectWindow
 
-    app = QApplication(sys.argv)
+    use_gpu = "--cpu-preview" not in sys.argv[1:]
+    app = QApplication([arg for arg in sys.argv if arg != "--cpu-preview"])
     app.setApplicationName("AstroMosaic")
-    window = ProjectWindow()
+    window = ProjectWindow(use_gpu=use_gpu)
     window.show()
     return app.exec()
 

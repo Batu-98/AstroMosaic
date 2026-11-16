@@ -15,10 +15,12 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QProgressBar,
     QPushButton,
+    QSplitter,
     QVBoxLayout,
     QWidget,
 )
 
+from astromosaic.display import DisplayFrame
 from astromosaic.storage.project import (
     FileReference,
     MosaicProject,
@@ -26,8 +28,9 @@ from astromosaic.storage.project import (
     load_project,
     save_project,
 )
-from astromosaic.ui.mosaic_job import MosaicJob
+from astromosaic.ui.mosaic_job import MosaicJob, PreviewJob
 from astromosaic.ui.project_settings import PANEL_FILES, PanelSettings, ProjectSettings
+from astromosaic.ui.sky_viewport import SkyViewport
 
 _PROJECT_FILTER = "AstroMosaic project (*.astromosaic)"
 _TIFF_FILTER = "TIFF mosaic (*.tiff *.tif)"
@@ -36,15 +39,16 @@ _Button = QMessageBox.StandardButton
 
 
 class ProjectWindow(QMainWindow):
-    def __init__(self) -> None:
+    def __init__(self, *, use_gpu: bool = True) -> None:
         super().__init__()
         self.project = MosaicProject()
         self._saved = self.project
         self.project_path: Path | None = None
-        self.job: MosaicJob | None = None
+        self.job: MosaicJob | PreviewJob | None = None
+        self._preview_project: MosaicProject | None = None
         self._close_after_job = False
         self.setWindowTitle("AstroMosaic")
-        self.resize(760, 460)
+        self.resize(1040, 780)
         self.setMinimumWidth(630)
 
         file_menu = self.menuBar().addMenu("&File")
@@ -60,6 +64,10 @@ class ProjectWindow(QMainWindow):
         layout = QVBoxLayout(body)
         layout.setContentsMargins(20, 16, 20, 16)
         layout.setSpacing(12)
+        splitter = QSplitter(Qt.Orientation.Vertical)
+        splitter.setChildrenCollapsible(False)
+        self.viewport = SkyViewport(use_gpu=use_gpu)
+        splitter.addWidget(self.viewport)
         self._editor = QWidget(body)
         controls = QVBoxLayout(self._editor)
         controls.setContentsMargins(0, 0, 0, 0)
@@ -81,7 +89,11 @@ class ProjectWindow(QMainWindow):
         buttons.addStretch()
         controls.addLayout(buttons)
         self.panels.currentRowChanged.connect(self._selection_changed)
-        layout.addWidget(self._editor, 1)
+        splitter.addWidget(self._editor)
+        splitter.setStretchFactor(0, 4)
+        splitter.setStretchFactor(1, 1)
+        splitter.setSizes([500, 150])
+        layout.addWidget(splitter, 1)
 
         self.grid_summary = QLabel()
         self.grid_summary.setWordWrap(True)
@@ -89,12 +101,15 @@ class ProjectWindow(QMainWindow):
         actions = QHBoxLayout()
         self.settings_button = QPushButton("Mosaic Settings…")
         self.settings_button.clicked.connect(self._settings)
-        self.start_button = QPushButton("Run Mosaic…")
+        self.preview_button = QPushButton("Build Preview")
+        self.preview_button.clicked.connect(self._preview)
+        self.start_button = QPushButton("Export Mosaic…")
         self.start_button.clicked.connect(self._start)
         self.cancel_button = QPushButton("Cancel Job")
         self.cancel_button.clicked.connect(self._cancel)
         actions.addWidget(self.settings_button)
         actions.addStretch()
+        actions.addWidget(self.preview_button)
         actions.addWidget(self.start_button)
         actions.addWidget(self.cancel_button)
         layout.addLayout(actions)
@@ -112,9 +127,11 @@ class ProjectWindow(QMainWindow):
 
     def _refresh(self, selected: int = -1) -> None:
         self.panels.clear()
+        linked = True
         for panel in self.project.panels:
             statuses = [(role, reference.status()) for role, reference in panel.references()]
             attention = [f"{role} {value.lower()}" for role, value in statuses if value != "Ready"]
+            linked &= not attention
             detail = ", ".join(attention) or "Linked"
             item = QListWidgetItem(
                 f"{panel.source.path.name}  ·  Weight {panel.weight:g}  ·  {detail}"
@@ -125,6 +142,10 @@ class ProjectWindow(QMainWindow):
             self.panels.addItem(item)
         if self.project.panels:
             self.panels.setCurrentRow(max(0, min(selected, self.panels.count() - 1)))
+        if self._preview_project is not None and (
+            self._preview_project != self.project or not linked
+        ):
+            self._clear_preview()
         self._selection_changed()
         name = self.project_path.name if self.project_path else "Untitled"
         marker = "*" if self.project != self._saved else ""
@@ -137,6 +158,7 @@ class ProjectWindow(QMainWindow):
             f"  ·  {region.width} × {region.height} px  ·  {spec.scale_arcsec:g} arcsec/px"
         )
         self.start_button.setEnabled(bool(self.project.panels) and self.job is None)
+        self.preview_button.setEnabled(bool(self.project.panels) and self.job is None)
         self.cancel_button.setEnabled(self.job is not None)
 
     def _selection_changed(self) -> None:
@@ -157,6 +179,7 @@ class ProjectWindow(QMainWindow):
         return response == _Button.Discard or (response == _Button.Save and self._save())
 
     def _set_project(self, project: MosaicProject, path: Path | None) -> None:
+        self._clear_preview()
         self.project = self._saved = project
         self.project_path = path
         self.progress.setValue(0)
@@ -313,12 +336,33 @@ class ProjectWindow(QMainWindow):
         path = Path(name)
         if not path.suffix:
             path = path.with_suffix(".fits" if selected == _FITS_FILTER else ".tiff")
-        self.job = job = MosaicJob(self.project, path, self)
+        self._launch_job(MosaicJob(self.project, path, self), "Preparing mosaic…")
+
+    def _clear_preview(self) -> None:
+        self._preview_project = None
+        self.viewport.set_frame(None)
+
+    def _preview(self) -> None:
+        if self.job is not None or not self.project.panels:
+            return
+        self._clear_preview()
+        self._preview_project = self.project
+        job = PreviewJob(self.project, self)
+        job.proxy_ready.connect(self._show_proxy)
+        self._launch_job(job, "Preparing sky preview…")
+
+    @Slot(object)
+    def _show_proxy(self, frame: DisplayFrame) -> None:
+        if self.sender() is self.job and self.cancel_button.isEnabled():
+            self.viewport.set_frame(frame)
+
+    def _launch_job(self, job: MosaicJob | PreviewJob, message: str) -> None:
+        self.job = job
         job.progress.connect(self._progress)
         job.finished.connect(self._finished)
         self._set_running(True)
         self.progress.setValue(0)
-        self.status.setText("Preparing mosaic…")
+        self.status.setText(message)
         job.start()
 
     def _set_running(self, running: bool) -> None:
@@ -327,20 +371,24 @@ class ProjectWindow(QMainWindow):
         self._editor.setEnabled(not running)
         self.settings_button.setEnabled(not running)
         self.start_button.setEnabled(not running and bool(self.project.panels))
+        self.preview_button.setEnabled(not running and bool(self.project.panels))
         self.cancel_button.setEnabled(running)
 
     @Slot(object, object)
     def _progress(self, done: int, total: int) -> None:
         self.progress.setValue((100 * done) // total)
         if self.cancel_button.isEnabled():
-            self.status.setText(f"Rendering {done:,} / {total:,} pixels.")
+            action = "Previewing" if isinstance(self.job, PreviewJob) else "Rendering"
+            self.status.setText(f"{action} {done:,} / {total:,} pixels.")
 
     @Slot()
     def _finished(self) -> None:
         job, self.job = self.job, None
         assert job is not None
         self._set_running(False)
-        if job.result is not None:
+        if isinstance(job, PreviewJob):
+            self._finish_preview(job)
+        elif job.result is not None:
             self.progress.setValue(100)
             self.status.setText(
                 f"Saved {job.destination.name} · {job.result.covered_pixels:,} covered pixels."
@@ -357,11 +405,31 @@ class ProjectWindow(QMainWindow):
             self._close_after_job = False
             QTimer.singleShot(0, self.close)
 
+    def _finish_preview(self, job: PreviewJob) -> None:
+        if job.result is not None:
+            self.viewport.set_frame(job.result)
+            self.progress.setValue(100)
+            width, height = job.result.size
+            self.status.setText(
+                f"Sky preview · {width} × {height} samples."
+                if job.result.has_coverage
+                else "No sky coverage at this preview resolution."
+            )
+        else:
+            self._clear_preview()
+            self.progress.setValue(0)
+            if job.cancelled:
+                self.status.setText("Preview cancelled.")
+            else:
+                self.status.setText(f"Preview failed. {job.error or 'No result was returned.'}")
+                self._refresh(self.panels.currentRow())
+
     def _cancel(self) -> None:
         if self.job is not None:
             self.job.cancel()
             self.cancel_button.setEnabled(False)
-            self.status.setText("Cancelling mosaic…")
+            action = "preview" if isinstance(self.job, PreviewJob) else "mosaic"
+            self.status.setText(f"Cancelling {action}…")
 
     def _error(self, title: str, error: Exception) -> None:
         box = QMessageBox(self)
