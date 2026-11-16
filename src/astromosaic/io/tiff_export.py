@@ -11,12 +11,19 @@ from tifffile import TiffWriter
 from astromosaic.io import TIFF_SUFFIXES
 from astromosaic.io.atomic import atomic_binary_file
 from astromosaic.io.raster import RasterMosaicWriter
-from astromosaic.io.tiff import DESCRIPTION_LIMIT, DESCRIPTION_VERSION
+from astromosaic.io.tiff import COMPOSITION_VERSION, DESCRIPTION_LIMIT, DESCRIPTION_VERSION
 
 
 @contextmanager
 def open_tiff_mosaic(
-    path: Path, width: int, height: int, channels: int, header: fits.Header, max_output_bytes: int
+    path: Path,
+    width: int,
+    height: int,
+    channels: int,
+    header: fits.Header,
+    max_output_bytes: int,
+    *,
+    layers: bool = False,
 ) -> Iterator[RasterMosaicWriter]:
     path = path.absolute()
     if path.suffix.lower() not in TIFF_SUFFIXES:
@@ -25,10 +32,13 @@ def open_tiff_mosaic(
         raise ValueError("Expected mono or RGB channels for TIFF export.")
     if min(width, height) < 1 or max(width, height) >= 2**32:
         raise ValueError("The mosaic dimensions exceed the supported TIFF range.")
-    description = DESCRIPTION_VERSION + header.tostring(sep="\n", padding=False)
+    description = (COMPOSITION_VERSION if layers else DESCRIPTION_VERSION) + header.tostring(
+        sep="\n", padding=False
+    )
     if len(description) > DESCRIPTION_LIMIT:
         raise ValueError("The TIFF mosaic metadata exceeds its size limit.")
-    raster_bytes = width * height * (4 * channels + 1)
+    subimages = 2 if layers else 1
+    raster_bytes = width * height * (4 * channels + subimages)
     if raster_bytes + len(description) > max_output_bytes:
         raise ValueError("The TIFF mosaic exceeds the configured output byte limit.")
     free = disk_usage(path.parent).free
@@ -39,7 +49,7 @@ def open_tiff_mosaic(
     shape = (height, width, 3) if rgb else (height, width)
     bigtiff = raster_bytes + len(description) >= 2**32 - 4096
     with atomic_binary_file(path) as stream:
-        # The writer reserves both rasters on disk and returns their byte offsets.
+        # The writer reserves the rasters on disk and returns their byte offsets.
         with TiffWriter(stream, byteorder="<", bigtiff=bigtiff) as tiff:
             science = tiff.write(
                 None,
@@ -49,22 +59,29 @@ def open_tiff_mosaic(
                 planarconfig="contig" if rgb else None,
                 metadata=None,
                 description=description,
-                subifds=1,
+                subifds=subimages,
                 returnoffset=True,
             )
-            coverage = tiff.write(
-                None,
-                shape=(height, width),
-                dtype="uint8",
-                photometric="minisblack",
-                metadata=None,
-                returnoffset=True,
-            )
-        if science is None or coverage is None:
-            raise RuntimeError("Could not reserve contiguous TIFF science and coverage rasters.")
+            offsets = []
+            for _ in range(subimages):
+                raster = tiff.write(
+                    None,
+                    shape=(height, width),
+                    dtype="uint8",
+                    photometric="minisblack",
+                    metadata=None,
+                    returnoffset=True,
+                )
+                if raster is None:
+                    raise RuntimeError("Could not reserve contiguous TIFF mask rasters.")
+                offsets.append(raster[0])
+        if science is None:
+            raise RuntimeError("Could not reserve a contiguous TIFF science raster.")
         size = stream.seek(0, 2)
         if size > max_output_bytes:
             raise ValueError("The TIFF mosaic exceeds the configured output byte limit.")
         if size > free:
             raise OSError("There is insufficient disk space for the TIFF mosaic.")
-        yield RasterMosaicWriter(stream, width, science[0], coverage[0], "<f4")
+        yield RasterMosaicWriter(
+            stream, width, science[0], offsets[0], "<f4", offsets[1] if layers else None
+        )

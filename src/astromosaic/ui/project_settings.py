@@ -22,9 +22,15 @@ from PySide6.QtWidgets import (
 
 from astromosaic.core import Region
 from astromosaic.core.masks import ForegroundTag
+from astromosaic.geometry.image import CompositionSpec, LayerPlacement
 from astromosaic.pipeline.mosaic import RenderSpec
 from astromosaic.pipeline.refinement import RefinementSpec
-from astromosaic.storage.project import FileReference, MosaicProject, ProjectPanel
+from astromosaic.storage.project import (
+    FileReference,
+    MosaicProject,
+    ProjectPanel,
+    default_composition,
+)
 
 PANEL_FILES = "Linear panels (*.fits *.fit *.fts *.tif *.tiff);;All files (*)"
 _OVERRIDES: tuple[ForegroundTag | None, ...] = (None, "mixed", "sky-only")
@@ -134,6 +140,12 @@ class PanelSettings(_SettingsDialog):
         )
         self.foreground_override.setCurrentIndex(_OVERRIDES.index(panel.foreground_override))
         self.form.addRow("Foreground tag", self.foreground_override)
+        self.include_sky = QCheckBox("Include in sky layer")
+        self.include_sky.setToolTip(
+            "Clear this to use the panel's foreground while its sky has no solution."
+        )
+        self.include_sky.setChecked(panel.include_sky)
+        self.form.addRow(self.include_sky)
         self.wcs = self._attachment("WCS sidecar", panel.wcs_sidecar, "WCS sidecar (*.json)")
         self.sky_mask = self._attachment(
             "FITS sky mask", panel.sky_mask, "FITS image (*.fits *.fit *.fts)"
@@ -182,4 +194,43 @@ class PanelSettings(_SettingsDialog):
             sky_mask=sky_mask,
             source_mask=None if sky_mask is not None else self.panel.source_mask,
             foreground_override=_OVERRIDES[self.foreground_override.currentIndex()],
+            include_sky=self.include_sky.isChecked(),
         )
+
+
+class CompositionSettings(_SettingsDialog):
+    def __init__(self, project: MosaicProject, parent: QWidget) -> None:
+        super().__init__("Composition settings", parent)
+        self.project = project
+        self.initial = spec = default_composition(project)
+        self.x_offset = self.field("Foreground X in sky grid (px)", spec.placement.offset[0])
+        self.y_offset = self.field("Foreground Y in sky grid (px)", spec.placement.offset[1])
+        self.rotation = self.field("Foreground rotation (°)", spec.placement.rotation_deg)
+        self.scale = self.field("Foreground scale", spec.placement.scale)
+        self.seam_y = self.field("Seam row in sky grid (px)", spec.seam_y)
+        self.overlap = self.field("Overlap (% of shorter layer)", spec.overlap_percent)
+        self.crop = self.field("Sky rows to crop from bottom", spec.sky_crop_bottom)
+        self.buttons()
+
+    def settings(self) -> CompositionSpec:
+        placement = LayerPlacement(
+            (float(self.x_offset.text()), float(self.y_offset.text())),
+            float(self.rotation.text()),
+            float(self.scale.text()),
+        )
+        seam = float(self.seam_y.text())
+        spec = replace(
+            self.initial,
+            placement=placement,
+            seam_y=seam,
+            overlap_percent=float(self.overlap.text()),
+            sky_crop_bottom=int(self.crop.text()),
+        )
+        if placement != self.initial.placement or seam != self.initial.seam_y:
+            spec = replace(spec, reference_panel=None, placement_rms_px=None)
+        sky = self.project.render.output_region()
+        ground = self.project.current_foreground()
+        if ground is None:
+            raise ValueError("Align the current foreground panels first.")
+        spec.frame((sky.width, sky.height), (ground.canvas.width, ground.canvas.height))
+        return spec

@@ -135,6 +135,7 @@ def _run_mosaic(arguments: argparse.Namespace) -> tuple[dict[str, object], int]:
     except RefinementRejected as error:
         return {"status": error.report.status, "refinement": asdict(error.report)}, 1
     payload = asdict(result)
+    del payload["common_pixels"]
     if result.refinement is None:
         del payload["refinement"]
     return payload, 0

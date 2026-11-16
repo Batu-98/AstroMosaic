@@ -6,18 +6,26 @@ from dataclasses import dataclass, replace
 from importlib.metadata import version
 from math import isfinite
 from pathlib import Path
+from typing import Protocol
 
 import numpy as np
 from astropy import units as u
 from astropy.coordinates import ICRS
 from astropy.io import fits
 from astropy.wcs import WCS
+from numpy.typing import NDArray
 
 from astromosaic.core import Region, SourceFingerprint, Tile
 from astromosaic.core.job import DEFAULT_JOB_CONTEXT
 from astromosaic.core.job import JobContext as JobContext
 from astromosaic.core.job import MosaicCancelled as MosaicCancelled
-from astromosaic.geometry import PanelGeometry, TileSky, read_panel_geometry, tan_output_wcs
+from astromosaic.geometry import (
+    PanelGeometry,
+    TileSky,
+    raster_pixels,
+    read_panel_geometry,
+    tan_output_wcs,
+)
 from astromosaic.io import TIFF_SUFFIXES, PanelSource, SkyMask, open_panel
 from astromosaic.io.fits_export import open_fits_mosaic
 from astromosaic.photometry import PanelCorrection
@@ -70,6 +78,7 @@ class MosaicResult:
     rejected_coordinates: int
     backend: str = "cpu"
     refinement: RefinementReport | None = None
+    common_pixels: int | None = None
 
 
 @dataclass(frozen=True, slots=True, eq=False)
@@ -78,8 +87,23 @@ class PreviewFrame:
 
     tile: Tile
     output_size: tuple[int, int]
-    output_wcs: WCS
+    output_wcs: WCS | None
     peak_reserved_bytes: int
+    common_coverage: NDArray[np.bool_] | None = None
+    seam_width: float | None = None
+
+
+class _RasterPanel(Protocol):
+    @property
+    def source(self) -> PanelSource: ...
+    @property
+    def weight(self) -> float: ...
+    @property
+    def correction(self) -> PanelCorrection | None: ...
+
+
+type _Coordinates = tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.bool_]]
+type _Scale = tuple[float, float]
 
 
 @dataclass(frozen=True, slots=True)
@@ -91,10 +115,13 @@ class _Panel:
     correction: PanelCorrection | None = None
 
 
-def _export_header(
-    target: WCS, panels: Sequence[_Panel], declared_filter: str | None, assume_brightness: bool
-) -> fits.Header:
-    descriptors = [panel.source.descriptor for panel in panels]
+def _set_calibration(
+    header: fits.Header,
+    sources: Sequence[PanelSource],
+    declared_filter: str | None,
+    assume_brightness: bool,
+) -> None:
+    descriptors = [source.descriptor for source in sources]
     declared_filter = declared_filter.strip() if declared_filter is not None else None
     band = declared_filter or descriptors[0].filter_name
     if not band or any((panel.filter_name or declared_filter) != band for panel in descriptors):
@@ -108,21 +135,27 @@ def _export_header(
         raise ValueError("Per-pixel units require an area-aware conversion before mosaicking.")
     brightness_units = (u.Jy / u.sr, u.W / (u.m**2 * u.sr), u.W / (u.m**2 * u.nm * u.sr))
     if not assume_brightness and (
-        len(units) != len(panels)
+        len(units) != len(sources)
         or not any(units[0].is_equivalent(candidate) for candidate in brightness_units)
     ):
         raise ValueError("Expected a surface-brightness BUNIT or --assume-surface-brightness.")
 
-    header = target.to_header()
     header["FILTER"] = band
     if labels:
         header["BUNIT"] = labels[0]
-    header.add_history(f"AstroMosaic {version('astromosaic')}: CPU ICRS TAN reprojection.")
-    header.add_history("Bilinear valid support; normalized panel weights; linear float32.")
     if assume_brightness:
         header.add_history("User declared a common surface-brightness scale for all panels.")
     if declared_filter:
         header.add_history("User provided FILTER for panels with missing filter metadata.")
+
+
+def _export_header(
+    target: WCS, panels: Sequence[_Panel], declared_filter: str | None, assume_brightness: bool
+) -> fits.Header:
+    header = target.to_header()
+    _set_calibration(header, [panel.source for panel in panels], declared_filter, assume_brightness)
+    header.add_history(f"AstroMosaic {version('astromosaic')}: CPU ICRS TAN reprojection.")
+    header.add_history("Bilinear valid support; normalized panel weights; linear float32.")
     for index, panel in enumerate(panels, start=1):
         fingerprint = panel.source.descriptor.fingerprint
         header.add_history(
@@ -153,6 +186,8 @@ def _export_header(
 class _RenderedTile:
     tile: Tile
     rejected_coordinates: int
+    contributions: NDArray[np.uint8] | None = None
+    common_coverage: NDArray[np.bool_] | None = None
 
 
 @dataclass(slots=True)
@@ -167,14 +202,13 @@ class _WorkingBudget:
         return True
 
 
-def _try_tile(
+def _try_tile[P: _RasterPanel](
     region: Region,
-    target: PanelGeometry,
-    panels: Sequence[_Panel],
+    panels: Sequence[P],
+    make_mapper: Callable[[], Callable[[P], _Coordinates]],
     budget: _WorkingBudget,
     context: JobContext,
     channels: int,
-    raster_scale: tuple[float, float],
 ) -> _RenderedTile | None:
     count = region.width * region.height
     output_bytes = _TILE_FIXED_BYTES + count * (_OUTPUT_BYTES_PER_PIXEL + 64 * (channels - 1))
@@ -182,16 +216,14 @@ def _try_tile(
         return None
 
     rejected = 0
-    sky = TileSky.from_output(target, region, raster_scale)
+    map_panel = make_mapper()
     numerator = np.zeros((count, channels), dtype=np.float64)
     denominator = np.zeros(count, dtype=np.float64)
     weight_scale = np.zeros(count, dtype=np.float64)
     for panel in panels:
         context.check_cancelled()
         correction = panel.correction
-        px, py, usable = sky.in_panel(
-            panel.geometry, correction.shift if correction else (0.0, 0.0)
-        )
+        px, py, usable = map_panel(panel)
         rejected += count - int(np.count_nonzero(usable))
         descriptor = panel.source.descriptor
         window = source_window(px, py, usable, descriptor.width, descriptor.height)
@@ -245,22 +277,46 @@ def _split(region: Region) -> tuple[Region, Region]:
     )
 
 
+type _TileRenderer = Callable[[Region, _Scale, _WorkingBudget, JobContext], _RenderedTile | None]
+
+
 def _fit_tile(
     region: Region,
-    target: PanelGeometry,
-    panels: Sequence[_Panel],
+    render_tile: _TileRenderer,
     budget: _WorkingBudget,
     context: JobContext,
-    channels: int,
-    scale: tuple[float, float],
+    scale: _Scale,
 ) -> Iterator[_RenderedTile]:
     context.check_cancelled()
-    rendered = _try_tile(region, target, panels, budget, context, channels, scale)
+    rendered = render_tile(region, scale, budget, context)
     if rendered is not None:
         yield rendered
         return
     for smaller in _split(region):
-        yield from _fit_tile(smaller, target, panels, budget, context, channels, scale)
+        yield from _fit_tile(smaller, render_tile, budget, context, scale)
+
+
+@dataclass(frozen=True, slots=True)
+class _RasterPlan:
+    render_tile: _TileRenderer
+    panel_count: int
+    channels: int
+    header: fits.Header
+    size: tuple[int, int]
+    spec: RenderSpec
+    output_wcs: WCS | None = None
+    refinement: RefinementReport | None = None
+    seam_width: float | None = None
+
+    def tiles(
+        self, width: int, height: int, budget: _WorkingBudget, context: JobContext
+    ) -> Iterator[_RenderedTile]:
+        scale = (self.size[0] / width, self.size[1] / height)
+        step = self.spec.tile_size
+        for y in range(0, height, step):
+            for x in range(0, width, step):
+                region = Region(x, y, min(step, width - x), min(step, height - y))
+                yield from _fit_tile(region, self.render_tile, budget, context, scale)
 
 
 @dataclass(frozen=True, slots=True)
@@ -273,17 +329,47 @@ class _PreparedMosaic:
     spec: RenderSpec
     refinement: RefinementReport | None
 
-    def tiles(
-        self, width: int, height: int, budget: _WorkingBudget, context: JobContext
-    ) -> Iterator[_RenderedTile]:
-        scale = (self.size[0] / width, self.size[1] / height)
-        step = self.spec.tile_size
-        for y in range(0, height, step):
-            for x in range(0, width, step):
-                region = Region(x, y, min(step, width - x), min(step, height - y))
-                yield from _fit_tile(
-                    region, self.target, self.panels, budget, context, self.channels, scale
+    def try_tile(
+        self,
+        region: Region,
+        scale: _Scale,
+        budget: _WorkingBudget,
+        context: JobContext,
+        *,
+        origin: tuple[int, int] = (0, 0),
+        sky_height: int | None = None,
+    ) -> _RenderedTile | None:
+        def make_mapper() -> Callable[[_Panel], _Coordinates]:
+            x, y = raster_pixels(region, scale, origin)
+            sky = TileSky.from_pixels(self.target, x, y)
+            inside = None
+            if sky_height is not None:
+                inside = (
+                    (x >= -0.5) & (x < self.size[0] - 0.5) & (y >= -0.5) & (y < sky_height - 0.5)
                 )
+
+            def locate(panel: _Panel) -> _Coordinates:
+                shift = panel.correction.shift if panel.correction else (0.0, 0.0)
+                px, py, usable = sky.in_panel(panel.geometry, shift)
+                if inside is not None:
+                    usable &= inside
+                return px, py, usable
+
+            return locate
+
+        return _try_tile(region, self.panels, make_mapper, budget, context, self.channels)
+
+    def raster(self) -> _RasterPlan:
+        return _RasterPlan(
+            self.try_tile,
+            len(self.panels),
+            self.channels,
+            self.header,
+            self.size,
+            self.spec,
+            self.target.wcs,
+            self.refinement,
+        )
 
 
 @contextmanager
@@ -399,8 +485,6 @@ def render_mosaic(
     context: JobContext = DEFAULT_JOB_CONTEXT,
 ) -> MosaicResult:
     """Reproject original linear samples and publish the finished mosaic on success."""
-    budget = _WorkingBudget(spec.max_working_bytes)
-    covered = completed = tiles = rejected = 0
     with _prepare_mosaic(
         paths,
         spec,
@@ -413,41 +497,55 @@ def render_mosaic(
         refinement=refinement,
         context=context,
     ) as mosaic:
-        width, height = mosaic.size
-        total = width * height
-        if destination.suffix.lower() in TIFF_SUFFIXES:
-            from astromosaic.io.tiff_export import open_tiff_mosaic
+        return _write_raster(mosaic.raster(), destination, context)
 
-            writer_context = open_tiff_mosaic(
-                destination, width, height, mosaic.channels, mosaic.header, spec.max_output_bytes
-            )
-        else:
-            writer_context = open_fits_mosaic(
-                destination, width, height, mosaic.header, spec.max_output_bytes
-            )
-        with writer_context as writer:
-            for rendered in mosaic.tiles(width, height, budget, context):
-                writer.write(rendered.tile)
-                covered += int(np.count_nonzero(rendered.tile.valid))
-                completed += rendered.tile.region.width * rendered.tile.region.height
-                rejected += rendered.rejected_coordinates
-                tiles += 1
-                del rendered
-                if context.on_progress is not None:
-                    context.on_progress(completed, total)
-            context.check_cancelled()
-            if not covered:
-                raise ValueError("The requested output grid has no valid input coverage.")
+
+def _write_raster(mosaic: _RasterPlan, destination: Path, context: JobContext) -> MosaicResult:
+    width, height = mosaic.size
+    total = width * height
+    layers = mosaic.seam_width is not None
+    max_bytes = mosaic.spec.max_output_bytes
+    budget = _WorkingBudget(mosaic.spec.max_working_bytes)
+    covered = completed = tiles = rejected = common = 0
+    context.check_cancelled()
+    if destination.suffix.lower() in TIFF_SUFFIXES:
+        from astromosaic.io.tiff_export import open_tiff_mosaic
+
+        writer_context = open_tiff_mosaic(
+            destination, width, height, mosaic.channels, mosaic.header, max_bytes, layers=layers
+        )
+    else:
+        if mosaic.channels != 1:
+            raise ValueError("RGB mosaics require TIFF output.")
+        writer_context = open_fits_mosaic(
+            destination, width, height, mosaic.header, max_bytes, layers=layers
+        )
+    with writer_context as writer:
+        for rendered in mosaic.tiles(width, height, budget, context):
+            writer.write(rendered.tile, rendered.contributions)
+            covered += int(np.count_nonzero(rendered.tile.valid))
+            if rendered.common_coverage is not None:
+                common += int(np.count_nonzero(rendered.common_coverage))
+            completed += rendered.tile.region.width * rendered.tile.region.height
+            rejected += rendered.rejected_coordinates
+            tiles += 1
+            del rendered
+            if context.on_progress is not None:
+                context.on_progress(completed, total)
+        context.check_cancelled()
+        if not covered:
+            raise ValueError("The requested output grid has no valid input coverage.")
 
     return MosaicResult(
         width,
         height,
         covered,
-        len(mosaic.panels),
+        mosaic.panel_count,
         tiles,
         budget.peak,
         rejected,
         refinement=mosaic.refinement,
+        common_pixels=common if layers else None,
     )
 
 
@@ -458,10 +556,11 @@ def _bounded_size(size: tuple[int, int], edge: int) -> tuple[int, int]:
 
 
 def _preview_frame(
-    mosaic: _PreparedMosaic, size: tuple[int, int], context: JobContext, completed: int, total: int
+    mosaic: _RasterPlan, size: tuple[int, int], context: JobContext, completed: int, total: int
 ) -> PreviewFrame:
     width, height = size
-    frame_bytes = width * height * (4 * mosaic.channels + 1)
+    has_layers = mosaic.seam_width is not None
+    frame_bytes = width * height * (4 * mosaic.channels + 1 + int(has_layers))
     budget = _WorkingBudget(mosaic.spec.max_working_bytes - frame_bytes)
     if budget.limit < _TILE_FIXED_BYTES:
         raise ValueError("The working byte budget cannot fit the preview and its render tiles.")
@@ -469,10 +568,13 @@ def _preview_frame(
     shape = (height, width)
     pixels = np.empty(shape if mosaic.channels == 1 else (*shape, mosaic.channels), np.float32)
     valid = np.empty(shape, np.bool_)
+    common = np.empty(shape, np.bool_) if has_layers else None
     for rendered in mosaic.tiles(width, height, budget, context):
         tile = rendered.tile
         pixels[tile.region.slices] = tile.pixels
         valid[tile.region.slices] = tile.valid
+        if common is not None and rendered.common_coverage is not None:
+            common[tile.region.slices] = rendered.common_coverage
         completed += tile.region.width * tile.region.height
         del rendered, tile
         if context.on_progress is not None:
@@ -480,12 +582,31 @@ def _preview_frame(
     context.check_cancelled()
     pixels.setflags(write=False)
     valid.setflags(write=False)
+    if common is not None:
+        common.setflags(write=False)
     return PreviewFrame(
         Tile(Region(0, 0, width, height), pixels, valid),
         mosaic.size,
-        mosaic.target.wcs.deepcopy(),
+        mosaic.output_wcs.deepcopy() if mosaic.output_wcs is not None else None,
         frame_bytes + budget.peak,
+        common,
+        mosaic.seam_width,
     )
+
+
+def _preview_raster(
+    mosaic: _RasterPlan, context: JobContext, on_proxy: Callable[[PreviewFrame], None] | None
+) -> PreviewFrame:
+    coarse = _bounded_size(mosaic.size, _PROXY_EDGE)
+    size = _bounded_size(mosaic.size, _PREVIEW_EDGE)
+    completed = coarse[0] * coarse[1] if on_proxy is not None and coarse != size else 0
+    total = completed + size[0] * size[1]
+    if on_proxy is not None and completed:
+        proxy = _preview_frame(mosaic, coarse, context, 0, total)
+        if proxy.tile.valid.any():
+            on_proxy(proxy)
+        del proxy
+    return _preview_frame(mosaic, size, context, completed, total)
 
 
 def preview_mosaic(
@@ -514,13 +635,4 @@ def preview_mosaic(
         refinement=refinement,
         context=context,
     ) as mosaic:
-        coarse = _bounded_size(mosaic.size, _PROXY_EDGE)
-        size = _bounded_size(mosaic.size, _PREVIEW_EDGE)
-        completed = coarse[0] * coarse[1] if on_proxy is not None and coarse != size else 0
-        total = completed + size[0] * size[1]
-        if on_proxy is not None and completed:
-            proxy = _preview_frame(mosaic, coarse, context, 0, total)
-            if proxy.tile.valid.any():
-                on_proxy(proxy)
-            del proxy
-        return _preview_frame(mosaic, size, context, completed, total)
+        return _preview_raster(mosaic.raster(), context, on_proxy)

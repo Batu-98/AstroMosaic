@@ -6,6 +6,8 @@ from pathlib import Path
 from PySide6.QtCore import Qt, QTimer, Slot
 from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import (
+    QCheckBox,
+    QComboBox,
     QFileDialog,
     QHBoxLayout,
     QLabel,
@@ -20,24 +22,45 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from astromosaic.display import DisplayFrame
+from astromosaic.display import DisplayFrame, highlight_overlap
 from astromosaic.storage.project import (
     FileReference,
+    Layer,
     MosaicProject,
     ProjectPanel,
     load_project,
     save_project,
 )
 from astromosaic.ui.mask_editor import MaskEditor
-from astromosaic.ui.mosaic_job import ForegroundJob, MaskEditorJob, MosaicJob, PreviewJob
-from astromosaic.ui.project_settings import PANEL_FILES, PanelSettings, ProjectSettings
+from astromosaic.ui.mosaic_job import (
+    CompositionProposalJob,
+    ForegroundAlignmentJob,
+    ForegroundJob,
+    MaskEditorJob,
+    MosaicJob,
+    PreviewJob,
+)
+from astromosaic.ui.project_settings import (
+    PANEL_FILES,
+    CompositionSettings,
+    PanelSettings,
+    ProjectSettings,
+)
 from astromosaic.ui.sky_viewport import SkyViewport
 
 _PROJECT_FILTER = "AstroMosaic project (*.astromosaic)"
 _TIFF_FILTER = "TIFF mosaic (*.tiff *.tif)"
 _FITS_FILTER = "FITS mosaic (*.fits *.fit *.fts)"
 _Button = QMessageBox.StandardButton
-_Job = MosaicJob | PreviewJob | ForegroundJob | MaskEditorJob
+_Job = (
+    MosaicJob
+    | PreviewJob
+    | ForegroundJob
+    | MaskEditorJob
+    | ForegroundAlignmentJob
+    | CompositionProposalJob
+)
+_LAYERS: tuple[Layer, ...] = ("sky", "foreground", "composition")
 
 
 class ProjectWindow(QMainWindow):
@@ -48,6 +71,7 @@ class ProjectWindow(QMainWindow):
         self.project_path: Path | None = None
         self.job: _Job | None = None
         self._preview_project: MosaicProject | None = None
+        self._display_frame: DisplayFrame | None = None
         self._close_after_job = False
         self.setWindowTitle("AstroMosaic")
         self.resize(1040, 780)
@@ -63,6 +87,12 @@ class ProjectWindow(QMainWindow):
         panel_menu = self.menuBar().addMenu("&Panel")
         self.check_foreground = panel_menu.addAction("Check Foreground", self._check_foreground)
         self.propose_mask = panel_menu.addAction("Propose Sky Mask…", self._propose_mask)
+        layers_menu = self.menuBar().addMenu("&Layers")
+        self.align_action = layers_menu.addAction("Align Foreground", self._align_foreground)
+        self.placement_action = layers_menu.addAction("Propose Placement", self._propose_placement)
+        self.composition_action = layers_menu.addAction(
+            "Composition Settings…", self._composition_settings
+        )
 
         body = QWidget(self)
         self.setCentralWidget(body)
@@ -120,8 +150,17 @@ class ProjectWindow(QMainWindow):
         self.start_button.clicked.connect(self._start)
         self.cancel_button = QPushButton("Cancel Job")
         self.cancel_button.clicked.connect(self._cancel)
+        self.layer_box = QComboBox()
+        self.layer_box.addItems(["Sky", "Foreground", "Composition"])
+        self.layer_box.setAccessibleName("Mosaic layer")
+        self.layer_box.setToolTip("Choose the layer to preview and export.")
+        self.layer_box.currentIndexChanged.connect(self._layer_changed)
+        self.overlap_check = QCheckBox("Highlight Overlap")
+        self.overlap_check.toggled.connect(self._paint_display)
         actions.addWidget(self.settings_button)
+        actions.addWidget(self.overlap_check)
         actions.addStretch()
+        actions.addWidget(self.layer_box)
         actions.addWidget(self.preview_button)
         actions.addWidget(self.start_button)
         actions.addWidget(self.cancel_button)
@@ -165,8 +204,9 @@ class ProjectWindow(QMainWindow):
                 mask = "  ·  Sky mask saved"
             elif panel.foreground_tag in ("mixed", "uncertain"):
                 mask = "  ·  Sky mask needed"
+            sky = "  ·  Sky skipped" if not panel.include_sky else ""
             item = QListWidgetItem(
-                f"{panel.source.path.name}  ·  Weight {panel.weight:g}  ·  {detail}  ·  {tag}{mask}"
+                f"{panel.source.path.name}  ·  Weight {panel.weight:g}  ·  {detail}  ·  {tag}{mask}{sky}"
             )
             item.setToolTip(
                 "\n".join(f"{role}: {reference.path}" for role, reference in panel.references())
@@ -182,16 +222,63 @@ class ProjectWindow(QMainWindow):
         name = self.project_path.name if self.project_path else "Untitled"
         marker = "*" if self.project != self._saved else ""
         self.setWindowTitle(f"{name}{marker} — AstroMosaic")
+        self._layer_controls()
+        self.cancel_button.setEnabled(self.job is not None)
+
+    def _layer(self) -> Layer:
+        return _LAYERS[self.layer_box.currentIndex()]
+
+    def _layer_controls(self) -> None:
+        idle = self.job is None
+        layer = self._layer()
+        ground = self.project.current_foreground()
+        sky = bool(self.project.sky_indices())
+        self.align_action.setEnabled(idle and bool(self.project.foreground_inputs()))
+        self.placement_action.setEnabled(idle and ground is not None and sky)
+        self.composition_action.setEnabled(idle and ground is not None and sky)
+        self.layer_box.setEnabled(idle and bool(self.project.panels))
+        self.overlap_check.setVisible(layer == "composition")
+        self.overlap_check.setEnabled(
+            self._display_frame is not None and self._display_frame.common_coverage is not None
+        )
         spec = self.project.render
         region = spec.output_region()
         ra, dec = spec.center
-        self.grid_summary.setText(
-            f"ICRS TAN  ·  RA {ra:.7g}°, Dec {dec:.7g}°"
-            f"  ·  {region.width} × {region.height} px  ·  {spec.scale_arcsec:g} arcsec/px"
-        )
-        self.start_button.setEnabled(bool(self.project.panels) and self.job is None)
-        self.preview_button.setEnabled(bool(self.project.panels) and self.job is None)
-        self.cancel_button.setEnabled(self.job is not None)
+        ready = False
+        if layer == "sky":
+            summary = (
+                f"ICRS TAN  ·  RA {ra:.7g}°, Dec {dec:.7g}°"
+                f"  ·  {region.width} × {region.height} px  ·  {spec.scale_arcsec:g} arcsec/px"
+            )
+            ready = sky
+        elif ground is None:
+            summary = "Apply editable foreground masks and choose Layers → Align Foreground."
+        elif layer == "foreground":
+            summary = f"Foreground  ·  {ground.canvas.width} × {ground.canvas.height} px"
+            ready = True
+        elif self.project.composition is None or not sky:
+            summary = "Include sky panels and set placement from the Layers menu."
+        else:
+            composition = self.project.composition
+            try:
+                canvas, seam = composition.frame(
+                    (region.width, region.height), (ground.canvas.width, ground.canvas.height)
+                )
+            except ValueError as error:
+                summary = str(error)
+            else:
+                summary = f"Composition  ·  {canvas.width} × {canvas.height} px  ·  Seam width {seam:.2f} px"
+                ready = True
+        self.grid_summary.setText(summary)
+        self.start_button.setEnabled(idle and ready)
+        self.preview_button.setEnabled(idle and ready)
+
+    @Slot()
+    def _layer_changed(self) -> None:
+        self._clear_preview()
+        self._layer_controls()
+        self.progress.setValue(0)
+        self.status.setText("")
 
     def _selection_changed(self) -> None:
         index = self.panels.currentRow()
@@ -395,10 +482,12 @@ class ProjectWindow(QMainWindow):
         path = Path(name)
         if not path.suffix:
             path = path.with_suffix(".fits" if selected == _FITS_FILTER else ".tiff")
-        self._launch_job(MosaicJob(self.project, path, self), "Preparing mosaic…")
+        self._launch_job(MosaicJob(self.project, path, self, self._layer()), "Preparing mosaic…")
 
     def _clear_preview(self) -> None:
         self._preview_project = None
+        self._display_frame = None
+        self.overlap_check.setEnabled(False)
         self.viewport.set_frame(None)
 
     def _preview(self) -> None:
@@ -406,14 +495,57 @@ class ProjectWindow(QMainWindow):
             return
         self._clear_preview()
         self._preview_project = self.project
-        job = PreviewJob(self.project, self)
+        layer = self._layer()
+        job = PreviewJob(self.project, self, layer)
         job.proxy_ready.connect(self._show_proxy)
-        self._launch_job(job, "Preparing sky preview…")
+        self._launch_job(job, f"Preparing {layer} preview…")
 
     @Slot(object)
     def _show_proxy(self, frame: DisplayFrame) -> None:
         if self.sender() is self.job and self.cancel_button.isEnabled():
-            self.viewport.set_frame(frame)
+            self._set_display_frame(frame)
+
+    def _set_display_frame(self, frame: DisplayFrame) -> None:
+        self._display_frame = frame
+        self.overlap_check.setEnabled(frame.common_coverage is not None)
+        self._paint_display()
+
+    @Slot()
+    def _paint_display(self) -> None:
+        frame = self._display_frame
+        if frame is not None:
+            self.viewport.set_frame(
+                highlight_overlap(frame) if self.overlap_check.isChecked() else frame
+            )
+
+    def _align_foreground(self) -> None:
+        if self.job is None:
+            self._launch_job(
+                ForegroundAlignmentJob(self.project, self), "Preparing foreground alignment…"
+            )
+
+    def _propose_placement(self) -> None:
+        if self.job is None:
+            self._launch_job(
+                CompositionProposalJob(self.project, self), "Finding a shared horizon…"
+            )
+
+    def _composition_settings(self) -> None:
+        dialog = CompositionSettings(self.project, self)
+        try:
+            while dialog.exec():
+                try:
+                    composition = dialog.settings()
+                except (ValueError, OverflowError) as error:
+                    self._error("Invalid composition settings", error)
+                    continue
+                self.project = replace(self.project, composition=composition)
+                self._refresh(self.panels.currentRow())
+                self.layer_box.setCurrentIndex(_LAYERS.index("composition"))
+                self.status.setText("Composition settings applied.")
+                break
+        finally:
+            dialog.deleteLater()
 
     def _launch_job(self, job: _Job, message: str) -> None:
         self.job = job
@@ -429,8 +561,7 @@ class ProjectWindow(QMainWindow):
             action.setEnabled(not running)
         self._editor.setEnabled(not running)
         self.settings_button.setEnabled(not running)
-        self.start_button.setEnabled(not running and bool(self.project.panels))
-        self.preview_button.setEnabled(not running and bool(self.project.panels))
+        self._layer_controls()
         self.cancel_button.setEnabled(running)
         self._selection_changed()
 
@@ -452,11 +583,14 @@ class ProjectWindow(QMainWindow):
             self._finish_foreground_check(job)
         elif isinstance(job, MaskEditorJob):
             self._finish_mask_editor(job)
+        elif isinstance(job, (ForegroundAlignmentJob, CompositionProposalJob)):
+            self._finish_layer_job(job)
         elif job.result is not None:
             self.progress.setValue(100)
-            self.status.setText(
-                f"Saved {job.destination.name} · {job.result.covered_pixels:,} covered pixels."
-            )
+            text = f"Saved {job.destination.name} · {job.result.covered_pixels:,} covered pixels."
+            if job.result.common_pixels is not None:
+                text += f" Both layers cover {job.result.common_pixels:,} pixels."
+            self.status.setText(text)
         elif job.cancelled:
             self.progress.setValue(0)
             self.status.setText("Mosaic cancelled.")
@@ -471,14 +605,19 @@ class ProjectWindow(QMainWindow):
 
     def _finish_preview(self, job: PreviewJob) -> None:
         if job.result is not None:
-            self.viewport.set_frame(job.result)
+            self._set_display_frame(job.result)
             self.progress.setValue(100)
             width, height = job.result.size
-            self.status.setText(
-                f"Sky preview · {width} × {height} samples."
+            text = (
+                f"{job.layer.capitalize()} preview · {width} × {height} samples."
                 if job.result.has_coverage
-                else "No sky coverage at this preview resolution."
+                else "No coverage at this preview resolution."
             )
+            if job.result.common_coverage is not None:
+                text += (
+                    f" Both layers cover {int(job.result.common_coverage.sum()):,} preview samples."
+                )
+            self.status.setText(text)
         else:
             self._clear_preview()
             self.progress.setValue(0)
@@ -487,6 +626,33 @@ class ProjectWindow(QMainWindow):
             else:
                 self.status.setText(f"Preview failed. {job.error or 'No result was returned.'}")
                 self._refresh(self.panels.currentRow())
+
+    def _finish_layer_job(self, job: ForegroundAlignmentJob | CompositionProposalJob) -> None:
+        if job.result is None:
+            self.progress.setValue(0)
+            label = job.label.capitalize()
+            self.status.setText(
+                f"{label} cancelled."
+                if job.cancelled
+                else f"{label} failed. {job.error or 'No result was returned.'}"
+            )
+            return
+        if isinstance(job, ForegroundAlignmentJob):
+            self.project = job.result
+            assert self.project.foreground is not None
+            alignment = self.project.foreground.alignment
+            layer = "foreground"
+            message = f"Aligned {len(alignment.panels)} foreground panel(s) across {len(alignment.overlaps)} overlap(s)."
+        else:
+            placement = job.result
+            self.project = replace(self.project, composition=placement)
+            assert placement.reference_panel is not None and placement.placement_rms_px is not None
+            layer = "composition"
+            message = f"Placement from panel {placement.reference_panel + 1} · {placement.placement_rms_px:.2f} px RMS."
+        self._refresh(self.panels.currentRow())
+        self.layer_box.setCurrentIndex(_LAYERS.index(layer))
+        self.progress.setValue(100)
+        self.status.setText(message)
 
     def _finish_foreground_check(self, job: ForegroundJob) -> None:
         if job.result is None:

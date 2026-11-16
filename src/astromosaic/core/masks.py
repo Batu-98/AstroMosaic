@@ -65,6 +65,20 @@ class SourceMask:
         width, height = self.size
         return np.frombuffer(self.labels, dtype=np.uint8).reshape(height, width)
 
+    def bounds(self, label: int) -> Region | None:
+        rows, columns = np.nonzero(self.grid() == label)
+        if not rows.size:
+            return None
+        width, height = self.size
+        source_width, source_height = self.source_size
+        left, top = (
+            int(columns.min()) * source_width // width,
+            int(rows.min()) * source_height // height,
+        )
+        right = (int(columns.max()) + 1) * source_width // width
+        bottom = (int(rows.max()) + 1) * source_height // height
+        return Region(left, top, right - left, bottom - top)
+
     def read_labels(self, region: Region) -> NDArray[np.uint8]:
         source_width, source_height = self.source_size
         region.with_halo(source_width, source_height, 0)

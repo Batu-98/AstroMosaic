@@ -4,37 +4,59 @@ import json
 import os
 from base64 import b64decode, b64encode
 from collections.abc import Callable, Iterator
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from dataclasses import asdict, dataclass, replace
+from hashlib import sha256
 from importlib.metadata import version
 from math import isfinite
 from pathlib import Path
 from stat import S_ISREG
-from typing import Any, TypedDict
+from typing import Any, Literal, TypedDict
 
 from astromosaic.core import Region, SourceFingerprint
 from astromosaic.core.job import JobContext
 from astromosaic.core.masks import (
+    FOREGROUND,
     MASK_EDGE,
+    SKY,
     ForegroundSuggestion,
     ForegroundTag,
     SourceMask,
     bounded_grid,
 )
 from astromosaic.geometry import tan_output_wcs
+from astromosaic.geometry.image import CompositionSpec, LayerPlacement
 from astromosaic.io import PanelSource, SkyMask, open_panel
 from astromosaic.io.atomic import atomic_binary_file
+from astromosaic.pipeline.foreground import (
+    ForegroundAlignment,
+    GroundOverlap,
+    GroundPanel,
+    align_foreground,
+)
+from astromosaic.pipeline.layers import (
+    ForegroundLayer,
+    ForegroundSource,
+    composition_raster,
+    propose_composition,
+)
 from astromosaic.pipeline.mosaic import (
     MosaicResult,
     PreviewFrame,
     RenderSpec,
+    _prepare_mosaic,
+    _preview_raster,
+    _RasterPlan,
+    _write_raster,
     preview_mosaic,
     render_mosaic,
 )
 from astromosaic.pipeline.refinement import RefinementSpec
 
-_SCHEMA_VERSION = 2
+_SCHEMA_VERSION = 3
 _MAX_MANIFEST_BYTES = 4 * 1024**2
+type Layer = Literal["sky", "foreground", "composition"]
+type _GroundInputs = tuple[tuple[int, SourceMask], ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -75,6 +97,7 @@ class ProjectPanel:
     foreground_suggestion: ForegroundSuggestion | None = None
     foreground_override: ForegroundTag | None = None
     source_mask: SourceMask | None = None
+    include_sky: bool = True
 
     def __post_init__(self) -> None:
         if self.sky_mask is not None and self.source_mask is not None:
@@ -107,20 +130,68 @@ class ProjectPanel:
 
 
 @dataclass(frozen=True, slots=True)
+class SavedForeground:
+    input_key: str
+    alignment: ForegroundAlignment
+
+    def __post_init__(self) -> None:
+        if len(self.input_key) != 64 or any(c not in "0123456789abcdef" for c in self.input_key):
+            raise ValueError("Invalid foreground input fingerprint.")
+
+
+@dataclass(frozen=True, slots=True)
 class MosaicProject:
     panels: tuple[ProjectPanel, ...] = ()
     render: RenderSpec = RenderSpec((0.0, 0.0), (1024, 1024), 2.0)
     filter_name: str | None = None
     assume_surface_brightness: bool = False
     refinement: RefinementSpec | None = None
+    foreground: SavedForeground | None = None
+    composition: CompositionSpec | None = None
 
     def validate(self) -> None:
         spec = self.render
-        tan_output_wcs(
-            spec.center, spec.size, spec.scale_arcsec, spec.rotation_deg, spec.output_region()
-        )
+        region = spec.output_region()
+        tan_output_wcs(spec.center, spec.size, spec.scale_arcsec, spec.rotation_deg, region)
         if any(not isfinite(panel.weight) or panel.weight <= 0 for panel in self.panels):
             raise ValueError("Panel weights must be positive and finite.")
+        if self.composition is not None and self.composition.sky_crop_bottom >= region.height:
+            raise ValueError("The composition crop must retain at least one row of sky.")
+
+    def foreground_inputs(self) -> _GroundInputs:
+        return tuple(
+            (i, panel.source_mask)
+            for i, panel in enumerate(self.panels)
+            if panel.source_mask is not None
+            and panel.foreground_tag != "sky-only"
+            and FOREGROUND in panel.source_mask.labels
+        )
+
+    def foreground_key(self, inputs: _GroundInputs) -> str:
+        digest = sha256(b"astromosaic-foreground-translation-v1\n")
+        for index, mask in inputs:
+            fp = self.panels[index].source.fingerprint
+            digest.update(
+                f"{index}:{fp.size_bytes}:{fp.modified_ns}:{mask.source_size}\n".encode("ascii")
+            )
+            digest.update(mask.labels.translate(bytes.maketrans(bytes((SKY,)), b"\x00")))
+        return digest.hexdigest()
+
+    def current_foreground(self) -> ForegroundAlignment | None:
+        if self.foreground is not None:
+            inputs = self.foreground_inputs()
+            if self.foreground.input_key == self.foreground_key(inputs) and tuple(
+                panel.index for panel in self.foreground.alignment.panels
+            ) == tuple(i for i, _ in inputs):
+                return self.foreground.alignment
+        return None
+
+    def sky_indices(self) -> tuple[int, ...]:
+        return tuple(
+            i
+            for i, panel in enumerate(self.panels)
+            if panel.include_sky and (panel.source_mask is None or SKY in panel.source_mask.labels)
+        )
 
     def relink_panel(self, index: int, path: Path) -> "MosaicProject":
         panel = self.panels[index]
@@ -161,20 +232,21 @@ def open_project_sky_panel(
 
 def _verified_inputs(project: MosaicProject, context: JobContext) -> _PanelInputs:
     sky_masks = {}
-    for index, panel in enumerate(project.panels):
+    panels = [project.panels[i] for i in project.sky_indices()]
+    if not panels:
+        raise ValueError("Include at least one panel with sky samples in the sky layer.")
+    for index, panel in enumerate(panels):
         for role, reference in panel.references():
             _check_reference(role, reference, context)
         if (mask := panel.sky_input()) is not None:
             sky_masks[index] = mask
     return {
-        "paths": [panel.source.path for panel in project.panels],
-        "weights": [panel.weight for panel in project.panels],
+        "paths": [panel.source.path for panel in panels],
+        "weights": [panel.weight for panel in panels],
         "filter_name": project.filter_name,
         "assume_surface_brightness": project.assume_surface_brightness,
         "sky_masks": sky_masks,
-        "wcs_sidecars": {
-            i: p.wcs_sidecar.path for i, p in enumerate(project.panels) if p.wcs_sidecar
-        },
+        "wcs_sidecars": {i: p.wcs_sidecar.path for i, p in enumerate(panels) if p.wcs_sidecar},
         "refinement": project.refinement,
     }
 
@@ -199,6 +271,142 @@ def preview_project(
         on_proxy=on_proxy,
         **_verified_inputs(project, context),
     )
+
+
+def _open_ground_source(
+    project: MosaicProject,
+    index: int,
+    mask: SourceMask,
+    context: JobContext,
+    stack: ExitStack,
+) -> PanelSource:
+    panel = project.panels[index]
+    _check_reference("Source", panel.source, context)
+    source = stack.enter_context(
+        open_panel(
+            panel.source.path,
+            max_tile_bytes=project.render.max_working_bytes,
+            foreground_mask=mask,
+        )
+    )
+    if source.descriptor.fingerprint != panel.source.fingerprint:
+        raise ValueError(f"Source file changed: {panel.source.path.name}")
+    return source
+
+
+def align_project_foreground(project: MosaicProject, context: JobContext) -> MosaicProject:
+    inputs = project.foreground_inputs()
+    with ExitStack() as stack:
+        candidates = []
+        for index, mask in inputs:
+            bounds = mask.bounds(FOREGROUND)
+            assert bounds is not None
+            source = _open_ground_source(project, index, mask, context, stack)
+            candidates.append((index, source, bounds))
+        aligned = align_foreground(candidates, project.render.max_working_bytes, context)
+    keep_placement = project.foreground is not None and project.foreground.alignment == aligned
+    return replace(
+        project,
+        foreground=SavedForeground(project.foreground_key(inputs), aligned),
+        composition=project.composition if keep_placement else None,
+    )
+
+
+@contextmanager
+def _project_foreground(project: MosaicProject, context: JobContext) -> Iterator[ForegroundLayer]:
+    alignment = project.current_foreground()
+    if alignment is None:
+        raise ValueError("Align the current foreground panels first.")
+    masks = dict(project.foreground_inputs())
+    with ExitStack() as stack:
+        panels = [
+            ForegroundSource(
+                _open_ground_source(project, item.index, masks[item.index], context, stack),
+                project.panels[item.index].weight,
+                masks[item.index],
+                item,
+            )
+            for item in alignment.panels
+        ]
+        if any(
+            (p.source.descriptor.width, p.source.descriptor.height) != alignment.source_size
+            for p in panels
+        ):
+            raise ValueError("The saved foreground dimensions differ from the source panels.")
+        yield ForegroundLayer(
+            panels,
+            alignment,
+            project.render,
+            project.filter_name,
+            project.assume_surface_brightness,
+        )
+
+
+def default_composition(project: MosaicProject) -> CompositionSpec:
+    if project.composition is not None:
+        return project.composition
+    y = float(project.render.output_region().height)
+    return CompositionSpec(LayerPlacement((0.0, y)), seam_y=y - 0.5)
+
+
+def propose_project_composition(project: MosaicProject, context: JobContext) -> CompositionSpec:
+    with (
+        _project_foreground(project, context) as ground,
+        _prepare_mosaic(
+            spec=project.render,
+            destination=None,
+            context=context,
+            **_verified_inputs(project, context),
+        ) as sky,
+    ):
+        return propose_composition(
+            sky, project.sky_indices(), ground, default_composition(project), context
+        )
+
+
+@contextmanager
+def _project_layer(
+    project: MosaicProject, layer: Layer, context: JobContext
+) -> Iterator[_RasterPlan]:
+    with _project_foreground(project, context) as ground:
+        if layer == "foreground":
+            yield ground.raster()
+            return
+        if project.composition is None:
+            raise ValueError("Set the composition placement or use the shared horizon proposal.")
+        with _prepare_mosaic(
+            spec=project.render,
+            destination=None,
+            context=context,
+            **_verified_inputs(project, context),
+        ) as sky:
+            yield composition_raster(sky, ground, project.composition)
+
+
+def preview_project_layer(
+    project: MosaicProject,
+    layer: Layer,
+    context: JobContext,
+    on_proxy: Callable[[PreviewFrame], None] | None = None,
+) -> PreviewFrame:
+    if layer == "sky":
+        return preview_project(project, context, on_proxy)
+    with _project_layer(project, layer, context) as raster:
+        return _preview_raster(raster, context, on_proxy)
+
+
+def render_project_layer(
+    project: MosaicProject,
+    layer: Layer,
+    destination: Path,
+    context: JobContext,
+) -> MosaicResult:
+    if layer == "sky":
+        return render_project(project, destination, context)
+    if destination.exists() or destination.is_symlink():
+        raise FileExistsError(f"The output file already exists: {destination}")
+    with _project_layer(project, layer, context) as raster:
+        return _write_raster(raster, destination, context)
 
 
 def _encode_reference(reference: FileReference | None, directory: Path) -> dict[str, object] | None:
@@ -236,6 +444,8 @@ def save_project(path: Path, project: MosaicProject, *, replace_existing: bool =
         "filter_name": project.filter_name,
         "assume_surface_brightness": project.assume_surface_brightness,
         "refinement": asdict(project.refinement) if project.refinement else None,
+        "foreground": asdict(project.foreground) if project.foreground else None,
+        "composition": asdict(project.composition) if project.composition else None,
         "panels": [
             {
                 "source": _encode_reference(panel.source, directory),
@@ -245,6 +455,7 @@ def save_project(path: Path, project: MosaicProject, *, replace_existing: bool =
                 "foreground_suggestion": panel.foreground_suggestion,
                 "foreground_override": panel.foreground_override,
                 "source_mask": _encode_mask(panel.source_mask),
+                "include_sky": panel.include_sky,
             }
             for panel in project.panels
         ],
@@ -306,8 +517,7 @@ def _decode_render(value: object) -> RenderSpec:
     width, height = _pair(render["size"])
     crop = None
     if render["crop"] is not None:
-        fields = _object(render["crop"])
-        crop = Region(*(_integer(fields[key]) for key in ("x", "y", "width", "height")))
+        crop = _decode_region(render["crop"])
     return RenderSpec(
         (_number(ra), _number(dec)),
         (_integer(width), _integer(height)),
@@ -317,6 +527,72 @@ def _decode_render(value: object) -> RenderSpec:
         _integer(render["tile_size"]),
         _integer(render["max_working_bytes"]),
         _integer(render["max_output_bytes"]),
+    )
+
+
+def _decode_region(value: object) -> Region:
+    fields = _object(value)
+    return Region(*(_integer(fields[key]) for key in ("x", "y", "width", "height")))
+
+
+def _decode_foreground(value: object) -> SavedForeground | None:
+    if value is None:
+        return None
+    data = _object(value)
+    alignment = _object(data["alignment"])
+    input_key = data["input_key"]
+    if (
+        not isinstance(input_key, str)
+        or not isinstance(alignment["panels"], list)
+        or not isinstance(alignment["overlaps"], list)
+    ):
+        raise ValueError("Invalid foreground record.")
+    panels, overlaps = [], []
+    for record in alignment["panels"]:
+        panel = _object(record)
+        dx, dy = _pair(panel["shift"])
+        panels.append(GroundPanel(_integer(panel["index"]), (_number(dx), _number(dy))))
+    for record in alignment["overlaps"]:
+        edge = _object(record)
+        left, right = _pair(edge["panels"])
+        overlaps.append(
+            GroundOverlap(
+                (_integer(left), _integer(right)),
+                _number(edge["correlation"]),
+                _integer(edge["support"]),
+                _integer(edge["patches"]),
+            )
+        )
+    width, height = _pair(alignment["source_size"])
+    return SavedForeground(
+        input_key,
+        ForegroundAlignment(
+            (_integer(width), _integer(height)),
+            _decode_region(alignment["canvas"]),
+            tuple(panels),
+            tuple(overlaps),
+        ),
+    )
+
+
+def _decode_composition(value: object) -> CompositionSpec | None:
+    if value is None:
+        return None
+    record = _object(value)
+    placement = _object(record["placement"])
+    dx, dy = _pair(placement["offset"])
+    reference, rms = record["reference_panel"], record["placement_rms_px"]
+    return CompositionSpec(
+        LayerPlacement(
+            (_number(dx), _number(dy)),
+            _number(placement["rotation_deg"]),
+            _number(placement["scale"]),
+        ),
+        _number(record["seam_y"]),
+        _number(record["overlap_percent"]),
+        _integer(record["sky_crop_bottom"]),
+        _integer(reference) if reference is not None else None,
+        _number(rms) if rms is not None else None,
     )
 
 
@@ -355,6 +631,9 @@ def _decode_panel(value: object, directory: Path, schema_version: int) -> Projec
             raise ValueError("Unknown foreground suggestion.")
         if override not in (None, "mixed", "sky-only"):
             raise ValueError("Unknown foreground override.")
+    include_sky = record["include_sky"] if schema_version >= 3 else True
+    if not isinstance(include_sky, bool):
+        raise ValueError("Invalid sky-layer selection.")
     return ProjectPanel(
         _decode_reference(record["source"], directory),
         _number(record["weight"]),
@@ -363,6 +642,7 @@ def _decode_panel(value: object, directory: Path, schema_version: int) -> Projec
         suggestion,
         override,
         source_mask,
+        include_sky,
     )
 
 
@@ -374,7 +654,7 @@ def load_project(path: Path) -> MosaicProject:
     try:
         data = _object(json.loads(payload.decode("utf-8")))
         schema_version = _integer(data["version"])
-        if schema_version not in (1, _SCHEMA_VERSION):
+        if schema_version not in (1, 2, _SCHEMA_VERSION):
             raise ValueError("Unsupported project manifest version.")
         if not isinstance(data["panels"], list):
             raise ValueError("Expected an ordered panel list.")
@@ -392,6 +672,8 @@ def load_project(path: Path) -> MosaicProject:
             filter_name,
             assume,
             _decode_refinement(data["refinement"]),
+            _decode_foreground(data["foreground"]) if schema_version >= 3 else None,
+            _decode_composition(data["composition"]) if schema_version >= 3 else None,
         )
         project.validate()
         return project

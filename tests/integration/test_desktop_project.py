@@ -10,13 +10,21 @@ from astropy.io import fits
 from astromosaic.astrometry.solve import SolveOptions, solve_panel, write_solution
 from astromosaic.core import Region, Tile
 from astromosaic.core.job import JobContext
-from astromosaic.core.masks import FOREGROUND, MASK_EDGE, SKY, UNCLASSIFIED
+from astromosaic.core.masks import FOREGROUND, MASK_EDGE, SKY, UNCLASSIFIED, SourceMask
 from astromosaic.geometry import tan_output_wcs
 from astromosaic.io import PanelSource, open_panel
 from astromosaic.pipeline.masking import read_thumbnail
-from astromosaic.pipeline.mosaic import MosaicResult, PreviewFrame
+from astromosaic.pipeline.mosaic import MosaicResult, PreviewFrame, RenderSpec
 from astromosaic.pipeline.smoke import write_smoke_panel
-from astromosaic.storage.project import MosaicProject, load_project, preview_project, render_project
+from astromosaic.storage.project import (
+    FileReference,
+    MosaicProject,
+    ProjectPanel,
+    load_project,
+    preview_project,
+    render_project,
+    save_project,
+)
 
 
 def test_desktop_project_roundtrip_progress_cancel_and_retry(
@@ -403,6 +411,119 @@ def test_desktop_sky_mask_proposal_manual_edits_and_reopen(
         assert originals == (source.read_bytes(), tiff.read_bytes())
     finally:
         release.set()
+        if window.job is not None:
+            window.job.cancel()
+            assert window.job.wait(10_000)
+        window.deleteLater()
+        app.processEvents()
+
+
+def test_desktop_composition_propose_edit_and_export(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pytest.importorskip("PySide6")
+    import os
+
+    from PySide6.QtCore import QEventLoop, QTimer
+    from PySide6.QtWidgets import QApplication, QFileDialog
+
+    from astromosaic.ui.project_settings import CompositionSettings
+    from astromosaic.ui.project_window import ProjectWindow
+
+    if "QT_QPA_PLATFORM" not in os.environ:
+        monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
+    app = QApplication.instance()
+    if not isinstance(app, QApplication):
+        app = QApplication([])
+    app.setQuitOnLastWindowClosed(False)
+    source = tmp_path / "combined.fits"
+    size = (80, 60)
+    spec = RenderSpec((30.0, 20.0), size, 2.0, tile_size=24)
+    header = tan_output_wcs(
+        spec.center, size, spec.scale_arcsec, 0.0, spec.output_region()
+    ).to_header()
+    header["FILTER"], header["BUNIT"] = "L", "MJy/sr"
+    y, x = np.indices((size[1], size[0]), dtype=np.float32)
+    fits.writeto(source, 0.1 * x + y, header)
+    labels = np.broadcast_to(np.where(y < 30, SKY, FOREGROUND), y.shape).astype(np.uint8)
+    panel = ProjectPanel(
+        FileReference.capture(source), source_mask=SourceMask(size, labels.tobytes())
+    )
+    manifest = tmp_path / "layers.astromosaic"
+    save_project(manifest, MosaicProject((panel,), render=spec))
+    destination = tmp_path / "composition.fits"
+    monkeypatch.setattr(QFileDialog, "getOpenFileName", lambda *a, **kw: (str(manifest), ""))
+    monkeypatch.setattr(QFileDialog, "getSaveFileName", lambda *a, **kw: (str(destination), ""))
+    window = ProjectWindow(use_gpu=False)
+
+    def wait_for_job() -> None:
+        job = window.job
+        if job is None:
+            return
+        loop = QEventLoop()
+        timer = QTimer()
+        timer.setSingleShot(True)
+        timer.timeout.connect(loop.quit)
+        job.finished.connect(loop.quit)
+        timer.start(8_000)
+        loop.exec()
+        assert window.job is None, window.status.text()
+
+    def edit() -> None:
+        dialog = QApplication.activeModalWidget()
+        assert isinstance(dialog, CompositionSettings)
+        dialog.x_offset.setText("2.5")
+        dialog.y_offset.setText("23.0")
+        dialog.rotation.setText("-2.0")
+        dialog.scale.setText("1.05")
+        dialog.seam_y.setText("27.0")
+        dialog.overlap.setText("20.0")
+        dialog.crop.setText("12")
+        dialog.accept()
+
+    try:
+        window.show()
+        _new, open_action, save, _save_as = window._file_actions
+        open_action.trigger()
+        window.align_action.trigger()
+        wait_for_job()
+        assert window.layer_box.currentText() == "Foreground", window.status.text()
+        window.placement_action.trigger()
+        wait_for_job()
+        assert window.layer_box.currentText() == "Composition", window.status.text()
+        QTimer.singleShot(0, edit)
+        window.composition_action.trigger()
+        save.trigger()
+        open_action.trigger()
+        composition = window.project.composition
+        assert composition is not None
+        assert (
+            composition.placement.offset,
+            composition.placement.rotation_deg,
+            composition.placement.scale,
+        ) == ((2.5, 23.0), -2.0, 1.05)
+        assert (composition.seam_y, composition.overlap_percent, composition.sky_crop_bottom) == (
+            27.0,
+            20.0,
+            12,
+        )
+        assert "Seam width" in window.grid_summary.text()
+        window.preview_button.click()
+        wait_for_job()
+        preview = window.viewport.frame
+        assert preview is not None and preview.common_coverage is not None
+        assert preview.common_coverage.any()
+        window.overlap_check.setChecked(True)
+        highlighted = window.viewport.frame
+        assert highlighted is not None and not np.array_equal(highlighted.rgba, preview.rgba)
+        window.overlap_check.setChecked(False)
+        assert window.viewport.frame is preview
+        window.start_button.click()
+        wait_for_job()
+        assert destination.exists(), window.status.text()
+        with fits.open(destination) as result:
+            assert np.any(result["LAYERS"].data == 3)
+    finally:
         if window.job is not None:
             window.job.cancel()
             assert window.job.wait(10_000)

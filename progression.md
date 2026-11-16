@@ -6,11 +6,11 @@ Use this file for concise development history and handoff state. Detailed techni
 
 - **Last updated:** 2026-11-16
 - **Active baseline:** Python-first architecture revision 3.6, with [Phase 3A–3F delivery stages](astro_mosaic_python_first_architecture_en.md#101-phase-3-delivery-stages). See [ADR-0003](docs/adr/0003-windows-first-platform-scope.md) for Windows scope, [ADR-0006](docs/adr/0006-dual-fits-and-tiff-workflow.md) for formats, and [ADR-0007](docs/adr/0007-sky-and-foreground-mosaics.md) for mixed panels.
-- **Current stage:** Phase 3D passed on Windows 11 x64. Linux and macOS support is deferred.
-- **Available artifacts:** [Foreground tags and editable sky masks](docs/phase-3d.md), [OpenGL and CPU sky preview](docs/phase-3c.md), and a Qt-free CLI with saved project-panel solving, WCS sidecars, mono relative refinement, and float32 FITS/TIFF export.
-- **Implementation / verification:** All 68 tests passed on Windows 11 x64 with native Qt and OpenGL enabled. The desktop checks also passed at 2× device scale and on the offscreen CPU path. Ruff, mypy, Poetry lock validation, and documentation link checks passed. [Phase 3D checks](docs/phase-3d.md#windows-verification)
-- **Version control:** Phase 3C is published as `e60d4a9` on `origin/main`. Phase 3D is in the working tree. [AstroMosaic GitHub repository](https://github.com/Batu-98/AstroMosaic)
-- **Next action:** Start Phase 3E with bounded foreground feature matching and independent image-space alignment on panels without celestial WCS.
+- **Current stage:** Phase 3E passed the development gate on Windows 11 x64. Linux and macOS support is deferred.
+- **Available artifacts:** [Independent layer previews and exports](docs/phase-3e.md), [foreground tags and editable sky masks](docs/phase-3d.md), and a Qt-free CLI with saved project-panel solving, WCS sidecars, mono relative refinement, and float32 FITS/TIFF export.
+- **Implementation / verification:** All 74 tests passed on Windows 11 x64 with native Qt and OpenGL enabled. Focused 2× device-scale and offscreen CPU checks passed. Ruff, mypy, Poetry lock validation, and documentation link checks passed. [Phase 3E checks](docs/phase-3e.md#windows-verification)
+- **Version control:** Phase 3D is published as `1e682b1` on `origin/main`. Phase 3E is in the local working tree. [AstroMosaic GitHub repository](https://github.com/Batu-98/AstroMosaic)
+- **Next action:** Start Phase 3F with the packaged Windows build and run the FITS/TIFF acceptance workflows on it.
 - **Open dependencies:** Q-003 through Q-005, Q-009, and Q-010 track later numerical, resource, distribution, format, and mixed-panel gates. Q-008 tracks deferred platforms and Q-011 tracks deferred visual fill. Q-006 and Q-007 are resolved for the Windows solver and FITS export references.
 
 ## Phase Overview
@@ -27,7 +27,7 @@ The table is a status summary, not a replacement for the full exit gates in Sect
 | 3B - Projects and jobs | Complete | Project save/reopen, panel relinking, responsive progress, and cancellation verified on native Windows Qt. |
 | 3C - Preview and export | Complete | Verified shared preview/export geometry, pan and zoom, display-only stretch, and GPU/CPU fallback on Windows. |
 | 3D - Sky masks | Complete | Verified automatic proposals, manual tag and mask edits after reopening, and sky-only solving and fitting. |
-| 3E - Foreground and composition | Not started | Independent layer alignment and export, plus saved placement, overlap, and crop edits. |
+| 3E - Foreground and composition | Complete | Verified WCS-independent foreground alignment, separate layer exports, and saved placement, seam, and crop edits on Windows. |
 | 3F - Windows acceptance | Not started | Packaged FITS/TIFF workflows, recovery, cancellation cleanup, and CPU fallback verified. |
 | 4 - Large mosaics and improved blends | Not started | Budgeted rendering of 12 FITS and TIFF panels at 6000 × 4000, including a mixed scene, incremental export, tile/halo correctness, and measured improvement for any optional multiband blend. |
 | 5 - Extended formats and channels | Not started | Format/channel/projection contracts and packaging checks for each added workflow. |
@@ -266,6 +266,26 @@ The table is a status summary, not a replacement for the full exit gates in Sect
 - **Verified:** All 68 native Windows tests passed. Focused 2× and CPU desktop checks, Ruff, mypy, Poetry lock validation, and local links passed. FITS and RGB TIFF fixtures verified the mask labels. ASTAP solved the mixed M13 project panel using the proposed mask. Hinted Gaia exhausted its match search on the same masked sample.
 - **Related:** [Phase 3D evidence](docs/phase-3d.md), [ADR-0014](docs/adr/0014-source-coordinate-mask-grid.md), and Q-010.
 - **Next:** Start Phase 3E with an independent foreground registration fixture and preserve the sky layer geometry for composition.
+
+### 2026-11-16 - Repository update - Published Phase 3D
+
+- **Changed:** Committed the foreground tags and editable sky masks as `1e682b1` and pushed the snapshot to `origin/main`.
+- **Verified:** All 68 native Windows tests, Ruff, mypy, Poetry lock validation, and 97 local documentation links passed. `git ls-remote` confirmed the published commit.
+- **Next:** Build and test image-space foreground alignment on panels without WCS.
+
+### 2026-11-16 - Phase 3E - Implemented independent layers and composition
+
+- **Changed:** Added masked foreground translation, a shared horizon placement proposal, and saved composition controls. Preview and export sample the original panels and record the actual layer contributions.
+- **Verified:** FITS and RGB TIFF fixtures matched known terrestrial shifts. The larger case refined its result at source resolution. The native desktop workflow on the secondary monitor proposed placement, reopened the edited composition, showed common coverage, and exported a FITS composite.
+- **Related:** [Phase 3E workflow](docs/phase-3e.md), [ADR-0015](docs/adr/0015-independent-layer-rendering.md), and Q-010.
+- **Next:** Run the full native regression suite and focused CPU and high-DPI checks.
+
+### 2026-11-16 - Phase 3E - Completed: Windows layer and composition gate
+
+- **Changed:** Documented the common-raster translation model, contribution map formats, and composition workflow. The overlap display shows common coverage independently of the feathering band.
+- **Verified:** All 74 native Windows tests passed with OpenGL enabled. The focused viewport and composition workflows passed at 2× device scale, and the offscreen CPU checks passed. Ruff, mypy, Poetry lock validation, and documentation links passed. Native test dialogs opened on the secondary monitor.
+- **Related:** [Phase 3E evidence](docs/phase-3e.md), [ADR-0015](docs/adr/0015-independent-layer-rendering.md), Q-004, Q-009, and Q-010. Real terrestrial captures and the 12-panel workload remain follow-up checks.
+- **Next:** Begin Phase 3F with a packaged Windows build and rerun the mixed-panel workflow, recovery, cancellation, and CPU fallback checks.
 
 ## Entry Template
 

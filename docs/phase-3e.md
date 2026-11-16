@@ -1,0 +1,26 @@
+# Phase 3E Foreground Alignment and Composition
+
+## Desktop Workflow
+
+1. Apply editable masks with **Foreground** labels to the panels that contribute ground. To convert an attached FITS mask, open **Edit Sky Mask**, review its labels, and apply it to the project. For a panel with an unsolved sky, clear **Panel Settings → Include in sky layer** and leave its foreground selected.
+2. Choose **Layers → Align Foreground**. The first participating panel anchors the foreground pixel grid. A successful alignment selects **Foreground** in the layer selector. **Build Preview** and **Export Mosaic** operate on the selected layer. Choose **Sky** to preview and export the scientific sky mosaic independently.
+3. Choose **Layers → Propose Placement** to use a shared mixed panel as a reference. Use **Layers → Composition Settings** to enter or adjust the foreground offset, rotation, scale, seam row, overlap, and rows to crop from the bottom of the sky. If the proposal reports a weak or missing shared horizon, open the same settings to place the layers manually.
+4. Select **Composition** and build a preview. The size and seam width appear above the controls. **Highlight Overlap** marks samples where both layers have coverage in cyan. The status reports their count. **Export Mosaic** saves the visual composite. Save the project to keep the alignment and composition settings.
+
+The alignment and placement jobs are cancellable. Realign after changing the participating foreground masks or panels. When realignment changes the foreground geometry, set the placement again. Update an automatic placement after changing the sky grid, mask, or WCS. The sky crop only affects the composition.
+
+## Geometry and Formats
+
+- Foreground alignment matches terrestrial texture on a thumbnail with a longest edge of up to 256 pixels. When the source is larger, the matcher verifies the translation with bounded full-resolution patches. The alignment assumes matching source dimensions and a common scale and orientation. Weak, repetitive, and disconnected overlaps are reported. Foreground panel rotations, scale changes, and perspective differences are outside this model.
+- A shared mixed panel supplies horizon points in both the anchored foreground and the cropped sky grid. The proposal uses a similarity transform and reports its RMS residual. Composition coordinates use the zero-based sky grid with positive Y downward. Positive rotation turns clockwise in the image. The composition canvas covers both the cropped sky rectangle and the placed foreground rectangle.
+- The seam is horizontal in the sky grid. The width is the requested percentage of the smaller of the cropped sky height and the placed foreground's bounding height. The blend uses both layers only within the seam band and their common validity. A sample supported by just one layer retains that layer's value. Holes stay uncovered.
+- Independent outputs retain linear float32 samples and binary coverage. FITS supports mono and TIFF supports mono and RGB. The sky layer retains its TAN WCS. A composition retains both layers' provenance in processing history and adds a byte contribution map with `0` for uncovered, `1` for sky, `2` for foreground, and `3` for both. FITS stores it in `LAYERS`. AstroMosaic TIFF version 2 stores it in the second SubIFD after binary coverage. The independent TIFF layers keep the version 1 layout.
+- Version 3 manifests store the per-panel sky selection, foreground alignment, and composition settings. Version 1 and 2 projects remain readable. Tile memory reservations include the current layer samples and blend buffers. The preview and export use the same geometry and sample original source windows.
+
+## Windows Verification
+
+- A same-scale textured foreground was recovered from mono FITS and RGB TIFF panels with a known `(35, 5)` pixel offset. The second panel supplied ground without a celestial WCS. A larger fixture recovered `(159, 7)` pixels using thumbnail and full-resolution matching. Flat and mismatched panels, a missing shared horizon, and an insufficient working budget produced diagnostics. [Layer tests](../tests/numerical/test_layers.py)
+- The shared horizon in the aligned fixtures recovered placement with less than `1e-7` pixel RMS. Changed placement, rotation, scale, seam, overlap, and crop survived reopening. CFITSIO and tifffile reopened the respective composites with matching preview samples, coverage, and layer contribution codes. Tests cover genuine gaps, partial common coverage, preview/export agreement, and cancelled output cleanup. [Layer tests](../tests/numerical/test_layers.py)
+- The desktop workflow verified alignment, a placement proposal, dialog edits, reopen, the overlap overlay, and a FITS composition export. All 74 tests passed on Windows 11 x64 with native OpenGL enabled. The focused viewport and composition workflows passed at 2× device scale. Offscreen CPU checks passed for the three desktop workflows and viewport. [Desktop tests](../tests/integration/test_desktop_project.py)
+
+Real terrestrial captures and the large mixed workload remain in the follow-up validation register. [Q-010](../questions_open_topics.md#q-010---foreground-recognition-masks-and-composition)

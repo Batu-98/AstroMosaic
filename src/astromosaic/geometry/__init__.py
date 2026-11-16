@@ -17,6 +17,17 @@ ROUND_TRIP_TOLERANCE = 1e-4  # pixels
 _INVERSE_TOLERANCE = 1e-8  # pixels
 
 
+def raster_pixels(
+    region: Region, scale: tuple[float, float], origin: tuple[int, int] = (0, 0)
+) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+    y, x = np.indices((region.height, region.width), dtype=np.float64)
+    # Map raster centers into the output's zero-based, pixel-edge rectangle.
+    return (
+        (x.ravel() + region.x + 0.5) * scale[0] - 0.5 + origin[0],
+        (y.ravel() + region.y + 0.5) * scale[1] - 0.5 + origin[1],
+    )
+
+
 def tan_output_wcs(
     center: tuple[float, float],
     size: tuple[int, int],
@@ -102,13 +113,7 @@ class TileSky:
     def from_output(
         cls, output: PanelGeometry, region: Region, scale: tuple[float, float] = (1.0, 1.0)
     ) -> Self:
-        y, x = np.indices((region.height, region.width), dtype=np.float64)
-        # Map raster centers onto the same pixel-edge rectangle as the exported grid.
-        return cls.from_pixels(
-            output,
-            (x.ravel() + region.x + 0.5) * scale[0] - 0.5,
-            (y.ravel() + region.y + 0.5) * scale[1] - 0.5,
-        )
+        return cls.from_pixels(output, *raster_pixels(region, scale))
 
     @classmethod
     def from_pixels(

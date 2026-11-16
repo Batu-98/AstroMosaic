@@ -13,6 +13,7 @@ from astromosaic.core import Tile
 from astromosaic.core.job import JobContext, MosaicCancelled
 from astromosaic.core.masks import MASK_EDGE, SKY, UNCLASSIFIED, SourceMask
 from astromosaic.display import DisplayFrame, normalize_preview, normalize_tile
+from astromosaic.geometry.image import CompositionSpec
 from astromosaic.io import open_panel
 from astromosaic.io.fits import open_fits_sky_mask
 from astromosaic.pipeline.masking import (
@@ -22,7 +23,17 @@ from astromosaic.pipeline.masking import (
     suggest_foreground,
 )
 from astromosaic.pipeline.mosaic import MosaicResult, PreviewFrame
-from astromosaic.storage.project import MosaicProject, ProjectPanel, preview_project, render_project
+from astromosaic.storage.project import (
+    Layer,
+    MosaicProject,
+    ProjectPanel,
+    align_project_foreground,
+    preview_project,
+    preview_project_layer,
+    propose_project_composition,
+    render_project,
+    render_project_layer,
+)
 
 
 class _ProjectJob[Result](QThread):
@@ -68,12 +79,17 @@ class MosaicJob(_ProjectJob[MosaicResult]):
     label = "mosaic"
     progress_label = "Rendering"
 
-    def __init__(self, project: MosaicProject, destination: Path, parent: QObject) -> None:
+    def __init__(
+        self, project: MosaicProject, destination: Path, parent: QObject, layer: Layer = "sky"
+    ) -> None:
         super().__init__(project, parent)
         self.destination = destination
+        self.layer = layer
 
     def perform(self, context: JobContext) -> MosaicResult:
-        return render_project(self.project, self.destination, context)
+        if self.layer == "sky":
+            return render_project(self.project, self.destination, context)
+        return render_project_layer(self.project, self.layer, self.destination, context)
 
 
 class PreviewJob(_ProjectJob[DisplayFrame]):
@@ -81,13 +97,38 @@ class PreviewJob(_ProjectJob[DisplayFrame]):
     label = "preview"
     progress_label = "Previewing"
 
+    def __init__(self, project: MosaicProject, parent: QObject, layer: Layer = "sky") -> None:
+        super().__init__(project, parent)
+        self.layer = layer
+
     def _publish_proxy(self, preview: PreviewFrame) -> None:
         self.proxy_ready.emit(normalize_preview(preview))
 
     def perform(self, context: JobContext) -> DisplayFrame:
-        frame = normalize_preview(preview_project(self.project, context, self._publish_proxy))
+        preview = (
+            preview_project(self.project, context, self._publish_proxy)
+            if self.layer == "sky"
+            else preview_project_layer(self.project, self.layer, context, self._publish_proxy)
+        )
+        frame = normalize_preview(preview)
         context.check_cancelled()
         return frame
+
+
+class ForegroundAlignmentJob(_ProjectJob[MosaicProject]):
+    label = "foreground alignment"
+    progress_label = "Comparing foreground"
+    progress_units = "steps"
+
+    def perform(self, context: JobContext) -> MosaicProject:
+        return align_project_foreground(self.project, context)
+
+
+class CompositionProposalJob(_ProjectJob[CompositionSpec]):
+    label = "placement proposal"
+
+    def perform(self, context: JobContext) -> CompositionSpec:
+        return propose_project_composition(self.project, context)
 
 
 def _panel_thumbnail(

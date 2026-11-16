@@ -1,6 +1,6 @@
 """Bounded display buffers and a linked mono/RGB stretch for sky previews."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import numpy as np
 from numpy.typing import NDArray
@@ -18,6 +18,8 @@ class DisplayFrame:
     output_size: tuple[int, int]
     rgba: NDArray[np.float32]
     has_coverage: bool
+    common_coverage: NDArray[np.bool_] | None = None
+    seam_width: float | None = None
 
     @property
     def size(self) -> tuple[int, int]:
@@ -25,7 +27,20 @@ class DisplayFrame:
 
 
 def normalize_preview(frame: PreviewFrame) -> DisplayFrame:
-    return normalize_tile(frame.tile, frame.output_size)
+    return replace(
+        normalize_tile(frame.tile, frame.output_size),
+        common_coverage=frame.common_coverage,
+        seam_width=frame.seam_width,
+    )
+
+
+def highlight_overlap(frame: DisplayFrame) -> DisplayFrame:
+    if frame.common_coverage is None:
+        return frame
+    rgba = frame.rgba.copy()
+    rgba[frame.common_coverage, :3] = (0.0, 0.7, 0.85)
+    rgba.setflags(write=False)
+    return replace(frame, rgba=rgba)
 
 
 def normalize_tile(tile: Tile, output_size: tuple[int, int]) -> DisplayFrame:

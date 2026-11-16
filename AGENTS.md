@@ -46,6 +46,7 @@ These rules apply to the whole AstroMosaic project. Keep development focused, un
 ## 7. Simple Completion Checks
 
 - Check that the change does what was requested and run the relevant existing tests, if available.
+- Open test windows and dialogs on the second monitor when one is available.
 - Add a focused test when new behavior or a bug fix needs one. Documentation-only edits need a content and link review, not application tests.
 - Report what passed and what could not be checked. Fix failures or record the remaining issue; do not claim unverified success.
 - Apply detailed numerical and platform checks when the relevant feature or phase requires them. Mark a phase complete only when its planned criteria are met.

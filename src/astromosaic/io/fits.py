@@ -99,29 +99,35 @@ def optional_header_text(header: fits.Header, keyword: str) -> str | None:
 
 
 def _coverage_hdu(hdus: fits.HDUList, shape: tuple[int, int], size: int) -> fits.ImageHDU | None:
-    extensions = hdus[1:3]
-    if not extensions:
+    composition = hdus[0].header.get("LAYERS") is True
+    names = ("COVERAGE", "LAYERS") if composition else ("COVERAGE",)
+    extensions = hdus[1 : len(names) + 2]
+    if not extensions and not composition:
         return None
-    coverage = extensions[0]
-    if (
-        len(extensions) != 1
-        or not isinstance(coverage, fits.ImageHDU)
-        or coverage.name != "COVERAGE"
-    ):
-        raise ValueError("FITS extensions are unsupported except for a single COVERAGE image.")
-    header = coverage.header
+    if len(extensions) != len(names):
+        raise ValueError("Expected the FITS COVERAGE and any declared LAYERS image.")
+    for image, name in zip(extensions, names, strict=True):
+        if not isinstance(image, fits.ImageHDU) or image.name != name:
+            raise ValueError(f"Unexpected FITS extensions. Expected the {name} image.")
+        _check_byte_extension(image, shape, size)
+    return cast(fits.ImageHDU, extensions[0])
+
+
+def _check_byte_extension(image: fits.ImageHDU, shape: tuple[int, int], size: int) -> None:
+    header = image.header
     height, width = shape
     if (
-        coverage.shape != shape
+        image.shape != shape
         or header["BITPIX"] != 8
         or header.get("BSCALE", 1) != 1
         or header.get("BZERO", 0) != 0
         or "BLANK" in header
     ):
-        raise ValueError("Expected an unscaled byte COVERAGE image matching the primary shape.")
-    if coverage.fileinfo()["datLoc"] + height * width > size:
-        raise ValueError("The FITS COVERAGE image is truncated.")
-    return coverage
+        raise ValueError(
+            f"Expected an unscaled byte {image.name} image matching the primary shape."
+        )
+    if image.fileinfo()["datLoc"] + height * width > size:
+        raise ValueError(f"The FITS {image.name} image is truncated.")
 
 
 @contextmanager

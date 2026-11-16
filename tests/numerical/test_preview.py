@@ -32,6 +32,7 @@ def test_fits_preview_uses_rotated_cropped_export_grid(tmp_path: Path) -> None:
     with open_panel(destination) as output_panel:
         reopened = WCS(output_panel.header)
     y, x = np.indices((crop.height, crop.width))
+    assert preview.output_wcs is not None
     np.testing.assert_allclose(
         preview.output_wcs.pixel_to_world_values(x, y),
         reopened.pixel_to_world_values(x, y),

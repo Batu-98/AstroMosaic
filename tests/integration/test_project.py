@@ -39,7 +39,7 @@ def test_project_manifest_reopens_with_settings_and_relocates_with_its_files(
     save_project(path, project)
     assert load_project(path) == project
     data = json.loads(path.read_text(encoding="utf-8"))
-    assert data["version"] == 2
+    assert data["version"] == 3
     assert data["panels"][0]["source"]["path"] == source.name
     relocated = original.rename(tmp_path / "relocated")
     reopened = load_project(relocated / path.name)

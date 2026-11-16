@@ -9,13 +9,22 @@ from typing import IO, Literal
 import numpy as np
 from astropy.io import fits
 from numpy.typing import NDArray
-from tifffile import COMPRESSION, PHOTOMETRIC, PLANARCONFIG, PREDICTOR, TiffFile, TiffPage
+from tifffile import (
+    COMPRESSION,
+    PHOTOMETRIC,
+    PLANARCONFIG,
+    PREDICTOR,
+    TiffFile,
+    TiffFrame,
+    TiffPage,
+)
 
 from astromosaic.core import PanelDescriptor, Region, SourceFingerprint, Tile
 from astromosaic.io.fits import FitsTileSource, open_fits_sky_mask, optional_header_text
 
 DESCRIPTION_PREFIX = "AstroMosaic TIFF "
 DESCRIPTION_VERSION = DESCRIPTION_PREFIX + "1\n"
+COMPOSITION_VERSION = DESCRIPTION_PREFIX + "2\n"
 DESCRIPTION_LIMIT = 128 * 1024
 _LOSSLESS_CODECS = {
     COMPRESSION.NONE,
@@ -219,17 +228,26 @@ def _read_metadata(page: TiffPage) -> tuple[fits.Header, TiffPage | None]:
         if page.subifds:
             raise ValueError("Unsupported TIFF subimages in a linear panel.")
         return fits.Header(), None
-    if not description.startswith(DESCRIPTION_VERSION) or len(description) > DESCRIPTION_LIMIT:
+    composition = description.startswith(COMPOSITION_VERSION)
+    prefix = COMPOSITION_VERSION if composition else DESCRIPTION_VERSION
+    if not description.startswith(prefix) or len(description) > DESCRIPTION_LIMIT:
         raise ValueError("Unsupported AstroMosaic TIFF metadata version or size.")
-    header = fits.Header.fromstring(description.removeprefix(DESCRIPTION_VERSION), sep="\n")
+    header = fits.Header.fromstring(description.removeprefix(prefix), sep="\n")
     if header.get("BSCALE", 1.0) != 1.0 or header.get("BZERO", 0.0) != 0.0 or "BLANK" in header:
         raise ValueError("TIFF metadata must describe unscaled samples without a BLANK value.")
-    if not page.subifds:
+    if not page.subifds and not composition:
         return header, None
     subimages = page.pages
-    if len(page.subifds) != 1 or subimages is None:
-        raise ValueError("Expected a single TIFF coverage subimage.")
-    coverage = subimages[0]
+    expected = 2 if composition else 1
+    if subimages is None or not page.subifds or len(page.subifds) != expected:
+        raise ValueError("Expected the TIFF coverage and any declared layer subimages.")
+    coverage = _byte_subimage(page, subimages[0])
+    if composition:
+        _byte_subimage(page, subimages[1])
+    return header, coverage
+
+
+def _byte_subimage(page: TiffPage, coverage: TiffPage | TiffFrame) -> TiffPage:
     if (
         not isinstance(coverage, TiffPage)
         or coverage.dtype != np.dtype("uint8")
@@ -238,9 +256,9 @@ def _read_metadata(page: TiffPage) -> tuple[fits.Header, TiffPage | None]:
         or (coverage.imagewidth, coverage.imagelength) != (page.imagewidth, page.imagelength)
         or coverage.subifds
     ):
-        raise ValueError("Expected a byte coverage subimage matching the TIFF panel dimensions.")
+        raise ValueError("Expected a byte subimage matching the TIFF panel dimensions.")
     _check_orientation(coverage)
-    return header, coverage
+    return coverage
 
 
 @contextmanager

@@ -28,7 +28,13 @@ def _image_header(header: fits.Header, width: int, height: int, bitpix: int) -> 
 
 @contextmanager
 def open_fits_mosaic(
-    path: Path, width: int, height: int, header: fits.Header, max_output_bytes: int
+    path: Path,
+    width: int,
+    height: int,
+    header: fits.Header,
+    max_output_bytes: int,
+    *,
+    layers: bool = False,
 ) -> Iterator[RasterMosaicWriter]:
     """Publish only after all tiles are written and flushed, without replacing an existing file."""
     path = path.absolute()
@@ -37,12 +43,20 @@ def open_fits_mosaic(
 
     primary = fits.PrimaryHDU(header=header).header
     primary.set("EXTEND", True, after="NAXIS")
+    if layers:
+        primary["LAYERS"] = (True, "Layer contribution raster present")
     pixels_header = _image_header(primary, width, height, -32)
     coverage_header = _image_header(fits.ImageHDU(name="COVERAGE").header, width, height, 8)
     pixel_count = width * height
     extension_offset = len(pixels_header) + _padded_size(4 * pixel_count)
     coverage_offset = extension_offset + len(coverage_header)
     total_size = coverage_offset + _padded_size(pixel_count)
+    layers_header = None
+    layers_offset = None
+    if layers:
+        layers_header = _image_header(fits.ImageHDU(name="LAYERS").header, width, height, 8)
+        layers_offset = total_size + len(layers_header)
+        total_size = layers_offset + _padded_size(pixel_count)
     if total_size > max_output_bytes:
         raise ValueError("The FITS mosaic exceeds the configured output byte limit.")
     if total_size > disk_usage(path.parent).free:
@@ -58,5 +72,11 @@ def open_fits_mosaic(
         stream.write(coverage_header)
         coverage_end = coverage_offset + pixel_count
         stream.seek(coverage_end)
-        stream.write(bytes(total_size - coverage_end))
-        yield RasterMosaicWriter(stream, width, len(pixels_header), coverage_offset, ">f4")
+        stream.write(bytes(_padded_size(pixel_count) - pixel_count))
+        if layers_header is not None and layers_offset is not None:
+            stream.write(layers_header)
+            stream.seek(layers_offset + pixel_count)
+            stream.write(bytes(_padded_size(pixel_count) - pixel_count))
+        yield RasterMosaicWriter(
+            stream, width, len(pixels_header), coverage_offset, ">f4", layers_offset
+        )
