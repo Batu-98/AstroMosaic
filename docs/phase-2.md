@@ -1,5 +1,7 @@
 # Phase 2 Astronomy Reference
 
+The original checks and results below are the baseline for [Phase 3.5 astronomy engine revalidation](../astro_mosaic_python_first_architecture_en.md#phase-35-astronomy-engine-revalidation).
+
 ## Acceptance Fixtures
 
 Fix the following thresholds for the named synthetic cases before tuning the fit. Stellar and extended-signal checks use generated truth independent of the fitting code. The offline solver checks use the public M13 DSS sample and archive provenance from Phase 0. [Phase 0 solver experiment](phase-0.md#offline-astap-experiment)

@@ -11,7 +11,7 @@ A Windows-first desktop application in development for assembling linear astrono
 | [AGENTS.md](AGENTS.md) | Mandatory working rules for development agents. |
 | [progression.md](progression.md) | Current phase, concise work history, verification, and next action. |
 | [questions_open_topics.md](questions_open_topics.md) | Open decisions, problems, risks, and their resolutions. |
-| [Python-first architecture](astro_mosaic_python_first_architecture_en.md) | Active technical plan, revision 3.6, including [Phase 3A–3F](astro_mosaic_python_first_architecture_en.md#101-phase-3-delivery-stages). |
+| [Python-first architecture](astro_mosaic_python_first_architecture_en.md) | Active technical plan, revision 3.9, including [Phase 3.1 desktop plate solving](astro_mosaic_python_first_architecture_en.md#phase-31-desktop-plate-solving), [Phase 3.5 engine revalidation](astro_mosaic_python_first_architecture_en.md#phase-35-astronomy-engine-revalidation), and [Phase 4 automation and large mosaics](astro_mosaic_python_first_architecture_en.md#102-phase-4-delivery-stages). |
 | [Phase 0 evidence](docs/phase-0.md) | Platform matrix, fixture tolerances, probe results, and packaging procedure. |
 | [Phase 1 FITS reference](docs/phase-1.md) | CLI contract, fixtures, export checks, and measured resource use. |
 | [Phase 2 astronomy reference](docs/phase-2.md) | Offline catalog setup, WCS sidecars, masks, refinement, and acceptance evidence. |
@@ -20,6 +20,7 @@ A Windows-first desktop application in development for assembling linear astrono
 | [Phase 3C sky preview and export](docs/phase-3c.md) | Preview controls, display backends, and comparison against reopened exports. |
 | [Phase 3D sky masks](docs/phase-3d.md) | Foreground tags, editable masks, and sky-only processing. |
 | [Phase 3E foreground and composition](docs/phase-3e.md) | Independent layers, shared horizon placement, seam controls, and layer exports. |
+| [Phase 3F Windows package](docs/phase-3f.md) | Reproducible package build, background acceptance checks, and clean-machine follow-up. |
 | [ADR-0001](docs/adr/0001-python-first-baseline.md) | Records which architecture is active and which decisions remain unverified. |
 
 All project Markdown, source comments, identifiers, logs, and default application text are written in English.

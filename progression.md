@@ -5,13 +5,13 @@ Use this file for concise development history and handoff state. Detailed techni
 ## Current State
 
 - **Last updated:** 2026-11-16
-- **Active baseline:** Python-first architecture revision 3.6, with [Phase 3A–3F delivery stages](astro_mosaic_python_first_architecture_en.md#101-phase-3-delivery-stages). See [ADR-0003](docs/adr/0003-windows-first-platform-scope.md) for Windows scope, [ADR-0006](docs/adr/0006-dual-fits-and-tiff-workflow.md) for formats, and [ADR-0007](docs/adr/0007-sky-and-foreground-mosaics.md) for mixed panels.
-- **Current stage:** Phase 3E passed the development gate on Windows 11 x64. Linux and macOS support is deferred.
-- **Available artifacts:** [Independent layer previews and exports](docs/phase-3e.md), [foreground tags and editable sky masks](docs/phase-3d.md), and a Qt-free CLI with saved project-panel solving, WCS sidecars, mono relative refinement, and float32 FITS/TIFF export.
-- **Implementation / verification:** All 74 tests passed on Windows 11 x64 with native Qt and OpenGL enabled. Focused 2× device-scale and offscreen CPU checks passed. Ruff, mypy, Poetry lock validation, and documentation link checks passed. [Phase 3E checks](docs/phase-3e.md#windows-verification)
-- **Version control:** Phase 3D is published as `1e682b1` on `origin/main`. Phase 3E is in the local working tree. [AstroMosaic GitHub repository](https://github.com/Batu-98/AstroMosaic)
-- **Next action:** Start Phase 3F with the packaged Windows build and run the FITS/TIFF acceptance workflows on it.
-- **Open dependencies:** Q-003 through Q-005, Q-009, and Q-010 track later numerical, resource, distribution, format, and mixed-panel gates. Q-008 tracks deferred platforms and Q-011 tracks deferred visual fill. Q-006 and Q-007 are resolved for the Windows solver and FITS export references.
+- **Active baseline:** Python-first architecture revision 3.9, with [Phase 3.1 desktop plate solving](astro_mosaic_python_first_architecture_en.md#phase-31-desktop-plate-solving), [Phase 3.5 engine revalidation](astro_mosaic_python_first_architecture_en.md#phase-35-astronomy-engine-revalidation), and [Phase 4A–4C automation and scaling](astro_mosaic_python_first_architecture_en.md#102-phase-4-delivery-stages). See [ADR-0003](docs/adr/0003-windows-first-platform-scope.md) for Windows scope, [ADR-0006](docs/adr/0006-dual-fits-and-tiff-workflow.md) for formats, and [ADR-0007](docs/adr/0007-sky-and-foreground-mosaics.md) for mixed panels.
+- **Current stage:** The Phase 3F bundles passed local Windows acceptance. The clean-machine check remains open. Linux and macOS support is deferred.
+- **Available artifacts:** [Portable Windows desktop and CLI bundles](docs/phase-3f.md), [independent layer previews and exports](docs/phase-3e.md), and [foreground tags and editable sky masks](docs/phase-3d.md).
+- **Implementation / verification:** The frozen desktop checks passed on offscreen CPU and hidden native OpenGL, including export agreement, relinking, recovery, and cancellation. The frozen CLI passed worker spawning, FITS and TIFF exports, and local Gaia and ASTAP. The offscreen source suite passed 73 tests. Ruff, mypy, Poetry lock validation, and documentation links passed. [Phase 3F evidence](docs/phase-3f.md#windows-evidence)
+- **Version control:** Phase 3E and the test monitor instruction are published as `f236a3a` on `origin/main`. [AstroMosaic GitHub repository](https://github.com/Batu-98/AstroMosaic)
+- **Next action:** Start Phase 3.1A with panel WCS status and optical metadata fixtures. Begin 3.5 after the desktop solve checks pass and begin 4A after 3.5C. Run the portable launcher and export check in parallel when a clean Windows 11 x64 installation is available.
+- **Open dependencies:** Q-013 tracks optical metadata conventions for 3.1A. Q-003 through Q-005, Q-009, and Q-010 track later numerical, resource, distribution, format, and mixed-panel gates. Q-008 tracks deferred platforms, Q-011 tracks deferred visual fill, and Q-012 tracks desktop terminal scope. Q-006 and Q-007 are resolved for the Windows solver and FITS export references.
 
 ## Phase Overview
 
@@ -22,14 +22,22 @@ The table is a status summary, not a replacement for the full exit gates in Sect
 | Preparation | Complete | Agent instructions, English documentation, tracking conventions, active-plan identification, and next task established. |
 | 0 - Compatibility and scope | Complete | Locked environment, initial fixtures/contracts, solver and PySide float-texture experiments, packaged skeleton, and a small job verified on Windows 11 x64. |
 | 1 - Headless reference | Complete | Correct two-panel FITS geometry, values, and coverage, independent reopening, bounded access, and a Qt-free CLI. The deferred TIFF checkpoint passed in Phase 3A. |
-| 2 - Robust astronomy engine | Complete | Verified local Gaia/ASTAP fallback, supplied sky masks, anchored overlap registration and stellar gains, offset/plane selection, held-out and injected-signal gates, and weak/disconnected diagnostics on Windows. |
+| 2 - Robust astronomy engine | Original gate passed | Verified local Gaia/ASTAP fallback, supplied sky masks, anchored overlap registration and stellar gains, offset/plane selection, held-out and injected-signal gates, and weak/disconnected diagnostics on Windows. |
 | 3A - Linear TIFF | Complete | Mono/RGB input and output verified on Windows for samples, channels, WCS, and coverage. |
 | 3B - Projects and jobs | Complete | Project save/reopen, panel relinking, responsive progress, and cancellation verified on native Windows Qt. |
 | 3C - Preview and export | Complete | Verified shared preview/export geometry, pan and zoom, display-only stretch, and GPU/CPU fallback on Windows. |
 | 3D - Sky masks | Complete | Verified automatic proposals, manual tag and mask edits after reopening, and sky-only solving and fitting. |
 | 3E - Foreground and composition | Complete | Verified WCS-independent foreground alignment, separate layer exports, and saved placement, seam, and crop edits on Windows. |
-| 3F - Windows acceptance | Not started | Packaged FITS/TIFF workflows, recovery, cancellation cleanup, and CPU fallback verified. |
-| 4 - Large mosaics and improved blends | Not started | Budgeted rendering of 12 FITS and TIFF panels at 6000 × 4000, including a mixed scene, incremental export, tile/halo correctness, and measured improvement for any optional multiband blend. |
+| 3F - Windows acceptance | Local checks passed | Packaged workflows, recovery, cancellation cleanup, and CPU fallback passed on the development host. Clean-machine validation remains open. |
+| 3.1A - Panel WCS and optical metadata | Not started | Per-panel WCS status, embedded and edited optical hints, scale derivation, and older project compatibility. |
+| 3.1B - Local plate solve settings | Not started | Gaia DR3 and ASTAP paths persisted and validated with actionable diagnostics. |
+| 3.1C - Desktop plate solve job | Not started | Packaged Windows workflow solves eligible panels, attaches reusable WCS, and handles cancellation and retry. |
+| 3.5A - Phase 2 review | Not started | Criteria mapped to current evidence, baseline rerun, and gaps and added thresholds recorded. |
+| 3.5B - Revision | Not started | Acceptance findings resolved with focused regression evidence. |
+| 3.5C - Verification | Not started | Numerical and packaged CLI results meet the Phase 2 criteria before Phase 4 starts. |
+| 4A - Headless project automation | Not started | Windows CLI project creation, validation and export, machine-readable results, and scripted batch and cancellation checks. |
+| 4B - Large mosaics and improved blends | Not started | Budgeted rendering of 12 FITS and TIFF panels at 6000 × 4000, including a mixed scene, incremental export, tile/halo correctness, and measured improvement for any optional multiband blend. |
+| 4C - Desktop terminal panel | Not started | Shared AstroMosaic commands, live progress, history, and cancellation verified in a responsive desktop panel. |
 | 5 - Extended formats and channels | Not started | Format/channel/projection contracts and packaging checks for each added workflow. |
 
 ## Journal Rules
@@ -286,6 +294,46 @@ The table is a status summary, not a replacement for the full exit gates in Sect
 - **Verified:** All 74 native Windows tests passed with OpenGL enabled. The focused viewport and composition workflows passed at 2× device scale, and the offscreen CPU checks passed. Ruff, mypy, Poetry lock validation, and documentation links passed. Native test dialogs opened on the secondary monitor.
 - **Related:** [Phase 3E evidence](docs/phase-3e.md), [ADR-0015](docs/adr/0015-independent-layer-rendering.md), Q-004, Q-009, and Q-010. Real terrestrial captures and the 12-panel workload remain follow-up checks.
 - **Next:** Begin Phase 3F with a packaged Windows build and rerun the mixed-panel workflow, recovery, cancellation, and CPU fallback checks.
+
+### 2026-11-16 - Repository update - Published Phase 3E and test guidance
+
+- **Changed:** Added the secondary-monitor instruction for test windows and dialogs to `AGENTS.md`. Published it with the Phase 3E source and evidence.
+- **Verified:** All 74 native Windows tests, Ruff, mypy, and Poetry lock validation passed. The test runner observed dialogs on the secondary monitor. The remote points to `f236a3a`.
+- **Next:** Build and verify the Windows desktop and CLI packages for Phase 3F.
+
+### 2026-11-16 - Phase 3F - Built the Windows packages
+
+- **Changed:** Added a repeatable PyInstaller build for the desktop and Qt-free CLI with the required TIFF codecs. Added a launcher option for visible tests on the secondary monitor.
+- **Verified:** The regular desktop launcher opened a native file chooser, relinked a moved TIFF, and drew the foreground in OpenGL on the second monitor. The frozen CLI passed spawned-worker, FITS, compressed TIFF, and local solver checks.
+- **Next:** Verify the remaining desktop acceptance paths in the background.
+
+### 2026-11-16 - Phase 3F - Passed local background acceptance
+
+- **Changed:** Added a separate frozen desktop checker that runs with the portable bundle's native libraries and supplies paths to the normal project and export entry points.
+- **Verified:** Offscreen CPU and hidden OpenGL passed the mixed-layer preview and export checks, relinking, simulated save failure recovery, running-job cancellation, and retry. The offscreen source suite passed 73 tests and skipped one native viewport test. Ruff, mypy, Poetry lock validation, and documentation links passed.
+- **Related:** [Phase 3F evidence](docs/phase-3f.md), Q-001, Q-004, Q-005, Q-009, and Q-010.
+- **Next:** Repeat the portable check on a clean Windows 11 x64 installation. The host provided no enabled Windows Sandbox or Hyper-V instance.
+
+### 2026-11-16 - Phase 4 planning - Added local automation and desktop terminal stages
+
+- **Changed:** Updated the plan to revision 3.7. Scheduled the scriptable project CLI in 4A, large-mosaic checks in 4B, and the desktop terminal panel in 4C.
+- **Verified:** Reviewed the plan against the current CLI, headless project loader and layer renderer, and Windows package evidence. Checked local documentation links, stage and revision references, topic IDs, and patch whitespace. This was a documentation update.
+- **Related:** [Phase 4 stages](astro_mosaic_python_first_architecture_en.md#102-phase-4-delivery-stages), [ADR-0016](docs/adr/0016-local-automation.md), and Q-012.
+- **Next:** Define the 4A project validation and export commands and their JSON results. Repeat the portable bundle check when a clean Windows 11 x64 installation is available.
+
+### 2026-11-16 - Phase 3.1 planning - Scheduled astronomy engine revalidation
+
+- **Changed:** Updated the plan to revision 3.8. Added 3.1A review, 3.1B revision, and 3.1C verification of the Phase 2 engine before Phase 4A.
+- **Verified:** Reviewed the sequence and exit criteria against the original Phase 2 fixtures, solver evidence, and current Windows workflows. Checked stage and revision references, local links, and patch whitespace.
+- **Related:** [Phase 3.1 gates](astro_mosaic_python_first_architecture_en.md#phase-31-astronomy-engine-revalidation), [Phase 2 baseline](docs/phase-2.md#acceptance-fixtures), and Q-003.
+- **Next:** Start 3.1A with the Phase 2 criteria-to-evidence review and baseline rerun.
+
+### 2026-11-16 - Phase 3.1 planning - Scheduled desktop plate solving
+
+- **Changed:** Updated the plan to revision 3.9. Added per-panel WCS and optical metadata, local solver settings, and the desktop solve job in 3.1A–3.1C. Renumbered the Phase 2 revalidation to 3.5A–3.5C and kept its verification as the entry condition for 4A.
+- **Verified:** Reviewed the plan against the FITS and TIFF metadata readers, current Gaia and ASTAP adapters, and project job and WCS sidecar contracts. Checked the phase order, cross-references, local links, and patch whitespace.
+- **Related:** [Desktop plate solving](astro_mosaic_python_first_architecture_en.md#phase-31-desktop-plate-solving), [Phase 3.5 revalidation](astro_mosaic_python_first_architecture_en.md#phase-35-astronomy-engine-revalidation), Q-003, and Q-013.
+- **Next:** Start 3.1A by choosing representative metadata fixtures and mapping the effective WCS states.
 
 ## Entry Template
 

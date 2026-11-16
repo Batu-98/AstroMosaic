@@ -4,8 +4,8 @@
 
 # AstroMosaic v1: Python-First Architecture and Implementation Plan
 
-- **Revision:** 3.6
-- **Date:** November 15, 2026
+- **Revision:** 3.9
+- **Date:** November 16, 2026
 - **Status:** Proposed implementation baseline following local source inspection
 - **Initial target:** Windows 11 x64
 - **Deferred platform support:** Linux and macOS may be added later. See [ADR-0003](docs/adr/0003-windows-first-platform-scope.md).
@@ -172,6 +172,14 @@ Use ordinary functions, dataclasses, and narrow protocols. Avoid a plugin platfo
 | `CompositionSpec` | Layer identities and transforms into the composition frame, reference panel or manual anchors, placement and crop, requested overlap, seam settings, and coverage. |
 
 GUI communication uses small progress/result descriptors and signals. Do not pass mutable whole-image arrays between the UI and several workers without ownership rules. Create QPixmap and manipulate widgets on the GUI thread.
+
+### 5.2 Local Automation for Agents and Scripts
+
+Use the existing Qt-free CLI as the local automation interface. Make commands discoverable with `--help` and identify the installed release with `--version`. Keep existing invocations compatible. Document exit codes and provide an opt-in, versioned UTF-8 JSON format with one final result on stdout and newline-delimited progress and diagnostic events on stderr. Automation commands run without interactive prompts.
+
+Use the saved `.astromosaic` manifest as the reusable job description. Provide commands to create a sky project from panel paths and render settings, check a saved project's inputs and settings before rendering, and export a selected sky, foreground, or composite layer from saved state. Project jobs use the same headless validation, renderer, resource budgets, and cancellation as desktop jobs. Require an explicit export destination, preserve source images, and publish completed outputs atomically. Provide PowerShell and Python examples that call the CLI to run projects in batch and read their results.
+
+Add a desktop terminal panel for the same AstroMosaic commands, with session history, output, progress, and cancellation. Run jobs off the UI thread. [Automation decision](docs/adr/0016-local-automation.md)
 
 ## 6. Processing Pipeline
 
@@ -343,7 +351,9 @@ Record selected backend, fallback reason, dtype conversions, failed coordinate c
 | 1: Headless reference | FITS tile access, masks, WCS reuse, Gnomonic reprojection, weighted blending, FITS export | Two-panel FITS output with correct geometry and values, independently reopened, and a Qt-free CLI. Then verify linear mono and RGB TIFF input and output before Phase 3 desktop acceptance. |
 | 2: Robust astronomy engine | Offline Gaia/ASTAP chain, masked sky processing, overlap graph, robust global registration, stellar scale, offset/plane corrections | Verify WCS reuse, fallback order, cancellation, and exhausted-chain diagnostics. Pass held-out alignment and injected-signal gates, including a mixed fixture with supplied masks, and report weak or disconnected cases. |
 | 3: Desktop workflow | Six delivery stages covering TIFF interoperability, project and job management, preview and export, sky masks, foreground composition, and Windows acceptance. | Meet the [Phase 3A–3F gates](#101-phase-3-delivery-stages). |
-| 4: Large mosaics and improved blends | Enforced memory budget, 12-panel 6000 x 4000 FITS and TIFF renders including RGB and a mixed sky and foreground case, optional multiband blending, and incremental export | Output-tile correctness, no halo seams, bounded memory/queue growth, and measured quality improvement for any optional blend. |
+| 3.1: Desktop plate solving | Per-panel WCS status and optical hints, local catalog settings, and a desktop solve job | Pass the [Phase 3.1A–3.1C checks](#phase-31-desktop-plate-solving) before starting Phase 3.5. |
+| 3.5: Astronomy engine revalidation | Review Phase 2 evidence on the current engine, resolve findings, and verify the results | Pass the [Phase 3.5A–3.5C checks](#phase-35-astronomy-engine-revalidation) before starting Phase 4. |
+| 4: Automation, large mosaics, and desktop terminal | Scriptable project commands, budgeted large renders and improved blends, and a desktop command panel | Meet the [Phase 4A–4C gates](#102-phase-4-delivery-stages). |
 | 5: Extended formats and channels | Optional XISF, projections, and per-band outputs | Format, geometry, mask, unit, packaging, and channel-consistency checks pass for each added workflow. |
 
 Memory and portability contracts begin in Phase 0; Phase 4 scales and verifies them. Do not postpone their architectural design until after the GUI or blend engine is complete.
@@ -358,6 +368,54 @@ Memory and portability contracts begin in Phase 0; Phase 4 scales and verifies t
 | 3D | Foreground tags and editable sky masks | Verify automatic tag and mask proposals plus manual overrides on mixed panels. Save and reopen a project with those edits. Verify that foreground features stay out of sky solving and fitting. |
 | 3E | Foreground stitching and layer composition | Verify image-space foreground alignment without WCS and independent sky and foreground exports. Propose a composition from a shared mixed panel. Verify that manual placement, seam overlap, and sky-edge crop edits survive reopening. |
 | 3F | Packaged Windows 11 x64 acceptance | Exercise the full FITS and TIFF workflows in the packaged app, including mixed panels. Verify preview/export agreement, project recovery and relinking, cancelled-job cleanup, and CPU fallback. Close Phase 3 after the cumulative checks pass. |
+
+### Phase 3.1 Desktop Plate Solving
+
+Start 3.1A after local Phase 3F acceptance. Run the [clean Windows 11 x64 check](docs/phase-3f.md#pending-clean-machine-check) in parallel when a test installation is available. Reuse the [offline solver chain](#63-wcs-reuse-solving-and-registration) and the project background job and sidecar contracts.
+
+#### 3.1A Panel WCS status and optical metadata
+
+- Show the effective WCS state for every panel in the project list. Distinguish validated embedded WCS, validated sidecar WCS, missing WCS, and invalid or stale WCS. Show why an input cannot be checked when its source is missing or unreadable. Refresh status on import, reopen, relink, mask edits, and solve completion.
+- Populate focal length in millimeters and effective X and Y pixel sizes in micrometers from supported embedded FITS or TIFF metadata. Start with FITS producer conventions such as `FOCALLEN`, `XPIXSZ`, and `YPIXSZ`, including FITS-style metadata already read by the TIFF adapter. Accept other embedded fields when their meaning and units are verified against representative files. Generic TIFF resolution tags are excluded as a source of sensor pitch. Record the metadata source and let users fill or override values per panel. Save explicit edits in the project and support reopening earlier manifests. [N.I.N.A. FITS fields](https://nighttime-imaging.eu/docs/master/site/advanced/file_formats/fits.html) · [MaxIm DL FITS field definitions](https://cdn.diffractionlimited.com/help/maximdl/FITS_File_Header_Definitions.htm)
+- Derive an approximate image scale in arcseconds per pixel from the effective pixel pitch and focal length when both are usable. Use the axis geometry consistently when deriving the solver's field-of-view hint. Prefer an explicit scale if supplied, then a validated embedded scale, then a derived scale. Use valid pointing hints when present. Treat optical values as scale hints and use the applicable blind fallback when pointing is missing. Account for binning or resampling only when confirmed by the metadata convention. Leave ambiguous, missing, or invalid hints unset.
+- Verify status and hint precedence with FITS and TIFF inputs containing valid, absent, and malformed metadata, including stale sidecar and binned-image cases. Verify manual overrides and reopening older projects.
+
+#### 3.1B Local plate solve settings
+
+- Add a **Plate Solve Settings** section accessible before running a job. Let the user browse to a local Gaia DR3 catalog file and its matching blind index when needed, and to the ASTAP executable and local catalog directory with the appropriate database selection. Support either configured backend or both in the existing precedence order.
+- Save the paths in local application settings. Validate configured paths and backend availability and explain missing or incompatible files and the hints or index needed for a usable attempt. Keep catalog identities in solve diagnostics. Verify path selection, persistence across application restarts, and actionable messages for missing or moved data.
+
+#### 3.1C Desktop plate solve job
+
+- Add a **Plate Solve** button that runs the existing Qt-free solver in a cancellable background job for sky-bearing panels without a validated effective WCS. Skip panels with validated WCS or no sky contribution. Use each panel's current hints and effective sky mask. Show the number of applicable panels, progress and per-panel outcomes, including the solver used and diagnostic reasons for failures.
+- Publish each successful WCS as a source- and mask-bound sidecar, attach it to the matching project panel, and refresh its state so preview and export can use it. Preserve original image files. Retain completed results when another panel fails or the user cancels. Keep the remaining panels eligible for retry and clean up incomplete output and solver staging.
+- Verify a mixed project with embedded WCS, a reusable sidecar, an unsolved sky panel, and a foreground-only panel in the Windows desktop bundle. Confirm only eligible panels reach the solver. Exercise Gaia DR3 and ASTAP configurations, fallback when both are configured, cancellation and retry, project save and reopen, and reuse of the solved WCS by preview and export. Verify unchanged inputs and that the CLI remains Qt-free.
+
+<a name="phase-31-astronomy-engine-revalidation"></a>
+
+### Phase 3.5 Astronomy Engine Revalidation
+
+Start 3.5A after Phase 3.1 passes. Use the [original Phase 2 acceptance criteria and evidence](docs/phase-2.md#acceptance-fixtures) as the baseline. Include the Phase 3.1 desktop solve workflow in the regression review.
+
+Review the supported mono workflow from solving through export. Cover WCS reuse and ordered offline Gaia/ASTAP fallback, sidecar validity, timeout and cancellation cleanup, and source immutability. Check sky masking with supplied masks and saved project edits, held-out alignment, relative stellar gain and profiles, offset and plane selection, faint emission recovery, and weak or disconnected overlaps.
+
+| Stage | Deliverable | Acceptance evidence |
+| --- | --- | --- |
+| 3.5A | Review | Map each Phase 2 criterion to current code, fixtures, and results. Rerun the original baseline on Windows 11 x64. Record coverage gaps and failing cases with reproduction steps. Select representative cases for any gaps and freeze their acceptance thresholds before revising the engine. |
+| 3.5B | Revision | Resolve findings that affect acceptance. Add focused regression checks for corrected behavior and missing evidence. Record before-and-after results for corrections and track any follow-up outside this gate in the topic register. |
+| 3.5C | Verification | Rerun the full Phase 2 baseline and added regressions on Windows 11 x64 against the frozen criteria. Exercise offline solving, sidecar reuse, and a representative masked refinement and export through the Qt-free Windows CLI bundle. Reopen a FITS export independently and verify pixels, WCS, and coverage. Record the tested revision, fixture and catalog versions, measured results, and pass or fail for each gate. |
+
+Close Phase 3.5 when the recorded evidence meets every Phase 2 acceptance criterion and all findings that affect acceptance are resolved.
+
+### 10.2 Phase 4 Delivery Stages
+
+Start 4A after [Phase 3.5C](#phase-35-astronomy-engine-revalidation) passes. Use the CLI from 4A for the 4B benchmarks. Build the desktop panel after the large-mosaic checks exercise progress and cancellation.
+
+| Stage | Deliverable | Acceptance evidence |
+| --- | --- | --- |
+| 4A | Headless project automation and scripts | On Windows 11 x64, use the installed CLI and portable console launcher to create and validate a sky project, run a batch of saved FITS and TIFF projects, and reproduce a saved mixed-project export with matching pixels, coverage, and applicable WCS. Verify that scripts can parse results and progress, detect missing inputs and occupied output paths, and cancel a render without publishing a partial export. The workflow runs without Qt. |
+| 4B | Large mosaics and improved blends | Run 12-panel 6000 x 4000 FITS and TIFF jobs, including RGB and a mixed sky and foreground case, with enforced memory limits and incremental export. Verify output-tile correctness, seamless halo boundaries, bounded queue growth, and measured quality improvement for any optional multiband blend. |
+| 4C | Desktop terminal panel | Validate a saved project and export from the panel using the same commands and results as the standalone CLI. Verify command history, progress, and cancellation with partial-output cleanup while the Windows desktop stays responsive. |
 
 ## 11. Validation and Acceptance Criteria
 
