@@ -15,7 +15,7 @@ from astropy.io import fits
 
 from astromosaic.astrometry.astap_probe import solve_astap
 from astromosaic.astrometry.stars import astrometry_pixels, measure_stars
-from astromosaic.core import Region
+from astromosaic.core import Region, SourceFingerprint
 from astromosaic.core.job import DEFAULT_JOB_CONTEXT, JobContext, MosaicCancelled
 from astromosaic.geometry import PanelGeometry, read_panel_geometry
 from astromosaic.io import PanelSource
@@ -304,7 +304,7 @@ def _source_identity(source: PanelSource) -> dict[str, object]:
     return {
         "fingerprint": asdict(descriptor.fingerprint),
         "size": [descriptor.width, descriptor.height],
-        "sky_mask": asdict(mask) if mask is not None else None,
+        "sky_mask": asdict(mask) if isinstance(mask, SourceFingerprint) else mask,
     }
 
 

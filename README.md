@@ -2,7 +2,7 @@
 
 A Windows-first desktop application in development for assembling linear astronomical image panels into reproducible mosaics.
 
-**Current state:** The Windows 11 x64 desktop app can save and relink projects, preview sky mosaics on OpenGL or CPU, and export float32 FITS and TIFF. The CLI supports offline solving and mono relative refinement. Linux and macOS support is deferred.
+**Current state:** The Windows 11 x64 desktop app can save and relink projects, propose and edit sky masks, preview sky mosaics on OpenGL or CPU, and export float32 FITS and TIFF. The CLI supports offline solving and mono relative refinement. Linux and macOS support is deferred.
 
 ## Start Here
 
@@ -18,6 +18,7 @@ A Windows-first desktop application in development for assembling linear astrono
 | [Phase 3A linear TIFF](docs/phase-3a.md) | Sample formats, WCS and coverage layout, interoperability limits, and Windows fixtures. |
 | [Phase 3B projects and jobs](docs/phase-3b.md) | Desktop setup, project save and relinking, worker progress, and cancellation. |
 | [Phase 3C sky preview and export](docs/phase-3c.md) | Preview controls, display backends, and comparison against reopened exports. |
+| [Phase 3D sky masks](docs/phase-3d.md) | Foreground tags, editable masks, and sky-only processing. |
 | [ADR-0001](docs/adr/0001-python-first-baseline.md) | Records which architecture is active and which decisions remain unverified. |
 
 All project Markdown, source comments, identifiers, logs, and default application text are written in English.
@@ -34,7 +35,7 @@ The user workflow provides first-class support for both FITS and linear TIFF pan
 
 The offline solve order is validated existing WCS, local Gaia DR3, hinted ASTAP, then blind ASTAP. The `gaia` extra adds Seiza. Catalogs and the external ASTAP executable are installed separately. [Offline setup](docs/phase-2.md#offline-solvers)
 
-The planned desktop workflow accepts panels that contain both sky and foreground. It proposes foreground tags and editable sky masks, stitches each layer independently, and supports automatic placement with manual seam, overlap, and crop controls. Plate solving applies to the sky layer. [Mixed-panel decision](docs/adr/0007-sky-and-foreground-mosaics.md)
+Mixed FITS and TIFF panels can contribute selected sky pixels to plate solving, refinement, and mosaics. The next desktop stage adds independent foreground stitching and layer placement, seam, overlap, and crop controls. [Mixed-panel decision](docs/adr/0007-sky-and-foreground-mosaics.md)
 
 The current lock uses CPython 3.13 with NumPy, SciPy, Astropy, SEP, reproject, tifffile, and imagecodecs. The `desktop` extra installs the PySide6 Essentials wheel.
 
@@ -71,6 +72,8 @@ poetry run python -m astromosaic.ui
 ```
 
 Add panels, set the mosaic grid, and save the project. Use **Build Preview** to pan, zoom, and stretch the sky image. Choose **Export Mosaic** for linear FITS or TIFF output. Both jobs report progress and support cancellation. [Desktop workflow](docs/phase-3c.md#desktop-workflow)
+
+For a mixed panel, choose **Panel → Propose Sky Mask** and review the overlay, or draw the mask with **Edit Sky Mask**. Use **Panel Settings** to override the foreground tag. [Mixed-panel workflow](docs/phase-3d.md#desktop-workflow)
 
 ## Develop and Verify
 

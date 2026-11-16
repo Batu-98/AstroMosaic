@@ -21,8 +21,17 @@ from phase2_reference import (
 from astromosaic.astrometry.registration import ProjectedField, register
 from astromosaic.cli import main
 from astromosaic.core.job import JobContext
+from astromosaic.core.masks import FOREGROUND, SKY, SourceMask
 from astromosaic.pipeline.mosaic import RenderSpec, preview_mosaic, render_mosaic
 from astromosaic.pipeline.refinement import RefinementSpec
+from astromosaic.storage.project import (
+    FileReference,
+    MosaicProject,
+    ProjectPanel,
+    load_project,
+    render_project,
+    save_project,
+)
 
 
 def _profile(
@@ -44,13 +53,23 @@ def test_three_panel_refinement_preserves_stars_emission_and_sky_mask(tmp_path: 
         fixture = write_panels(directory, injected=injected)
         originals = {path: path.read_bytes() for path in (*fixture.paths, fixture.mask)}
         output = directory / "refined.fits"
-        result = render_mosaic(
-            fixture.paths,
-            output,
-            RenderSpec(CENTER, SIZE, ARCSEC, tile_size=37),
-            sky_masks={1: fixture.mask},
-            refinement=RefinementSpec(background="plane"),
-        )
+        spec = RenderSpec(CENTER, SIZE, ARCSEC, tile_size=37)
+        refinement = RefinementSpec(background="plane")
+        if injected:
+            labels = np.where(fits.getdata(fixture.mask) == 1, SKY, FOREGROUND).astype(np.uint8)
+            height, width = labels.shape
+            mask = SourceMask((width, height), labels.tobytes())
+            panels = tuple(
+                ProjectPanel(FileReference.capture(path), source_mask=mask if index == 1 else None)
+                for index, path in enumerate(fixture.paths)
+            )
+            manifest = directory / "mixed.astromosaic"
+            save_project(manifest, MosaicProject(panels, spec, refinement=refinement))
+            result = render_project(load_project(manifest), output, JobContext())
+        else:
+            result = render_mosaic(
+                fixture.paths, output, spec, sky_masks={1: fixture.mask}, refinement=refinement
+            )
         refined = result.refinement
         assert refined is not None and refined.status == "ready"
         assert refined.components == ((1, 2, 3),)
@@ -75,14 +94,14 @@ def test_three_panel_refinement_preserves_stars_emission_and_sky_mask(tmp_path: 
             coverage = hdus["COVERAGE"].read()
             assert coverage[133, 180] == 0 and np.isnan(pixels[133, 180])
             assert coverage[60, 180] == 1
-            assert np.nanmax(pixels) < 150  # The supplied ground is at least 300 brightness units.
+            assert np.nanmax(pixels) < 150  # The injected ground is at least 300 brightness units.
             products.append(pixels)
         if injected:
             preview = preview_mosaic(
                 fixture.paths,
-                RenderSpec(CENTER, SIZE, ARCSEC, tile_size=37),
+                spec,
                 sky_masks={1: fixture.mask},
-                refinement=RefinementSpec(background="plane"),
+                refinement=refinement,
             )
             np.testing.assert_array_equal(preview.tile.pixels, pixels)
             np.testing.assert_array_equal(preview.tile.valid, coverage)

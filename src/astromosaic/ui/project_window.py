@@ -28,7 +28,8 @@ from astromosaic.storage.project import (
     load_project,
     save_project,
 )
-from astromosaic.ui.mosaic_job import MosaicJob, PreviewJob
+from astromosaic.ui.mask_editor import MaskEditor
+from astromosaic.ui.mosaic_job import ForegroundJob, MaskEditorJob, MosaicJob, PreviewJob
 from astromosaic.ui.project_settings import PANEL_FILES, PanelSettings, ProjectSettings
 from astromosaic.ui.sky_viewport import SkyViewport
 
@@ -36,6 +37,7 @@ _PROJECT_FILTER = "AstroMosaic project (*.astromosaic)"
 _TIFF_FILTER = "TIFF mosaic (*.tiff *.tif)"
 _FITS_FILTER = "FITS mosaic (*.fits *.fit *.fts)"
 _Button = QMessageBox.StandardButton
+_Job = MosaicJob | PreviewJob | ForegroundJob | MaskEditorJob
 
 
 class ProjectWindow(QMainWindow):
@@ -44,7 +46,7 @@ class ProjectWindow(QMainWindow):
         self.project = MosaicProject()
         self._saved = self.project
         self.project_path: Path | None = None
-        self.job: MosaicJob | PreviewJob | None = None
+        self.job: _Job | None = None
         self._preview_project: MosaicProject | None = None
         self._close_after_job = False
         self.setWindowTitle("AstroMosaic")
@@ -58,6 +60,9 @@ class ProjectWindow(QMainWindow):
             file_menu.addAction("&Save Project", "Ctrl+S", self._save),
             file_menu.addAction("Save Project &As…", "Ctrl+Shift+S", self._save_as),
         )
+        panel_menu = self.menuBar().addMenu("&Panel")
+        self.check_foreground = panel_menu.addAction("Check Foreground", self._check_foreground)
+        self.propose_mask = panel_menu.addAction("Propose Sky Mask…", self._propose_mask)
 
         body = QWidget(self)
         self.setCentralWidget(body)
@@ -82,9 +87,17 @@ class ProjectWindow(QMainWindow):
         self.relink_button.clicked.connect(self._relink)
         self.panel_button = QPushButton("Panel Settings…")
         self.panel_button.clicked.connect(self._panel_settings)
+        self.mask_button = QPushButton("Edit Sky Mask…")
+        self.mask_button.clicked.connect(self._edit_mask)
         self.remove_button = QPushButton("Remove")
         self.remove_button.clicked.connect(self._remove)
-        for button in (self.add_button, self.relink_button, self.panel_button, self.remove_button):
+        for button in (
+            self.add_button,
+            self.relink_button,
+            self.panel_button,
+            self.mask_button,
+            self.remove_button,
+        ):
             buttons.addWidget(button)
         buttons.addStretch()
         controls.addLayout(buttons)
@@ -133,8 +146,27 @@ class ProjectWindow(QMainWindow):
             attention = [f"{role} {value.lower()}" for role, value in statuses if value != "Ready"]
             linked &= not attention
             detail = ", ".join(attention) or "Linked"
+            tag = {
+                None: "Foreground unchecked",
+                "mixed": "Foreground suggested",
+                "uncertain": "Uncertain foreground",
+                "sky-only": "No foreground detected",
+            }[panel.foreground_tag]
+            if panel.foreground_override is not None:
+                tag = (
+                    "Mixed (manual)"
+                    if panel.foreground_override == "mixed"
+                    else "Sky only (manual)"
+                )
+            elif panel.source_mask is not None:
+                tag = "Mixed"
+            mask = ""
+            if panel.source_mask is not None or panel.sky_mask is not None:
+                mask = "  ·  Sky mask saved"
+            elif panel.foreground_tag in ("mixed", "uncertain"):
+                mask = "  ·  Sky mask needed"
             item = QListWidgetItem(
-                f"{panel.source.path.name}  ·  Weight {panel.weight:g}  ·  {detail}"
+                f"{panel.source.path.name}  ·  Weight {panel.weight:g}  ·  {detail}  ·  {tag}{mask}"
             )
             item.setToolTip(
                 "\n".join(f"{role}: {reference.path}" for role, reference in panel.references())
@@ -162,9 +194,14 @@ class ProjectWindow(QMainWindow):
         self.cancel_button.setEnabled(self.job is not None)
 
     def _selection_changed(self) -> None:
-        selected = self.panels.currentRow() >= 0
-        for button in (self.relink_button, self.panel_button, self.remove_button):
+        index = self.panels.currentRow()
+        selected = index >= 0 and self.job is None
+        for button in (self.relink_button, self.panel_button, self.mask_button, self.remove_button):
             button.setEnabled(selected)
+        self.check_foreground.setEnabled(selected)
+        self.propose_mask.setEnabled(
+            selected and self.project.panels[index].foreground_tag in ("mixed", "uncertain")
+        )
 
     def _confirm_discard(self) -> bool:
         if self.project == self._saved:
@@ -262,9 +299,11 @@ class ProjectWindow(QMainWindow):
             start = len(self.project.panels)
             self.project = replace(self.project, panels=self.project.panels + tuple(additions))
             self._refresh(start)
-            self.status.setText(
-                f"Added {len(additions)} panel(s)." if additions else "Panels already added."
-            )
+            if additions:
+                indices = tuple(range(start, len(self.project.panels)))
+                self._launch_job(ForegroundJob(self.project, indices, self), "Checking foreground…")
+            else:
+                self.status.setText("Panels already added.")
         except (OSError, ValueError) as error:
             self._error("Add failed", error)
 
@@ -299,13 +338,33 @@ class ProjectWindow(QMainWindow):
                 except (OSError, ValueError) as error:
                     self._error("Invalid panel settings", error)
                     continue
-                self.project = replace(
-                    self.project, panels=panels[:index] + (panel,) + panels[index + 1 :]
-                )
-                self._refresh(index)
+                self._update_panel(index, panel)
                 break
         finally:
             dialog.deleteLater()
+
+    def _update_panel(self, index: int, panel: ProjectPanel) -> None:
+        panels = self.project.panels
+        self.project = replace(self.project, panels=panels[:index] + (panel,) + panels[index + 1 :])
+        self._refresh(index)
+
+    def _check_foreground(self) -> None:
+        index = self.panels.currentRow()
+        if index >= 0 and self.job is None:
+            self._launch_job(ForegroundJob(self.project, (index,), self), "Checking foreground…")
+
+    def _edit_mask(self) -> None:
+        self._open_mask_editor(propose=False)
+
+    def _propose_mask(self) -> None:
+        self._open_mask_editor(propose=True)
+
+    def _open_mask_editor(self, *, propose: bool) -> None:
+        index = self.panels.currentRow()
+        if index >= 0 and self.job is None:
+            self._launch_job(
+                MaskEditorJob(self.project, index, propose, self), "Preparing sky mask…"
+            )
 
     def _settings(self) -> None:
         dialog = ProjectSettings(self.project, self)
@@ -356,7 +415,7 @@ class ProjectWindow(QMainWindow):
         if self.sender() is self.job and self.cancel_button.isEnabled():
             self.viewport.set_frame(frame)
 
-    def _launch_job(self, job: MosaicJob | PreviewJob, message: str) -> None:
+    def _launch_job(self, job: _Job, message: str) -> None:
         self.job = job
         job.progress.connect(self._progress)
         job.finished.connect(self._finished)
@@ -373,13 +432,14 @@ class ProjectWindow(QMainWindow):
         self.start_button.setEnabled(not running and bool(self.project.panels))
         self.preview_button.setEnabled(not running and bool(self.project.panels))
         self.cancel_button.setEnabled(running)
+        self._selection_changed()
 
     @Slot(object, object)
     def _progress(self, done: int, total: int) -> None:
         self.progress.setValue((100 * done) // total)
-        if self.cancel_button.isEnabled():
-            action = "Previewing" if isinstance(self.job, PreviewJob) else "Rendering"
-            self.status.setText(f"{action} {done:,} / {total:,} pixels.")
+        job = self.job
+        if job is not None and self.cancel_button.isEnabled():
+            self.status.setText(f"{job.progress_label} {done:,} / {total:,} {job.progress_units}.")
 
     @Slot()
     def _finished(self) -> None:
@@ -388,6 +448,10 @@ class ProjectWindow(QMainWindow):
         self._set_running(False)
         if isinstance(job, PreviewJob):
             self._finish_preview(job)
+        elif isinstance(job, ForegroundJob):
+            self._finish_foreground_check(job)
+        elif isinstance(job, MaskEditorJob):
+            self._finish_mask_editor(job)
         elif job.result is not None:
             self.progress.setValue(100)
             self.status.setText(
@@ -424,12 +488,71 @@ class ProjectWindow(QMainWindow):
                 self.status.setText(f"Preview failed. {job.error or 'No result was returned.'}")
                 self._refresh(self.panels.currentRow())
 
+    def _finish_foreground_check(self, job: ForegroundJob) -> None:
+        if job.result is None:
+            self._mask_job_status(job)
+            return
+        self.project, problems = job.result
+        self._refresh(self.panels.currentRow())
+        self.progress.setValue(100)
+        if problems:
+            self.status.setText(
+                f"Foreground check failed for {len(problems)} panel(s). {problems[0]}"
+            )
+        else:
+            self.status.setText(f"Checked {len(job.indices)} panel(s) for foreground.")
+
+    def _finish_mask_editor(self, job: MaskEditorJob) -> None:
+        if job.result is None:
+            self._mask_job_status(job)
+            return
+        if self._close_after_job:
+            return
+        self.progress.setValue(100)
+        panel = self.project.panels[job.index]
+        self.status.setText(f"Edit the sky mask for {panel.source.path.name}.")
+        dialog = MaskEditor(
+            panel.source.path.name,
+            job.result,
+            proposed=job.propose,
+            attached=panel.sky_mask is not None,
+            parent=self,
+        )
+        try:
+            accepted = dialog.exec()
+            mask = dialog.result_mask
+        finally:
+            dialog.deleteLater()
+        if not accepted:
+            self.status.setText("Sky mask editing cancelled.")
+            return
+        if (panel.sky_mask is not None and mask is not None and mask == job.result.saved) or (
+            panel.sky_mask is None and mask == panel.source_mask
+        ):
+            self.status.setText("Sky mask kept.")
+            return
+        self._update_panel(job.index, replace(panel, source_mask=mask, sky_mask=None))
+        message = "Sky mask applied." if mask is not None else "Sky mask removed."
+        previous = panel.source_mask.sky_fingerprint if panel.source_mask is not None else None
+        current = mask.sky_fingerprint if mask is not None else None
+        if panel.wcs_sidecar is not None and (panel.sky_mask is not None or previous != current):
+            message += " Recompute or clear the WCS sidecar for the new mask revision."
+        self.status.setText(message)
+
+    def _mask_job_status(self, job: ForegroundJob | MaskEditorJob) -> None:
+        self.progress.setValue(0)
+        name = job.label.capitalize()
+        self.status.setText(
+            f"{name} cancelled."
+            if job.cancelled
+            else f"{name} failed. {job.error or 'No result was returned.'}"
+        )
+
     def _cancel(self) -> None:
         if self.job is not None:
             self.job.cancel()
             self.cancel_button.setEnabled(False)
-            action = "preview" if isinstance(self.job, PreviewJob) else "mosaic"
-            self.status.setText(f"Cancelling {action}…")
+            self.status.setText(f"Cancelling {self.job.label}…")
 
     def _error(self, title: str, error: Exception) -> None:
         box = QMessageBox(self)

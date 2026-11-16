@@ -6,11 +6,11 @@ Use this file for concise development history and handoff state. Detailed techni
 
 - **Last updated:** 2026-11-16
 - **Active baseline:** Python-first architecture revision 3.6, with [Phase 3A–3F delivery stages](astro_mosaic_python_first_architecture_en.md#101-phase-3-delivery-stages). See [ADR-0003](docs/adr/0003-windows-first-platform-scope.md) for Windows scope, [ADR-0006](docs/adr/0006-dual-fits-and-tiff-workflow.md) for formats, and [ADR-0007](docs/adr/0007-sky-and-foreground-mosaics.md) for mixed panels.
-- **Current stage:** Phase 3C passed on Windows 11 x64. The desktop workflow previews and exports sky mosaics. Linux and macOS support is deferred.
-- **Available artifacts:** [OpenGL and CPU sky preview](docs/phase-3c.md), [PySide6 project persistence and jobs](docs/phase-3b.md), and a Qt-free CLI with offline solving, WCS sidecars, supplied sky masks, mono relative refinement, and float32 FITS/TIFF export. The [Phase 2 development bundle](docs/phase-2.md#windows-development-bundle) covers the FITS reference.
-- **Implementation / verification:** All 62 tests passed on Windows 11 x64 with native Qt and OpenGL enabled, along with Ruff, mypy, Poetry lock validation, and documentation link checks. The [Phase 3C checks](docs/phase-3c.md#windows-verification) include CPU fallback, 2× device scaling, and linear samples, coverage, and coordinates compared with reopened exports.
-- **Version control:** This Phase 3C snapshot follows the published Phase 3A and 3B snapshot `1e3a05d` on `main`. [AstroMosaic GitHub repository](https://github.com/Batu-98/AstroMosaic)
-- **Next action:** Start Phase 3D with foreground tag proposals and source-coordinate sky masks. Verify manual overrides, persistence, and exclusion of ground features from sky solving and fitting.
+- **Current stage:** Phase 3D passed on Windows 11 x64. Linux and macOS support is deferred.
+- **Available artifacts:** [Foreground tags and editable sky masks](docs/phase-3d.md), [OpenGL and CPU sky preview](docs/phase-3c.md), and a Qt-free CLI with saved project-panel solving, WCS sidecars, mono relative refinement, and float32 FITS/TIFF export.
+- **Implementation / verification:** All 68 tests passed on Windows 11 x64 with native Qt and OpenGL enabled. The desktop checks also passed at 2× device scale and on the offscreen CPU path. Ruff, mypy, Poetry lock validation, and documentation link checks passed. [Phase 3D checks](docs/phase-3d.md#windows-verification)
+- **Version control:** Phase 3C is published as `e60d4a9` on `origin/main`. Phase 3D is in the working tree. [AstroMosaic GitHub repository](https://github.com/Batu-98/AstroMosaic)
+- **Next action:** Start Phase 3E with bounded foreground feature matching and independent image-space alignment on panels without celestial WCS.
 - **Open dependencies:** Q-003 through Q-005, Q-009, and Q-010 track later numerical, resource, distribution, format, and mixed-panel gates. Q-008 tracks deferred platforms and Q-011 tracks deferred visual fill. Q-006 and Q-007 are resolved for the Windows solver and FITS export references.
 
 ## Phase Overview
@@ -26,7 +26,7 @@ The table is a status summary, not a replacement for the full exit gates in Sect
 | 3A - Linear TIFF | Complete | Mono/RGB input and output verified on Windows for samples, channels, WCS, and coverage. |
 | 3B - Projects and jobs | Complete | Project save/reopen, panel relinking, responsive progress, and cancellation verified on native Windows Qt. |
 | 3C - Preview and export | Complete | Verified shared preview/export geometry, pan and zoom, display-only stretch, and GPU/CPU fallback on Windows. |
-| 3D - Sky masks | Not started | Automatic proposals and manual tag/mask edits that survive project reopen. |
+| 3D - Sky masks | Complete | Verified automatic proposals, manual tag and mask edits after reopening, and sky-only solving and fitting. |
 | 3E - Foreground and composition | Not started | Independent layer alignment and export, plus saved placement, overlap, and crop edits. |
 | 3F - Windows acceptance | Not started | Packaged FITS/TIFF workflows, recovery, cancellation cleanup, and CPU fallback verified. |
 | 4 - Large mosaics and improved blends | Not started | Budgeted rendering of 12 FITS and TIFF panels at 6000 × 4000, including a mixed scene, incremental export, tile/halo correctness, and measured improvement for any optional multiband blend. |
@@ -246,6 +246,26 @@ The table is a status summary, not a replacement for the full exit gates in Sect
 - **Changed:** Prepared the shared sky preview and export snapshot for `main`.
 - **Verified:** Re-ran all 62 tests on native Windows Qt with OpenGL required. Ruff lint and format checks, mypy, and Poetry lock validation passed.
 - **Next:** Confirm the remote revision, then implement Phase 3D foreground tags and sky masks.
+
+### 2026-11-16 - Repository update - Published Phase 3C
+
+- **Changed:** Pushed the Phase 3C sky preview and export snapshot `e60d4a9` to `origin/main`.
+- **Verified:** GitHub accepted the fast-forward from `1e3a05d`. The local `main` and remote-tracking `origin/main` both resolved to `e60d4a9` after the push.
+- **Next:** Continue Phase 3D with foreground checks and mask editing.
+
+### 2026-11-16 - Phase 3D - Implemented mask proposals and editing
+
+- **Changed:** Added local thumbnail checks, a cancellable mask job, an overlay editor, and manifest persistence for foreground overrides and source-coordinate masks. Preview, export, refinement, and project-panel solving use the effective sky mask.
+- **Verified:** The initial Phase 2 M13 trial recognized the synthetic foreground in the mixed copy and found no horizon in the original. The proposal on the mixed copy did not label any injected ground pixels as sky.
+- **Related:** Q-010.
+- **Next:** Exercise interactive edits, bounds, cancellation, and the full solver and refinement paths on Windows.
+
+### 2026-11-16 - Phase 3D - Completed: saved sky mask workflow
+
+- **Changed:** Rejected short horizon candidates caused by isolated stars and narrowed the unclassified band around strong edges. Saved the edited grid and foreground override in manifest version 2, with version 1 read support.
+- **Verified:** All 68 native Windows tests passed. Focused 2× and CPU desktop checks, Ruff, mypy, Poetry lock validation, and local links passed. FITS and RGB TIFF fixtures verified the mask labels. ASTAP solved the mixed M13 project panel using the proposed mask. Hinted Gaia exhausted its match search on the same masked sample.
+- **Related:** [Phase 3D evidence](docs/phase-3d.md), [ADR-0014](docs/adr/0014-source-coordinate-mask-grid.md), and Q-010.
+- **Next:** Start Phase 3E with an independent foreground registration fixture and preserve the sky layer geometry for composition.
 
 ## Entry Template
 

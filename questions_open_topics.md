@@ -66,12 +66,12 @@ This register tracks unresolved decisions, problems, and risks. It is not a work
 
 ### Q-010 - Foreground recognition, masks, and composition
 
-- **Status / priority:** Open / P1
-- **Opened / updated:** 2026-11-15 / 2026-11-15
+- **Status / priority:** Investigating / P1
+- **Opened / updated:** 2026-11-15 / 2026-11-16
 - **Affected phase:** Phase 2 masked sky processing, Phase 3D mask editing, Phase 3E foreground alignment and composition, Phase 3F packaged acceptance, and Phase 4 resource validation.
-- **Impact and evidence:** [Phase 2 checks](docs/phase-2.md) verify supplied sky-mask use for solving, stellar and background fitting, and sky export. The desktop workflow also needs foreground tags, editable masks, independent ground registration, and a reproducible horizon seam.
-- **Current assumption:** Use local thumbnail detection, separate segmentation, and image-space foreground registration. Derive an automatic composition proposal from a shared mixed panel and provide manual adjustment. Start with the overlap percentage convention in the [plan](astro_mosaic_python_first_architecture_en.md#67-mixed-sky-and-foreground-panels).
-- **Next action / responsibility:** Extend the supplied-mask fixture to mixed FITS and TIFF workflow tests. Measure detection latency and segmentation error on low-contrast and irregular horizons. Test manual corrections, mismatched frames, and seams with partial or zero common coverage before selecting backends.
+- **Impact and evidence:** [Phase 3D](docs/phase-3d.md#windows-verification) verifies local suggestions, manual overrides and masks, and exclusion of foreground from sky solving and fitting. The detector handles the tested dark and irregular horizons. Small, rotated, and ambiguous terrain still needs manual review.
+- **Current assumption:** Reuse the saved three-label source grid for image-space registration. Derive an automatic composition proposal from a shared mixed panel and provide manual adjustment. Start with the overlap percentage convention in the [plan](astro_mosaic_python_first_architecture_en.md#67-mixed-sky-and-foreground-panels).
+- **Next action / responsibility:** Verify ground alignment without a sky WCS, weak and mismatched frames, and seams with partial or zero common coverage. Add representative terrestrial captures when evaluating the detector beyond the current fixtures.
 - **Closure condition:** Verify the Phase 2 and 3 mixed-panel gates, including separate layer exports and saved edits, then run the Phase 4 mixed workload within measured memory and worker limits.
 
 ### Q-011 - Optional generative fill for a visual seam

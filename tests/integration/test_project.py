@@ -39,7 +39,7 @@ def test_project_manifest_reopens_with_settings_and_relocates_with_its_files(
     save_project(path, project)
     assert load_project(path) == project
     data = json.loads(path.read_text(encoding="utf-8"))
-    assert data["version"] == 1
+    assert data["version"] == 2
     assert data["panels"][0]["source"]["path"] == source.name
     relocated = original.rename(tmp_path / "relocated")
     reopened = load_project(relocated / path.name)
@@ -48,6 +48,13 @@ def test_project_manifest_reopens_with_settings_and_relocates_with_its_files(
         ref.path.parent == relocated and ref.status() == "Ready"
         for _, ref in reopened.panels[0].references()
     )
+    legacy = relocated / "legacy.astromosaic"
+    data["version"] = 1
+    for record in data["panels"]:
+        for key in ("foreground_suggestion", "foreground_override", "source_mask"):
+            del record[key]
+    legacy.write_text(json.dumps(data), encoding="utf-8")
+    assert load_project(legacy) == reopened
 
 
 def test_relink_requires_saved_fingerprint_and_changes_are_checked_before_render(

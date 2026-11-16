@@ -21,11 +21,13 @@ from PySide6.QtWidgets import (
 )
 
 from astromosaic.core import Region
+from astromosaic.core.masks import ForegroundTag
 from astromosaic.pipeline.mosaic import RenderSpec
 from astromosaic.pipeline.refinement import RefinementSpec
 from astromosaic.storage.project import FileReference, MosaicProject, ProjectPanel
 
 PANEL_FILES = "Linear panels (*.fits *.fit *.fts *.tif *.tiff);;All files (*)"
+_OVERRIDES: tuple[ForegroundTag | None, ...] = (None, "mixed", "sky-only")
 
 
 class _SettingsDialog(QDialog):
@@ -126,9 +128,15 @@ class PanelSettings(_SettingsDialog):
         source.setText(panel.source.path.name)
         self.form.addRow("Source", source)
         self.weight = self.field("Blend weight", panel.weight)
+        self.foreground_override = QComboBox()
+        self.foreground_override.addItems(
+            ["Use suggestion", "Mixed sky and foreground", "Sky only"]
+        )
+        self.foreground_override.setCurrentIndex(_OVERRIDES.index(panel.foreground_override))
+        self.form.addRow("Foreground tag", self.foreground_override)
         self.wcs = self._attachment("WCS sidecar", panel.wcs_sidecar, "WCS sidecar (*.json)")
         self.sky_mask = self._attachment(
-            "Sky mask", panel.sky_mask, "FITS image (*.fits *.fit *.fts)"
+            "FITS sky mask", panel.sky_mask, "FITS image (*.fits *.fit *.fts)"
         )
         self.buttons()
 
@@ -166,9 +174,12 @@ class PanelSettings(_SettingsDialog):
                 return previous
             return FileReference.capture(path)
 
+        sky_mask = attachment(self.sky_mask, self.panel.sky_mask)
         return replace(
             self.panel,
             weight=weight,
             wcs_sidecar=attachment(self.wcs, self.panel.wcs_sidecar),
-            sky_mask=attachment(self.sky_mask, self.panel.sky_mask),
+            sky_mask=sky_mask,
+            source_mask=None if sky_mask is not None else self.panel.source_mask,
+            foreground_override=_OVERRIDES[self.foreground_override.currentIndex()],
         )

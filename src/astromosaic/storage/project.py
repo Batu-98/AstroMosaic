@@ -2,7 +2,9 @@
 
 import json
 import os
-from collections.abc import Callable
+from base64 import b64decode, b64encode
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass, replace
 from importlib.metadata import version
 from math import isfinite
@@ -12,7 +14,15 @@ from typing import Any, TypedDict
 
 from astromosaic.core import Region, SourceFingerprint
 from astromosaic.core.job import JobContext
+from astromosaic.core.masks import (
+    MASK_EDGE,
+    ForegroundSuggestion,
+    ForegroundTag,
+    SourceMask,
+    bounded_grid,
+)
 from astromosaic.geometry import tan_output_wcs
+from astromosaic.io import PanelSource, SkyMask, open_panel
 from astromosaic.io.atomic import atomic_binary_file
 from astromosaic.pipeline.mosaic import (
     MosaicResult,
@@ -23,7 +33,7 @@ from astromosaic.pipeline.mosaic import (
 )
 from astromosaic.pipeline.refinement import RefinementSpec
 
-_SCHEMA_VERSION = 1
+_SCHEMA_VERSION = 2
 _MAX_MANIFEST_BYTES = 4 * 1024**2
 
 
@@ -62,6 +72,30 @@ class ProjectPanel:
     weight: float = 1.0
     sky_mask: FileReference | None = None
     wcs_sidecar: FileReference | None = None
+    foreground_suggestion: ForegroundSuggestion | None = None
+    foreground_override: ForegroundTag | None = None
+    source_mask: SourceMask | None = None
+
+    def __post_init__(self) -> None:
+        if self.sky_mask is not None and self.source_mask is not None:
+            raise ValueError("Choose either an attached FITS mask or an edited sky mask.")
+
+    @property
+    def foreground_tag(self) -> ForegroundSuggestion | None:
+        if self.foreground_override is not None:
+            return self.foreground_override
+        return "mixed" if self.source_mask is not None else self.foreground_suggestion
+
+    def sky_input(self) -> SkyMask | None:
+        if self.source_mask is not None:
+            return self.source_mask
+        if self.sky_mask is not None:
+            return self.sky_mask.path
+        if self.foreground_tag in ("mixed", "uncertain"):
+            raise ValueError(
+                f"{self.source.path.name}: Apply a sky mask or mark the panel Sky only."
+            )
+        return None
 
     def references(self) -> tuple[tuple[str, FileReference], ...]:
         references = [("Source", self.source)]
@@ -99,24 +133,45 @@ class _PanelInputs(TypedDict):
     weights: list[float]
     filter_name: str | None
     assume_surface_brightness: bool
-    sky_masks: dict[int, Path]
+    sky_masks: dict[int, SkyMask]
     wcs_sidecars: dict[int, Path]
     refinement: RefinementSpec | None
 
 
+def _check_reference(role: str, reference: FileReference, context: JobContext) -> None:
+    context.check_cancelled()
+    status = reference.status()
+    if status != "Ready":
+        raise ValueError(f"{role} file is {status.lower()}: {reference.path.name}")
+
+
+@contextmanager
+def open_project_sky_panel(
+    panel: ProjectPanel, max_working_bytes: int, context: JobContext
+) -> Iterator[PanelSource]:
+    """Use the saved sky selection when solving one project panel."""
+    _check_reference("Source", panel.source, context)
+    if panel.sky_mask is not None:
+        _check_reference("Sky mask", panel.sky_mask, context)
+    with open_panel(
+        panel.source.path, max_tile_bytes=max_working_bytes, sky_mask=panel.sky_input()
+    ) as source:
+        yield source
+
+
 def _verified_inputs(project: MosaicProject, context: JobContext) -> _PanelInputs:
-    for panel in project.panels:
+    sky_masks = {}
+    for index, panel in enumerate(project.panels):
         for role, reference in panel.references():
-            context.check_cancelled()
-            status = reference.status()
-            if status != "Ready":
-                raise ValueError(f"{role} file is {status.lower()}: {reference.path.name}")
+            _check_reference(role, reference, context)
+        if (mask := panel.sky_input()) is not None:
+            sky_masks[index] = mask
     return {
         "paths": [panel.source.path for panel in project.panels],
         "weights": [panel.weight for panel in project.panels],
         "filter_name": project.filter_name,
         "assume_surface_brightness": project.assume_surface_brightness,
-        "sky_masks": {i: p.sky_mask.path for i, p in enumerate(project.panels) if p.sky_mask},
+        "sky_masks": sky_masks,
         "wcs_sidecars": {
             i: p.wcs_sidecar.path for i, p in enumerate(project.panels) if p.wcs_sidecar
         },
@@ -157,6 +212,12 @@ def _encode_reference(reference: FileReference | None, directory: Path) -> dict[
     return {"path": path, "fingerprint": asdict(reference.fingerprint)}
 
 
+def _encode_mask(mask: SourceMask | None) -> dict[str, object] | None:
+    if mask is None:
+        return None
+    return {"source_size": mask.source_size, "labels": b64encode(mask.labels).decode("ascii")}
+
+
 def save_project(path: Path, project: MosaicProject, *, replace_existing: bool = False) -> None:
     if path.suffix.lower() != ".astromosaic":
         raise ValueError("The project filename must end in .astromosaic.")
@@ -181,6 +242,9 @@ def save_project(path: Path, project: MosaicProject, *, replace_existing: bool =
                 "weight": panel.weight,
                 "sky_mask": _encode_reference(panel.sky_mask, directory),
                 "wcs_sidecar": _encode_reference(panel.wcs_sidecar, directory),
+                "foreground_suggestion": panel.foreground_suggestion,
+                "foreground_override": panel.foreground_override,
+                "source_mask": _encode_mask(panel.source_mask),
             }
             for panel in project.panels
         ],
@@ -266,14 +330,39 @@ def _decode_refinement(value: object) -> RefinementSpec | None:
     return RefinementSpec(_number(record["max_shift_px"]), background)
 
 
-def _decode_panel(value: object, directory: Path) -> ProjectPanel:
+def _decode_mask(value: object) -> SourceMask | None:
+    if value is None:
+        return None
+    record = _object(value)
+    width, height = _pair(record["source_size"])
+    source_size = (_integer(width), _integer(height))
+    columns, rows = bounded_grid(source_size, MASK_EDGE)
+    labels = record["labels"]
+    if not isinstance(labels, str) or len(labels) != 4 * ((columns * rows + 2) // 3):
+        raise ValueError("Unexpected encoded source mask size.")
+    return SourceMask(source_size, b64decode(labels, validate=True))
+
+
+def _decode_panel(value: object, directory: Path, schema_version: int) -> ProjectPanel:
     record = _object(value)
     mask, wcs = record["sky_mask"], record["wcs_sidecar"]
+    suggestion, override, source_mask = None, None, None
+    if schema_version >= 2:
+        suggestion = record["foreground_suggestion"]
+        override = record["foreground_override"]
+        source_mask = _decode_mask(record["source_mask"])
+        if suggestion not in (None, "mixed", "sky-only", "uncertain"):
+            raise ValueError("Unknown foreground suggestion.")
+        if override not in (None, "mixed", "sky-only"):
+            raise ValueError("Unknown foreground override.")
     return ProjectPanel(
         _decode_reference(record["source"], directory),
         _number(record["weight"]),
         _decode_reference(mask, directory) if mask is not None else None,
         _decode_reference(wcs, directory) if wcs is not None else None,
+        suggestion,
+        override,
+        source_mask,
     )
 
 
@@ -284,7 +373,8 @@ def load_project(path: Path) -> MosaicProject:
         raise ValueError("The project manifest exceeds its size limit.")
     try:
         data = _object(json.loads(payload.decode("utf-8")))
-        if _integer(data["version"]) != _SCHEMA_VERSION:
+        schema_version = _integer(data["version"])
+        if schema_version not in (1, _SCHEMA_VERSION):
             raise ValueError("Unsupported project manifest version.")
         if not isinstance(data["panels"], list):
             raise ValueError("Expected an ordered panel list.")
@@ -294,7 +384,10 @@ def load_project(path: Path) -> MosaicProject:
         ):
             raise ValueError("Invalid filter or surface brightness declaration.")
         project = MosaicProject(
-            tuple(_decode_panel(record, path.absolute().parent) for record in data["panels"]),
+            tuple(
+                _decode_panel(record, path.absolute().parent, schema_version)
+                for record in data["panels"]
+            ),
             _decode_render(data["render"]),
             filter_name,
             assume,

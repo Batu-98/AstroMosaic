@@ -5,6 +5,7 @@ from dataclasses import dataclass
 import numpy as np
 from numpy.typing import NDArray
 
+from astromosaic.core import Tile
 from astromosaic.pipeline.mosaic import PreviewFrame
 
 MIN_MIDTONES = 5
@@ -24,10 +25,14 @@ class DisplayFrame:
 
 
 def normalize_preview(frame: PreviewFrame) -> DisplayFrame:
+    return normalize_tile(frame.tile, frame.output_size)
+
+
+def normalize_tile(tile: Tile, output_size: tuple[int, int]) -> DisplayFrame:
     """Set linked black and white points from valid samples only."""
-    valid = frame.tile.valid
+    valid = tile.valid
     rgba = np.zeros((*valid.shape, 4), dtype=np.float32)
-    samples = frame.tile.pixels[valid].astype(np.float64)
+    samples = tile.pixels[valid].astype(np.float64)
     if samples.size:
         low, high = np.percentile(samples, (1.0, 99.5))
         if low == high:
@@ -41,7 +46,7 @@ def normalize_preview(frame: PreviewFrame) -> DisplayFrame:
         rgba[valid, :3] = samples.reshape(-1, 1) if samples.ndim == 1 else samples
         rgba[..., 3] = valid
     rgba.setflags(write=False)
-    return DisplayFrame(frame.output_size, rgba, bool(samples.size))
+    return DisplayFrame(output_size, rgba, bool(samples.size))
 
 
 def stretch_rgba(frame: DisplayFrame, midtones: float) -> NDArray[np.uint8]:

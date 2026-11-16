@@ -13,12 +13,12 @@ from astropy.coordinates import ICRS
 from astropy.io import fits
 from astropy.wcs import WCS
 
-from astromosaic.core import Region, Tile
+from astromosaic.core import Region, SourceFingerprint, Tile
 from astromosaic.core.job import DEFAULT_JOB_CONTEXT
 from astromosaic.core.job import JobContext as JobContext
 from astromosaic.core.job import MosaicCancelled as MosaicCancelled
 from astromosaic.geometry import PanelGeometry, TileSky, read_panel_geometry, tan_output_wcs
-from astromosaic.io import TIFF_SUFFIXES, PanelSource, open_panel
+from astromosaic.io import TIFF_SUFFIXES, PanelSource, SkyMask, open_panel
 from astromosaic.io.fits_export import open_fits_mosaic
 from astromosaic.photometry import PanelCorrection
 from astromosaic.pipeline.refinement import RefinementReport, RefinementSpec, refine_panels
@@ -130,10 +130,13 @@ def _export_header(
         )
         header.add_history(f"Input {index}: mtime_ns {fingerprint.modified_ns}; {panel.wcs_origin}")
         mask = panel.source.sky_mask_fingerprint
-        if mask is not None:
+        if isinstance(mask, SourceFingerprint):
             header.add_history(
                 f"Input {index}: sky mask {mask.size_bytes} bytes; mtime_ns {mask.modified_ns}"
             )
+        elif mask is not None:
+            header.add_history(f"Input {index}: project sky mask SHA-256")
+            header.add_history(mask)
         correction = panel.correction
         if correction is not None:
             dx, dy = correction.shift
@@ -292,7 +295,7 @@ def _prepare_mosaic(
     weights: Sequence[float] | None,
     filter_name: str | None,
     assume_surface_brightness: bool,
-    sky_masks: Mapping[int, Path] | None,
+    sky_masks: Mapping[int, SkyMask] | None,
     wcs_sidecars: Mapping[int, Path] | None,
     refinement: RefinementSpec | None,
     context: JobContext,
@@ -390,7 +393,7 @@ def render_mosaic(
     weights: Sequence[float] | None = None,
     filter_name: str | None = None,
     assume_surface_brightness: bool = False,
-    sky_masks: Mapping[int, Path] | None = None,
+    sky_masks: Mapping[int, SkyMask] | None = None,
     wcs_sidecars: Mapping[int, Path] | None = None,
     refinement: RefinementSpec | None = None,
     context: JobContext = DEFAULT_JOB_CONTEXT,
@@ -492,7 +495,7 @@ def preview_mosaic(
     weights: Sequence[float] | None = None,
     filter_name: str | None = None,
     assume_surface_brightness: bool = False,
-    sky_masks: Mapping[int, Path] | None = None,
+    sky_masks: Mapping[int, SkyMask] | None = None,
     wcs_sidecars: Mapping[int, Path] | None = None,
     refinement: RefinementSpec | None = None,
     context: JobContext = DEFAULT_JOB_CONTEXT,

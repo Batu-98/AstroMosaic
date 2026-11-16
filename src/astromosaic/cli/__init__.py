@@ -26,6 +26,7 @@ def _panel_files(values: list[str], count: int) -> dict[int, Path]:
 def _run_solve(arguments: argparse.Namespace) -> tuple[dict[str, object], int]:
     os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
     from astromosaic.astrometry.solve import SolveOptions, solve_panel, write_solution
+    from astromosaic.core.job import DEFAULT_JOB_CONTEXT
     from astromosaic.io import open_panel
 
     options = SolveOptions(
@@ -40,11 +41,24 @@ def _run_solve(arguments: argparse.Namespace) -> tuple[dict[str, object], int]:
         max_working_bytes=arguments.memory_mib * 1024**2,
         max_scratch_bytes=arguments.scratch_mib * 1024**2,
     )
-    with open_panel(
-        arguments.path,
-        max_tile_bytes=options.max_working_bytes,
-        sky_mask=arguments.sky_mask,
-    ) as panel:
+    if arguments.path.suffix.lower() == ".astromosaic":
+        from astromosaic.storage.project import load_project, open_project_sky_panel
+
+        if arguments.panel is None or arguments.sky_mask is not None:
+            raise ValueError("For a project, use --panel and its saved sky mask.")
+        project = load_project(arguments.path)
+        if not 1 <= arguments.panel <= len(project.panels):
+            raise ValueError("The panel number is outside the project.")
+        opened = open_project_sky_panel(
+            project.panels[arguments.panel - 1], options.max_working_bytes, DEFAULT_JOB_CONTEXT
+        )
+    else:
+        if arguments.panel is not None:
+            raise ValueError("Use --panel with an AstroMosaic project.")
+        opened = open_panel(
+            arguments.path, max_tile_bytes=options.max_working_bytes, sky_mask=arguments.sky_mask
+        )
+    with opened as panel:
         solution = solve_panel(panel, options)
         report = solution.report()
         if solution.geometry is None:
@@ -138,7 +152,10 @@ def main(argv: list[str] | None = None) -> int:
     smoke = commands.add_parser("smoke", help="Run a small synthetic FITS/WCS processing job.")
     smoke.add_argument("--spawn", action="store_true", help="Run the job in a spawned worker.")
     solve = commands.add_parser("solve", help="Resolve a FITS or TIFF panel with local astrometry.")
-    solve.add_argument("path", type=Path, help="Linear mono FITS or mono/RGB TIFF panel.")
+    solve.add_argument(
+        "path", type=Path, help="Linear FITS or TIFF panel, or an AstroMosaic project."
+    )
+    solve.add_argument("--panel", type=int, help="One-based panel number in the saved project.")
     solve.add_argument("-o", "--output", type=Path, help="Save a new JSON WCS sidecar on success.")
     solve.add_argument("--sky-mask", type=Path, help="Binary FITS sky mask in source coordinates.")
     solve.add_argument("--gaia-catalog", type=Path, help="Local Seiza Gaia DR3 catalog file.")

@@ -10,6 +10,8 @@ poetry run python -m astromosaic.ui
 ```
 
 1. Use **Add Panels** to select calibrated mono FITS or mono/RGB TIFF inputs with a common channel layout. Use **Panel Settings** to set the blend weight and attach a saved WCS solution or a supplied FITS sky mask. The headless `solve` command can create a solution for a panel.
+
+   Phase 3D adds foreground suggestions and masks stored in the project. [Editing and solving masked panels](phase-3d.md#desktop-workflow)
 2. Use **Mosaic Settings** to enter the ICRS tangent point, output size and scale, and any rotation or crop. Declare a common filter and brightness scale when required by the inputs. Mono refinement can be disabled or can use stellar refinement with no background correction, an offset, or a plane.
 3. Use **File → Save Project** to save a `.astromosaic` file. Reopen it with **File → Open Project**. If a source moved, select its row and choose **Relink**. The replacement must retain the original size and modification time. For a new revision, remove the old entry and add the new source. To update a mask or solution reference, browse to it again in **Panel Settings**.
 4. Choose **Export Mosaic** and a new TIFF or FITS output filename. TIFF supports mono and RGB. FITS export supports mono. The progress bar reports output pixels. **Cancel Job** requests cancellation at the next engine checkpoint. The output is published only after a successful render. Closing the window during a job requests the same cancellation and waits asynchronously for cleanup.
