@@ -29,6 +29,18 @@ In **Panel settings**, the focal length and effective X and Y pixel sizes show e
 
 On Windows 11 x64, the Phase 3.1A source and packaged CLIs solved an M13 reference copy with both local Gaia DR3 and hinted ASTAP using generated optical metadata equivalent to 1.0069 arcseconds per pixel. The copy retained its original bytes through each check. The native desktop regression checked the embedded hints, manual edit, restored project values, and WCS state after relinking on the secondary monitor. [M13 source provenance](phase-0.md#offline-astap-experiment) · [Desktop regression](../tests/integration/test_desktop_project.py)
 
+## Local Plate Solve Settings
+
+Open **Tools → Plate Solve Settings** even with an empty project. The paths and database selection belong to the local Windows user and are restored when the application restarts.
+
+1. For Gaia DR3, select an installed Seiza star catalog file. Select its matching blind index for panels without usable pointing and plate scale. Keep the catalog and index from the same Seiza bundle. The source desktop needs the optional `gaia` extra for this backend. [Seiza catalog setup](phase-2.md#catalog-setup-and-updates)
+2. For ASTAP, select the ASTAP command-line executable and the folder containing the unpacked database tiles. Choose D05, D20, D50, or D80 to match the installed database. [ASTAP command line and databases](https://www.hnsky.org/astap.htm#astap_command_line)
+3. Select **Check Paths** to see each backend's results. Seiza attempts to open the selected files. ASTAP checks the layout of a matching sample tile and requests the executable's version through its help command. Select **Save** to retain the paths and database. Check the paths again after moving the catalog or reconnecting its drive. [Path check tests](../tests/integration/test_solver_setup.py)
+
+The settings can hold either backend or both. The offline chain tries Gaia DR3 before ASTAP after checking for usable WCS. Solve diagnostics retain the backend version and the Gaia catalog and index identities or the selected ASTAP database. The desktop solve job will use these settings in Phase 3.1C. [Offline solver order](adr/0005-offline-solver-chain.md) · [Desktop solve stages](../astro_mosaic_python_first_architecture_en.md#phase-31-desktop-plate-solving)
+
+On Windows 11 x64, separate desktop processes checked and restored the real Gaia DR3 catalog and blind index and ASTAP CLI 2026.11.01 with D05 in an isolated settings store. The warning path identified missing files after reopening. The rebuilt CPU and OpenGL desktop bundles also checked missing paths and saved settings. [Desktop settings regression](../tests/integration/test_desktop_solver_settings.py) · [Packaged desktop checks](../packaging/check-windows-desktop.py)
+
 ## Verification
 
 - Persistence tests check Unicode paths, project folder moves, all render settings and attachment references, fingerprint-matching relink, changed and missing file errors, unsupported schemas, and preservation of the original manifest after a failed atomic replacement. [Persistence tests](../tests/integration/test_project.py)

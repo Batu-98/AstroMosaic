@@ -77,6 +77,8 @@ Add panels, set the mosaic grid, and save the project. Use the layer selector wi
 
 For a mixed panel, choose **Panel → Propose Sky Mask** and review the overlay, or draw the mask with **Edit Sky Mask**. Use **Panel Settings** to override the foreground tag. [Mixed-panel workflow](docs/phase-3d.md#desktop-workflow)
 
+Use **Tools → Plate Solve Settings** to choose and check local Gaia DR3 and ASTAP paths. [Local solver settings](docs/phase-3b.md#local-plate-solve-settings)
+
 ## Develop and Verify
 
 ```shell

@@ -2,7 +2,7 @@
 
 ## Build
 
-Build with the locked Python 3.13 `main,build` groups in a dedicated Windows x64 environment. The desktop extra supplies Qt. The Gaia extra supplies the local solver binding for the CLI.
+Build with the locked Python 3.13 `main,build` groups in a dedicated Windows x64 environment. The desktop extra supplies Qt. The Gaia extra supplies the local Seiza binding for the desktop and CLI bundles.
 
 ```powershell
 poetry sync --only main,build -E desktop -E gaia

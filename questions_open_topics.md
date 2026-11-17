@@ -133,10 +133,10 @@ This register tracks unresolved decisions, problems, and risks. It is not a work
 
 - **Status / priority:** Resolved / P1
 - **Opened / updated:** 2026-11-15 / 2026-11-15
-- **Affected phase:** Phase 0 adapter experiment and Phase 2 offline astrometry.
+- **Affected phase:** Phase 0 adapter experiment, Phase 2 offline astrometry, and Phase 3.1 desktop solver settings and jobs.
 - **Impact and evidence:** The Windows M13 reference passed both hinted and blind Gaia DR3 and ASTAP, ordered fallback, real ASTAP cancellation, missing-catalog diagnostics, and unchanged-source checks. The catalog and index were verified against the versioned manifest.
 - **Current assumption:** Install explicit local Gaia and ASTAP files separately, keep the Gaia catalog and index version paired, and save solved WCS in a source-bound sidecar.
-- **Next action / responsibility:** Recheck the solver matrix on catalog updates and during release packaging. Release notices and data terms remain under Q-005.
+- **Next action / responsibility:** Recheck the solver matrix through the desktop job in Phase 3.1C, on catalog updates, and during release packaging. Release notices and data terms remain under Q-005.
 - **Closure condition:** Record a tested solver/version/catalog matrix and deployment/update policy, including ordered fallbacks, cancellation, missing-catalog diagnostics, exhausted-chain behavior, and unchanged-source checks.
 - **Resolution:** 2026-11-15. [ADR-0010](docs/adr/0010-seiza-gaia-backend.md) records the backend. The [Phase 2 solver matrix and setup](docs/phase-2.md#offline-solvers) record results, catalog provenance, and the update procedure.
 

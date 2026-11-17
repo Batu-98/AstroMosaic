@@ -4,13 +4,13 @@ Use this file for concise development history and handoff state. Detailed techni
 
 ## Current State
 
-- **Last updated:** 2026-11-16
+- **Last updated:** 2026-11-17
 - **Active baseline:** Python-first architecture revision 3.9, with [Phase 3.1 desktop plate solving](astro_mosaic_python_first_architecture_en.md#phase-31-desktop-plate-solving), [Phase 3.5 engine revalidation](astro_mosaic_python_first_architecture_en.md#phase-35-astronomy-engine-revalidation), and [Phase 4A–4C automation and scaling](astro_mosaic_python_first_architecture_en.md#102-phase-4-delivery-stages). See [ADR-0003](docs/adr/0003-windows-first-platform-scope.md) for Windows scope, [ADR-0006](docs/adr/0006-dual-fits-and-tiff-workflow.md) for formats, and [ADR-0007](docs/adr/0007-sky-and-foreground-mosaics.md) for mixed panels.
-- **Current stage:** Phase 3.1A passed on Windows 11 x64. The Phase 3F clean-machine check remains open. Linux and macOS support is deferred.
-- **Available artifacts:** [Panel WCS status and optical hints](docs/phase-3b.md#panel-wcs-and-plate-solve-hints), [portable Windows desktop and CLI bundles](docs/phase-3f.md), and [independent layer previews and exports](docs/phase-3e.md).
-- **Implementation / verification:** All 79 native Windows tests passed, with test windows and dialogs on the secondary monitor. Rebuilt desktop checks passed on offscreen CPU and native OpenGL. The packaged CLI passed worker spawning, FITS and TIFF export, and optical-hint solves with local Gaia and ASTAP. Ruff, mypy, Poetry lock validation, and documentation links passed.
-- **Version control:** The Windows packaging and revision 3.9 planning snapshot is published as `6685e0f` on `origin/main`. Phase 3.1A is in the local working tree. [AstroMosaic GitHub repository](https://github.com/Batu-98/AstroMosaic)
-- **Next action:** Implement Phase 3.1B local plate solve settings. Run the portable launcher and export check in parallel when a clean Windows 11 x64 installation is available.
+- **Current stage:** Phase 3.1B passed on Windows 11 x64. The Phase 3F clean-machine check remains open. Linux and macOS support is deferred.
+- **Available artifacts:** [Local plate solve settings](docs/phase-3b.md#local-plate-solve-settings), [panel WCS status and optical hints](docs/phase-3b.md#panel-wcs-and-plate-solve-hints), and [portable Windows desktop and CLI bundles](docs/phase-3f.md).
+- **Implementation / verification:** All 84 native Windows tests passed. The session exposed one active display. Separate desktop processes checked and restored real Gaia and ASTAP paths, and rebuilt CPU and OpenGL packages passed the settings workflow. Source and packaged CLIs solved M13 with both backends and reported catalog identities. Ruff, mypy, Poetry lock validation, and documentation links passed.
+- **Version control:** Phase 3.1A is published as `2534333` on `origin/main`. Phase 3.1B is in the local working tree. [AstroMosaic GitHub repository](https://github.com/Batu-98/AstroMosaic)
+- **Next action:** Implement the Phase 3.1C desktop plate solve job with the saved local settings. Run the portable launcher and export check in parallel when a clean Windows 11 x64 installation is available.
 - **Open dependencies:** Q-003 through Q-005, Q-009, and Q-010 track later numerical, resource, distribution, format, and mixed-panel gates. Q-008 tracks deferred platforms, Q-011 tracks deferred visual fill, and Q-012 tracks desktop terminal scope. Q-006, Q-007, and Q-013 are resolved for the Windows solver, FITS export, and optical hint references.
 
 ## Phase Overview
@@ -30,7 +30,7 @@ The table is a status summary, not a replacement for the full exit gates in Sect
 | 3E - Foreground and composition | Complete | Verified WCS-independent foreground alignment, separate layer exports, and saved placement, seam, and crop edits on Windows. |
 | 3F - Windows acceptance | Local checks passed | Packaged workflows, recovery, cancellation cleanup, and CPU fallback passed on the development host. Clean-machine validation remains open. |
 | 3.1A - Panel WCS and optical metadata | Complete | Per-panel WCS status, embedded and edited optical hints, scale derivation, and older project compatibility verified on Windows. |
-| 3.1B - Local plate solve settings | Not started | Gaia DR3 and ASTAP paths persisted and validated with actionable diagnostics. |
+| 3.1B - Local plate solve settings | Complete | Gaia DR3 and ASTAP paths and database choice restored across restarts. Source and packaged Windows checks verified actionable diagnostics. |
 | 3.1C - Desktop plate solve job | Not started | Packaged Windows workflow solves eligible panels, attaches reusable WCS, and handles cancellation and retry. |
 | 3.5A - Phase 2 review | Not started | Criteria mapped to current evidence, baseline rerun, and gaps and added thresholds recorded. |
 | 3.5B - Revision | Not started | Acceptance findings resolved with focused regression evidence. |
@@ -347,6 +347,25 @@ The table is a status summary, not a replacement for the full exit gates in Sect
 - **Verified:** All 79 native Windows tests passed on the secondary monitor. Rebuilt desktop packages passed CPU and OpenGL checks, including WCS refresh after relinking. The CLI passed worker and export checks. Source and packaged CLIs solved the M13 reference copy using optical hints with both Gaia and ASTAP. Ruff, mypy, lock validation, and local documentation links passed.
 - **Related:** [Panel workflow and Windows evidence](docs/phase-3b.md#panel-wcs-and-plate-solve-hints) and Q-013.
 - **Next:** Implement Phase 3.1B local solver settings. The pending Phase 3F clean-machine check remains tracked separately.
+
+### 2026-11-17 - Repository update - Published Phase 3.1A
+
+- **Changed:** Published the completed Phase 3.1A code, Windows evidence, and project records as `2534333`.
+- **Verified:** The staged patch passed the whitespace check. The remote main ref resolved to `2534333` after the push.
+- **Next:** Implement and verify Phase 3.1B local solver settings.
+
+### 2026-11-17 - Phase 3.1B - Completed local solver settings
+
+- **Changed:** Added Tools → Plate Solve Settings, per-user path storage, and a cancellable background check for Gaia DR3 and ASTAP. The dialog reports the backend prerequisites and keeps path choices available when data moves.
+- **Verified:** All 84 native Windows tests passed on the session's sole active display. Separate processes checked and restored real Gaia DR3 and ASTAP D05 settings. Rebuilt CPU and OpenGL desktop checks verified diagnostics and saving. The rebuilt CLI passed worker and export checks and solved M13 with both backends. Ruff, mypy, lock validation, and local links passed.
+- **Related:** [Settings workflow and evidence](docs/phase-3b.md#local-plate-solve-settings) and Q-006.
+- **Next:** Implement the 3.1C background desktop solve job with per-panel progress and sidecar attachment.
+
+### 2026-11-17 - Development guidance - Added phase drafting rule
+
+- **Changed:** Updated [AGENTS.md](AGENTS.md#1-language-and-plan) to cover phase scope, project impact, and potential improvements during drafting.
+- **Verified:** Reviewed the wording against the owner’s instruction and checked the local link and patch whitespace.
+- **Next:** Apply the rule when drafting or revising phase content.
 
 ## Entry Template
 

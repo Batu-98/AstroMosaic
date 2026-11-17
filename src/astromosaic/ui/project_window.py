@@ -43,6 +43,7 @@ from astromosaic.ui.mosaic_job import (
     PanelInspectionJob,
     PreviewJob,
 )
+from astromosaic.ui.plate_solve_settings import PlateSolveSettings
 from astromosaic.ui.project_settings import (
     PANEL_FILES,
     CompositionSettings,
@@ -99,6 +100,10 @@ class ProjectWindow(QMainWindow):
         self.placement_action = layers_menu.addAction("Propose Placement", self._propose_placement)
         self.composition_action = layers_menu.addAction(
             "Composition Settings…", self._composition_settings
+        )
+        tools_menu = self.menuBar().addMenu("&Tools")
+        self.plate_solve_settings_action = tools_menu.addAction(
+            "Plate Solve Settings…", self._plate_solve_settings
         )
 
         body = QWidget(self)
@@ -527,6 +532,14 @@ class ProjectWindow(QMainWindow):
         finally:
             dialog.deleteLater()
 
+    def _plate_solve_settings(self) -> None:
+        dialog = PlateSolveSettings(self)
+        try:
+            if dialog.exec():
+                self.status.setText("Saved local plate solve settings.")
+        finally:
+            dialog.deleteLater()
+
     def _start(self) -> None:
         if self.job is not None or not self.project.panels:
             return
@@ -619,6 +632,7 @@ class ProjectWindow(QMainWindow):
     def _set_running(self, running: bool) -> None:
         for action in self._file_actions:
             action.setEnabled(not running)
+        self.plate_solve_settings_action.setEnabled(not running)
         self._editor.setEnabled(not running)
         self.settings_button.setEnabled(not running)
         self._layer_controls()

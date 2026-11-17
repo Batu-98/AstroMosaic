@@ -1,4 +1,4 @@
-"""Run one immutable project snapshot on a Qt worker thread."""
+"""Run blocking desktop jobs on Qt worker threads."""
 
 import logging
 from dataclasses import dataclass, replace
@@ -38,15 +38,14 @@ from astromosaic.storage.project import (
 )
 
 
-class _ProjectJob[Result](QThread):
+class BackgroundJob[Result](QThread):
     progress = Signal(object, object)
     label = "job"
     progress_label = "Processing"
     progress_units = "pixels"
 
-    def __init__(self, project: MosaicProject, parent: QObject) -> None:
+    def __init__(self, parent: QObject) -> None:
         super().__init__(parent)
-        self.project = project
         self.result: Result | None = None
         self.error: str | None = None
         self.cancelled = False
@@ -75,6 +74,12 @@ class _ProjectJob[Result](QThread):
 
     def perform(self, context: JobContext) -> Result:
         raise NotImplementedError
+
+
+class _ProjectJob[Result](BackgroundJob[Result]):
+    def __init__(self, project: MosaicProject, parent: QObject) -> None:
+        super().__init__(parent)
+        self.project = project
 
 
 class PanelInspectionJob(_ProjectJob[tuple[PanelInspection, ...]]):

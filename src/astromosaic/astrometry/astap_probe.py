@@ -1,4 +1,4 @@
-"""Test the ASTAP CLI with a local D05 catalog and a disposable copy of a FITS image."""
+"""Use the ASTAP CLI with local catalogs and disposable FITS copies."""
 
 import argparse
 import json
@@ -18,6 +18,10 @@ from astropy.io import fits
 from astropy.wcs import WCS
 
 from astromosaic.core.job import DEFAULT_JOB_CONTEXT, JobContext
+
+ASTAP_DATABASES = ("d05", "d20", "d50", "d80")
+_TILE_HEADER_BYTES = 110
+_D_SERIES_RECORD_BYTES = 5
 
 
 def _read_solution_header(workdir: Path) -> fits.Header:
@@ -103,6 +107,52 @@ def solve_d05(
     return _summarize_header(header)
 
 
+def _astap_catalog_tile(executable: Path, catalog: Path, database: str) -> Path:
+    if not executable.is_file():
+        raise ValueError("The ASTAP executable is missing. Choose the local ASTAP CLI executable.")
+    if database not in ASTAP_DATABASES:
+        raise ValueError("Expected an ASTAP D05, D20, D50, or D80 database name.")
+    if not catalog.is_dir():
+        raise ValueError("The ASTAP catalog folder is missing. Choose its current location.")
+    for tile in catalog.glob(f"{database}_*.1476"):
+        if tile.is_file():
+            return tile
+    raise ValueError(
+        f"No ASTAP {database.upper()} catalog tiles found. "
+        "Choose the folder containing the tiles or select the database installed there."
+    )
+
+
+def check_astap_setup(
+    executable: Path, catalog: Path, database: str, context: JobContext = DEFAULT_JOB_CONTEXT
+) -> str:
+    """Check the selected CLI and the format of one catalog tile without an image."""
+    context.check_cancelled()
+    tile = _astap_catalog_tile(executable, catalog, database)
+    with tile.open("rb") as stream:
+        header = stream.read(_TILE_HEADER_BYTES)
+        first_record = stream.read(_D_SERIES_RECORD_BYTES)
+    if (
+        len(header) != _TILE_HEADER_BYTES
+        or header[-1] != _D_SERIES_RECORD_BYTES
+        or len(first_record) != _D_SERIES_RECORD_BYTES
+        or not first_record.startswith(b"\xff\xff\xff")
+        or (tile.stat().st_size - _TILE_HEADER_BYTES) % _D_SERIES_RECORD_BYTES
+    ):
+        raise ValueError(
+            f"The sampled {database.upper()} tile ({tile.name}) has an invalid .1476 layout. "
+            "Choose an unpacked ASTAP catalog."
+        )
+    with TemporaryDirectory(prefix="astromosaic-astap-check-") as directory:
+        output = _run_astap([str(executable.resolve()), "-h"], Path(directory), 8, context)
+    match = re.search(r"^ASTAP astrometric solver version ([\w.-]+)", output, re.I | re.M)
+    if match is None:
+        raise ValueError(
+            "The selected program did not report an ASTAP solver version. Select the ASTAP CLI."
+        )
+    return match[1]
+
+
 def solve_astap(
     executable: Path,
     catalog: Path,
@@ -116,14 +166,7 @@ def solve_astap(
 ) -> tuple[fits.Header, str | None]:
     """Run a hinted or blind ASTAP attempt with an explicit local database."""
     context.check_cancelled()
-    if not executable.is_file():
-        raise ValueError("Provide the local ASTAP CLI executable.")
-    if database not in {"d05", "d20", "d50", "d80"}:
-        raise ValueError("Expected an ASTAP D05, D20, D50, or D80 database name.")
-    if not any(catalog.glob(f"{database}_*.1476")):
-        raise ValueError(
-            f"The supplied directory does not contain ASTAP {database.upper()} catalog tiles."
-        )
+    _astap_catalog_tile(executable, catalog, database)
     if not 0 <= field_height_deg <= 180:
         raise ValueError("Expected an ASTAP field height between 0 and 180 degrees.")
     if not isfinite(timeout_seconds) or timeout_seconds <= 0:
@@ -162,30 +205,37 @@ def solve_astap(
             if not (0 <= ra_deg < 360 and -90 <= dec_deg <= 90):
                 raise ValueError("Expected valid ASTAP sky coordinates in degrees.")
             command.extend(("-ra", str(ra_deg / 15), "-spd", str(dec_deg + 90)))
-        context.check_cancelled()
-        with subprocess.Popen(
-            command,
-            cwd=scratch,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
-        ) as process:
-            try:
-                output = _wait_for_astap(process, timeout_seconds, context)
-            except BaseException:
-                process.kill()
-                process.communicate()
-                raise
-            if process.returncode:
-                detail = output.strip().splitlines()[-1] if output.strip() else "No solver details."
-                raise ValueError(f"ASTAP exited with code {process.returncode}. {detail}")
+        output = _run_astap(command, scratch, timeout_seconds, context)
         context.check_cancelled()
         version = re.search(r"solver version ([A-Za-z0-9.-]+)", output, flags=re.IGNORECASE)
         return _read_solution_header(scratch), version[1] if version else None
+
+
+def _run_astap(
+    command: list[str], scratch: Path, timeout_seconds: float, context: JobContext
+) -> str:
+    context.check_cancelled()
+    with subprocess.Popen(
+        command,
+        cwd=scratch,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    ) as process:
+        try:
+            output = _wait_for_astap(process, timeout_seconds, context)
+        except BaseException:
+            process.kill()
+            process.communicate()
+            raise
+        if process.returncode:
+            detail = output.strip().splitlines()[-1] if output.strip() else "No solver details."
+            raise ValueError(f"ASTAP exited with code {process.returncode}. {detail}")
+        return output
 
 
 def _wait_for_astap(

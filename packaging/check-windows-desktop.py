@@ -16,7 +16,7 @@ import numpy as np
 import tifffile
 from astropy.io import fits
 from astropy.wcs import WCS
-from PySide6.QtCore import QCoreApplication, QEvent, QEventLoop, Qt, QTimer
+from PySide6.QtCore import QCoreApplication, QEvent, QEventLoop, QSettings, Qt, QTimer
 from PySide6.QtWidgets import QApplication, QFileDialog
 from scipy.ndimage import gaussian_filter
 
@@ -36,6 +36,8 @@ from astromosaic.storage.project import (
     preview_project_layer,
     save_project,
 )
+from astromosaic.ui import plate_solve_settings
+from astromosaic.ui.plate_solve_settings import PlateSolveSettings
 from astromosaic.ui.preview_gl import OpenGLPreview
 from astromosaic.ui.project_settings import CompositionSettings
 from astromosaic.ui.project_window import ProjectWindow
@@ -242,6 +244,41 @@ def check_project(window: ProjectWindow, directory: Path, backend: str) -> dict[
     return covered
 
 
+def check_solver_settings(window: ProjectWindow, directory: Path) -> None:
+    settings_file = directory / "settings.ini"
+    missing_catalog = directory / "moved-stars.bin"
+
+    def edit(dialog: PlateSolveSettings) -> int:
+        dialog.gaia_catalog.setText(str(missing_catalog))
+        dialog.astap.setText(str(directory / "moved-astap.exe"))
+        dialog.astap_catalog.setText(str(directory))
+        dialog.astap_database.setCurrentText("D50")
+        dialog.check_button.click()
+        try:
+            wait_for(window, dialog.save_button.isEnabled)
+            assert "catalog is missing" in dialog.message.text(), dialog.message.text()
+            assert "ASTAP executable is missing" in dialog.message.text()
+            dialog.save_button.click()
+            return dialog.result()
+        finally:
+            if dialog._job is not None:
+                dialog._job.cancel()
+                assert dialog._job.wait(15_000)
+
+    with (
+        patch.object(
+            plate_solve_settings,
+            "_settings",
+            side_effect=lambda: QSettings(str(settings_file), QSettings.Format.IniFormat),
+        ),
+        patch.object(PlateSolveSettings, "exec", edit),
+    ):
+        window.plate_solve_settings_action.trigger()
+        assert window.status.text() == "Saved local plate solve settings."
+        options = plate_solve_settings.load_plate_solve_settings()
+        assert options.gaia_catalog == missing_catalog and options.astap_database == "d50"
+
+
 def frozen_check(backend: str) -> None:
     runtime = Path(sys.executable).parent / "_internal"
     assert Path(sys._MEIPASS).resolve() == runtime.resolve()  # type: ignore[attr-defined]
@@ -253,6 +290,7 @@ def frozen_check(backend: str) -> None:
     window.setAttribute(Qt.WidgetAttribute.WA_DontShowOnScreen)
     window.show()
     try:
+        check_solver_settings(window, Path.cwd())
         covered = check_project(window, Path.cwd(), backend)
         print(
             json.dumps(
@@ -262,6 +300,7 @@ def frozen_check(backend: str) -> None:
                     "covered_pixels": covered,
                     "recovery": True,
                     "cancel_and_retry": True,
+                    "solver_settings": True,
                 }
             )
         )
@@ -306,7 +345,8 @@ def check_bundle(bundle: Path, probe: Path, backend: str) -> None:
         if result.returncode:
             raise RuntimeError(result.stderr.strip() or result.stdout.strip())
         report = json.loads(result.stdout)
-        assert report["backend"] == backend and report["recovery"] and report["cancel_and_retry"]
+        assert report["backend"] == backend
+        assert report["recovery"] and report["cancel_and_retry"] and report["solver_settings"]
         print(result.stdout.strip())
 
 
