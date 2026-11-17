@@ -26,8 +26,10 @@ from astromosaic.pipeline.mosaic import MosaicResult, PreviewFrame
 from astromosaic.storage.project import (
     Layer,
     MosaicProject,
+    PanelInspection,
     ProjectPanel,
     align_project_foreground,
+    inspect_project_panel,
     preview_project,
     preview_project_layer,
     propose_project_composition,
@@ -73,6 +75,13 @@ class _ProjectJob[Result](QThread):
 
     def perform(self, context: JobContext) -> Result:
         raise NotImplementedError
+
+
+class PanelInspectionJob(_ProjectJob[tuple[PanelInspection, ...]]):
+    """Read and validate lightweight panel metadata off the UI thread."""
+
+    def perform(self, context: JobContext) -> tuple[PanelInspection, ...]:
+        return tuple(inspect_project_panel(panel, context) for panel in self.project.panels)
 
 
 class MosaicJob(_ProjectJob[MosaicResult]):

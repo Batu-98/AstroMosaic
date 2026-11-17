@@ -14,6 +14,7 @@ import numpy as np
 from astropy.io import fits
 
 from astromosaic.astrometry.astap_probe import solve_astap
+from astromosaic.astrometry.hints import PanelOptics, positive_number, read_optics
 from astromosaic.astrometry.stars import astrometry_pixels, measure_stars
 from astromosaic.core import Region, SourceFingerprint
 from astromosaic.core.job import DEFAULT_JOB_CONTEXT, JobContext, MosaicCancelled
@@ -37,6 +38,7 @@ class SolveOptions:
     timeout_seconds: float = 60
     max_working_bytes: int = 64 * 1024**2
     max_scratch_bytes: int = 1024**3
+    optics: PanelOptics = PanelOptics()
 
 
 @dataclass(frozen=True, slots=True)
@@ -66,7 +68,7 @@ class SolveResult:
 
 def _pointing(
     source: PanelSource, options: SolveOptions
-) -> tuple[tuple[float, float] | None, float | None]:
+) -> tuple[tuple[float, float] | None, float | None, float | None]:
     position, scale = options.position, options.scale_arcsec
     if position is not None and not (0 <= position[0] < 360 and -90 <= position[1] <= 90):
         raise ValueError("Expected valid ICRS pointing in degrees.")
@@ -77,11 +79,13 @@ def _pointing(
         ra, dec = float(header["RA"]), float(header["DEC"])
         if 0 <= ra < 360 and -90 <= dec <= 90:
             position = ra, dec
-    if scale is None and isinstance(header.get("PIXSCALE"), int | float):
-        candidate = float(header["PIXSCALE"])
-        if isfinite(candidate) and candidate > 0:
-            scale = candidate
-    return position, scale
+    scale = scale if scale is not None else positive_number(header.get("PIXSCALE"))
+    if scale is not None:
+        return position, scale, scale
+    scale_x, scale_y = read_optics(header).with_overrides(options.optics).scales_arcsec()
+    # Gaia takes a single scale. ASTAP takes the vertical field of view.
+    gaia_scale = scale_y if scale_x == scale_y else None
+    return position, gaia_scale, scale_y
 
 
 def _stage_astap_input(
@@ -235,7 +239,7 @@ def solve_panel(
     if min(options.max_working_bytes, options.max_scratch_bytes) <= 0:
         raise ValueError("Solver resource budgets must be positive.")
     width, height = source.descriptor.width, source.descriptor.height
-    position, scale = _pointing(source, options)
+    position, scale, vertical_scale = _pointing(source, options)
     attempts: list[SolverAttempt] = []
     for stage in _STAGES:
         context.check_cancelled()
@@ -272,7 +276,7 @@ def solve_panel(
                     options.astap_catalog,
                     lambda path: _stage_astap_input(source, path, options, context),
                     position=position if stage == "astap-hinted" else None,
-                    field_height_deg=height * scale / 3600 if scale is not None else 0,
+                    field_height_deg=height * vertical_scale / 3600 if vertical_scale else 0,
                     timeout_seconds=options.timeout_seconds,
                     database=options.astap_database,
                     context=context,

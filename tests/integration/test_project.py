@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+from astromosaic.astrometry.hints import PanelOptics
 from astromosaic.core import Region
 from astromosaic.core.job import JobContext
 from astromosaic.pipeline.mosaic import RenderSpec
@@ -31,7 +32,11 @@ def test_project_manifest_reopens_with_settings_and_relocates_with_its_files(
     wcs = original / "panel.wcs.json"
     wcs.write_text('{"version": 1, "stage": "gaia-dr3"}', encoding="utf-8")
     panel = ProjectPanel(
-        FileReference.capture(source), 0.75, FileReference.capture(mask), FileReference.capture(wcs)
+        FileReference.capture(source),
+        0.75,
+        FileReference.capture(mask),
+        FileReference.capture(wcs),
+        optics=PanelOptics(420, 3.75, 3.75),
     )
     spec = RenderSpec((359.999, 20.0), (13, 11), 7.2, 23, Region(1, 2, 8, 6), 3)
     project = MosaicProject((panel,), spec, "L", True, RefinementSpec(4.0, "plane"))
@@ -39,7 +44,7 @@ def test_project_manifest_reopens_with_settings_and_relocates_with_its_files(
     save_project(path, project)
     assert load_project(path) == project
     data = json.loads(path.read_text(encoding="utf-8"))
-    assert data["version"] == 3
+    assert data["version"] == 4
     assert data["panels"][0]["source"]["path"] == source.name
     relocated = original.rename(tmp_path / "relocated")
     reopened = load_project(relocated / path.name)
@@ -49,12 +54,16 @@ def test_project_manifest_reopens_with_settings_and_relocates_with_its_files(
         for _, ref in reopened.panels[0].references()
     )
     legacy = relocated / "legacy.astromosaic"
-    data["version"] = 1
-    for record in data["panels"]:
-        for key in ("foreground_suggestion", "foreground_override", "source_mask"):
-            del record[key]
+    data["version"] = 3
+    del data["panels"][0]["optics"]
     legacy.write_text(json.dumps(data), encoding="utf-8")
-    assert load_project(legacy) == reopened
+    old_project = replace(reopened, panels=(replace(reopened.panels[0], optics=PanelOptics()),))
+    assert load_project(legacy) == old_project
+    data["version"] = 1
+    for key in ("foreground_suggestion", "foreground_override", "source_mask", "include_sky"):
+        del data["panels"][0][key]
+    legacy.write_text(json.dumps(data), encoding="utf-8")
+    assert load_project(legacy) == old_project
 
 
 def test_relink_requires_saved_fingerprint_and_changes_are_checked_before_render(

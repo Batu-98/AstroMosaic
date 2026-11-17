@@ -7,6 +7,7 @@ import pytest
 import tifffile
 from astropy.io import fits
 
+from astromosaic.astrometry.hints import PanelOptics
 from astromosaic.astrometry.solve import SolveOptions, solve_panel, write_solution
 from astromosaic.core import Region, Tile
 from astromosaic.core.job import JobContext
@@ -50,6 +51,8 @@ def test_desktop_project_roundtrip_progress_cancel_and_retry(
 
     source = tmp_path / "light.fits"
     write_smoke_panel(source)
+    with fits.open(source, mode="update", do_not_scale_image_data=True) as hdus:
+        hdus[0].header.update({"FOCALLEN": 450.0, "XPIXSZ": 3.75, "YPIXSZ": 3.75})
     mask = tmp_path / "sky-mask.fits"
     sky = np.ones((12, 16), dtype=np.uint8)
     sky[0, 0] = 0
@@ -141,6 +144,10 @@ def test_desktop_project_roundtrip_progress_cancel_and_retry(
         dialog = QApplication.activeModalWidget()
         assert isinstance(dialog, PanelSettings)
         dialog.weight.setText("1.5")
+        assert dialog.focal_length.placeholderText() == "450 (embedded)"
+        assert dialog.pixel_size_x.placeholderText() == "3.75 (embedded)"
+        assert dialog.pixel_size_y.placeholderText() == "3.75 (embedded)"
+        dialog.focal_length.setText("500")
         dialog.wcs.setText(str(wcs))
         dialog.sky_mask.setText(str(mask))
         dialog.accept()
@@ -150,10 +157,13 @@ def test_desktop_project_roundtrip_progress_cancel_and_retry(
         click(window.add_button)
         assert window.panels.count() == 2 and window.windowTitle().startswith("Untitled*")
         until(lambda: window.job is None)
+        until(lambda: "WCS Embedded" in window.panels.item(0).text())
         window.panels.setCurrentRow(0)
         QTimer.singleShot(0, set_panel_options)
         click(window.panel_button)
         assert window.project.panels[0].weight == 1.5
+        assert window.project.panels[0].optics == PanelOptics(500)
+        until(lambda: "WCS Sidecar" in window.panels.item(0).text())
         QTimer.singleShot(0, set_geometry)
         click(window.settings_button)
         assert window.project.render.size == (140, 140)
@@ -166,11 +176,14 @@ def test_desktop_project_roundtrip_progress_cancel_and_retry(
         moved = source.rename(tmp_path / "Taşınan panel.fits")
         open_project.trigger()
         assert "missing" in window.panels.item(0).text()
+        assert "WCS Unavailable" in window.panels.item(0).text()
         open_target = moved
         click(window.relink_button)
         assert "Linked" in window.panels.item(0).text()
+        until(lambda: "WCS Sidecar" in window.panels.item(0).text())
         save.trigger()
         assert load_project(manifest).panels[0].source.path == moved
+        assert window.project.panels[0].optics == PanelOptics(500)
 
         with monkeypatch.context() as patch:
             patch.setattr(mosaic_job, "preview_project", pause_preview)
@@ -235,9 +248,10 @@ def test_desktop_project_roundtrip_progress_cancel_and_retry(
         assert not save_target.exists() and not list(tmp_path.glob("*.part"))
     finally:
         release.set()
-        if window.job is not None:
-            window.job.cancel()
-            assert window.job.wait(15_000)
+        for job in (window.job, window._inspection_job):
+            if job is not None:
+                job.cancel()
+                assert job.wait(15_000)
         window.deleteLater()
         app.processEvents()
 
@@ -411,9 +425,10 @@ def test_desktop_sky_mask_proposal_manual_edits_and_reopen(
         assert originals == (source.read_bytes(), tiff.read_bytes())
     finally:
         release.set()
-        if window.job is not None:
-            window.job.cancel()
-            assert window.job.wait(10_000)
+        for job in (window.job, window._inspection_job):
+            if job is not None:
+                job.cancel()
+                assert job.wait(10_000)
         window.deleteLater()
         app.processEvents()
 
@@ -524,8 +539,9 @@ def test_desktop_composition_propose_edit_and_export(
         with fits.open(destination) as result:
             assert np.any(result["LAYERS"].data == 3)
     finally:
-        if window.job is not None:
-            window.job.cancel()
-            assert window.job.wait(10_000)
+        for job in (window.job, window._inspection_job):
+            if job is not None:
+                job.cancel()
+                assert job.wait(10_000)
         window.deleteLater()
         app.processEvents()

@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from astromosaic.astrometry.hints import PanelOptics
 from astromosaic.core import Region
 from astromosaic.core.masks import ForegroundTag
 from astromosaic.geometry.image import CompositionSpec, LayerPlacement
@@ -146,11 +147,28 @@ class PanelSettings(_SettingsDialog):
         )
         self.include_sky.setChecked(panel.include_sky)
         self.form.addRow(self.include_sky)
+        self.focal_length = self._optical_field("Focal length (mm)", panel.optics.focal_length_mm)
+        self.pixel_size_x = self._optical_field(
+            "Effective X pixel size (µm)", panel.optics.pixel_size_x_um
+        )
+        self.pixel_size_y = self._optical_field(
+            "Effective Y pixel size (µm)", panel.optics.pixel_size_y_um
+        )
         self.wcs = self._attachment("WCS sidecar", panel.wcs_sidecar, "WCS sidecar (*.json)")
         self.sky_mask = self._attachment(
             "FITS sky mask", panel.sky_mask, "FITS image (*.fits *.fit *.fts)"
         )
         self.buttons()
+
+    def _optical_field(self, label: str, value: float | None) -> QLineEdit:
+        field = self.field(label, "" if value is None else value)
+        field.setToolTip("Enter an override for this panel. Clear it to use embedded metadata.")
+        return field
+
+    def show_embedded_optics(self, optics: PanelOptics) -> None:
+        self.focal_length.setPlaceholderText(_embedded_hint(optics.focal_length_mm))
+        self.pixel_size_x.setPlaceholderText(_embedded_hint(optics.pixel_size_x_um))
+        self.pixel_size_y.setPlaceholderText(_embedded_hint(optics.pixel_size_y_um))
 
     def _attachment(self, label: str, reference: FileReference | None, names: str) -> QLineEdit:
         path = QLineEdit(str(reference.path) if reference else "")
@@ -187,6 +205,11 @@ class PanelSettings(_SettingsDialog):
             return FileReference.capture(path)
 
         sky_mask = attachment(self.sky_mask, self.panel.sky_mask)
+        optics = PanelOptics(
+            _optical_override(self.focal_length),
+            _optical_override(self.pixel_size_x),
+            _optical_override(self.pixel_size_y),
+        )
         return replace(
             self.panel,
             weight=weight,
@@ -195,7 +218,17 @@ class PanelSettings(_SettingsDialog):
             source_mask=None if sky_mask is not None else self.panel.source_mask,
             foreground_override=_OVERRIDES[self.foreground_override.currentIndex()],
             include_sky=self.include_sky.isChecked(),
+            optics=optics,
         )
+
+
+def _embedded_hint(value: float | None) -> str:
+    return f"{value:g} (embedded)" if value is not None else "No usable embedded value"
+
+
+def _optical_override(field: QLineEdit) -> float | None:
+    entered = field.text().strip()
+    return float(entered) if entered else None
 
 
 class CompositionSettings(_SettingsDialog):

@@ -5,7 +5,7 @@ import json
 import os
 import sys
 from collections.abc import Mapping
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from importlib.metadata import version
 from pathlib import Path
 
@@ -49,8 +49,10 @@ def _run_solve(arguments: argparse.Namespace) -> tuple[dict[str, object], int]:
         project = load_project(arguments.path)
         if not 1 <= arguments.panel <= len(project.panels):
             raise ValueError("The panel number is outside the project.")
+        project_panel = project.panels[arguments.panel - 1]
+        options = replace(options, optics=project_panel.optics)
         opened = open_project_sky_panel(
-            project.panels[arguments.panel - 1], options.max_working_bytes, DEFAULT_JOB_CONTEXT
+            project_panel, options.max_working_bytes, DEFAULT_JOB_CONTEXT
         )
     else:
         if arguments.panel is not None:

@@ -171,11 +171,15 @@ def check_project(window: ProjectWindow, directory: Path, backend: str) -> dict[
 
     open_project(manifest)
     assert "Source missing" in window.panels.item(1).text()
+    assert "WCS Unavailable" in window.panels.item(1).text()
     window.panels.setCurrentRow(1)
     with patch.object(QFileDialog, "getOpenFileName", return_value=(str(moved), "")):
         window.relink_button.click()
     assert "Linked" in window.panels.item(1).text()
     assert window.project.panels[1].source.path == moved
+    wait_for(window, lambda: window._inspection_job is None)
+    assert "WCS Embedded" in window.panels.item(0).text()
+    assert "WCS Missing" in window.panels.item(1).text()
 
     snapshot = manifest.read_bytes()
     with (
@@ -262,9 +266,10 @@ def frozen_check(backend: str) -> None:
             )
         )
     finally:
-        if window.job is not None:
-            window.job.cancel()
-            assert window.job.wait(15_000)
+        for job in (window.job, window._inspection_job):
+            if job is not None:
+                job.cancel()
+                assert job.wait(15_000)
         window.hide()
         window.deleteLater()
         QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)

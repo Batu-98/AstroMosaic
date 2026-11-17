@@ -13,6 +13,8 @@ from pathlib import Path
 from stat import S_ISREG
 from typing import Any, Literal, TypedDict
 
+from astromosaic.astrometry.hints import PanelOptics, read_optics
+from astromosaic.astrometry.solve import load_solution
 from astromosaic.core import Region, SourceFingerprint
 from astromosaic.core.job import JobContext
 from astromosaic.core.masks import (
@@ -24,7 +26,7 @@ from astromosaic.core.masks import (
     SourceMask,
     bounded_grid,
 )
-from astromosaic.geometry import tan_output_wcs
+from astromosaic.geometry import read_panel_geometry, tan_output_wcs
 from astromosaic.geometry.image import CompositionSpec, LayerPlacement
 from astromosaic.io import PanelSource, SkyMask, open_panel
 from astromosaic.io.atomic import atomic_binary_file
@@ -53,7 +55,7 @@ from astromosaic.pipeline.mosaic import (
 )
 from astromosaic.pipeline.refinement import RefinementSpec
 
-_SCHEMA_VERSION = 3
+_SCHEMA_VERSION = 4
 _MAX_MANIFEST_BYTES = 4 * 1024**2
 type Layer = Literal["sky", "foreground", "composition"]
 type _GroundInputs = tuple[tuple[int, SourceMask], ...]
@@ -98,6 +100,7 @@ class ProjectPanel:
     foreground_override: ForegroundTag | None = None
     source_mask: SourceMask | None = None
     include_sky: bool = True
+    optics: PanelOptics = PanelOptics()
 
     def __post_init__(self) -> None:
         if self.sky_mask is not None and self.source_mask is not None:
@@ -228,6 +231,42 @@ def open_project_sky_panel(
         panel.source.path, max_tile_bytes=max_working_bytes, sky_mask=panel.sky_input()
     ) as source:
         yield source
+
+
+@dataclass(frozen=True, slots=True)
+class PanelInspection:
+    wcs_status: Literal["Embedded", "Sidecar", "Missing", "Invalid", "Unavailable"]
+    detail: str
+    embedded_optics: PanelOptics = PanelOptics()
+
+
+def inspect_project_panel(panel: ProjectPanel, context: JobContext) -> PanelInspection:
+    """Inspect source headers and validate the WCS selected by the project."""
+    try:
+        _check_reference("Source", panel.source, context)
+        with open_panel(panel.source.path) as source:
+            header = source.header
+            descriptor = source.descriptor
+    except (OSError, ValueError, OverflowError) as error:
+        return PanelInspection("Unavailable", str(error))
+
+    optics = read_optics(header)
+    if panel.wcs_sidecar is not None:
+        try:
+            _check_reference("WCS sidecar", panel.wcs_sidecar, context)
+            with open_project_sky_panel(panel, 32 * 1024**2, context) as source:
+                _, provenance = load_solution(panel.wcs_sidecar.path, source)
+        except (OSError, ValueError, OverflowError) as error:
+            return PanelInspection("Invalid", str(error), optics)
+        return PanelInspection("Sidecar", provenance, optics)
+
+    if not any(key in header for key in ("CTYPE1", "CTYPE2", "CRVAL1", "CRVAL2")):
+        return PanelInspection("Missing", "The input has no embedded celestial WCS.", optics)
+    try:
+        read_panel_geometry(header, descriptor.width, descriptor.height)
+    except (ValueError, OverflowError) as error:
+        return PanelInspection("Invalid", str(error), optics)
+    return PanelInspection("Embedded", "Validated the image's embedded celestial WCS.", optics)
 
 
 def _verified_inputs(project: MosaicProject, context: JobContext) -> _PanelInputs:
@@ -456,6 +495,7 @@ def save_project(path: Path, project: MosaicProject, *, replace_existing: bool =
                 "foreground_override": panel.foreground_override,
                 "source_mask": _encode_mask(panel.source_mask),
                 "include_sky": panel.include_sky,
+                "optics": asdict(panel.optics),
             }
             for panel in project.panels
         ],
@@ -634,6 +674,12 @@ def _decode_panel(value: object, directory: Path, schema_version: int) -> Projec
     include_sky = record["include_sky"] if schema_version >= 3 else True
     if not isinstance(include_sky, bool):
         raise ValueError("Invalid sky-layer selection.")
+    optics = _object(record["optics"]) if schema_version >= 4 else {}
+
+    def optical_value(key: str) -> float | None:
+        value = optics.get(key)
+        return _number(value) if value is not None else None
+
     return ProjectPanel(
         _decode_reference(record["source"], directory),
         _number(record["weight"]),
@@ -643,6 +689,11 @@ def _decode_panel(value: object, directory: Path, schema_version: int) -> Projec
         override,
         source_mask,
         include_sky,
+        PanelOptics(
+            optical_value("focal_length_mm"),
+            optical_value("pixel_size_x_um"),
+            optical_value("pixel_size_y_um"),
+        ),
     )
 
 
@@ -654,7 +705,7 @@ def load_project(path: Path) -> MosaicProject:
     try:
         data = _object(json.loads(payload.decode("utf-8")))
         schema_version = _integer(data["version"])
-        if schema_version not in (1, 2, _SCHEMA_VERSION):
+        if not 1 <= schema_version <= _SCHEMA_VERSION:
             raise ValueError("Unsupported project manifest version.")
         if not isinstance(data["panels"], list):
             raise ValueError("Expected an ordered panel list.")

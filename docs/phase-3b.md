@@ -18,6 +18,17 @@ poetry run python -m astromosaic.ui
 
 The saved manifest holds the settings and paths needed to reproduce a job. Files on the same drive use relative paths, so moving a project and its referenced files together preserves the links. During a render the editor uses the snapshot from job start. [Sky preview workflow](phase-3c.md#desktop-workflow)
 
+## Panel WCS and Plate Solve Hints
+
+The panel list shows **Embedded**, **Sidecar**, **Missing**, **Invalid**, or **Unavailable** after a background inspection. The panel tooltip gives the reason. An attached sidecar is the project's selected WCS and is checked against the source and current sky mask. A stale sidecar reports **Invalid** and can be cleared or replaced in **Panel settings**.
+
+In **Panel settings**, the focal length and effective X and Y pixel sizes show embedded values as placeholders. Enter edited values in millimeters and micrometers for the panel. Clear an edit to use the embedded value again. The manifest stores explicit edits in version 4 and still opens versions 1 through 3.
+
+- Import reads numeric `FOCALLEN`, `XPIXSZ`, and `YPIXSZ` from FITS and from the FITS-style header in AstroMosaic TIFF. For binning greater than one, pixel size is accepted when the card comment identifies native pitch or effective pitch. For native pitch the reader applies the declared binning once. Ambiguous binned pitch requires an override or another usable scale hint. [N.I.N.A. FITS fields](https://nighttime-imaging.eu/docs/master/site/advanced/file_formats/fits.html) · [N.I.N.A. binning behavior](https://github.com/isbeorn/nina/blob/develop/RELEASE_NOTES.md) · [ARGOS FITS fields](https://perretjules.com/argos/docs/fits_headers.html)
+- The headless `solve` command uses an explicit `--scale`, then a positive embedded `PIXSCALE`, then the scale derived from effective pitch and focal length. A project solve uses saved panel overrides when deriving that scale. Gaia receives a scalar derived hint when the two axis scales agree. ASTAP's field height uses the Y scale. Available blind solver paths can handle missing pointing or scale hints. [Optics and WCS tests](../tests/integration/test_panel_inspection.py)
+
+On Windows 11 x64, the Phase 3.1A source and packaged CLIs solved an M13 reference copy with both local Gaia DR3 and hinted ASTAP using generated optical metadata equivalent to 1.0069 arcseconds per pixel. The copy retained its original bytes through each check. The native desktop regression checked the embedded hints, manual edit, restored project values, and WCS state after relinking on the secondary monitor. [M13 source provenance](phase-0.md#offline-astap-experiment) · [Desktop regression](../tests/integration/test_desktop_project.py)
+
 ## Verification
 
 - Persistence tests check Unicode paths, project folder moves, all render settings and attachment references, fingerprint-matching relink, changed and missing file errors, unsupported schemas, and preservation of the original manifest after a failed atomic replacement. [Persistence tests](../tests/integration/test_project.py)

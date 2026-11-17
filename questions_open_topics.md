@@ -94,16 +94,6 @@ This register tracks unresolved decisions, problems, and risks. It is not a work
 - **Next action / responsibility:** Review the expected terminal workflows at the start of Phase 4C and record the selected scope.
 - **Closure condition:** Record the selected desktop terminal scope and verify its agreed workflows on Windows 11 x64.
 
-### Q-013 - Optical metadata conventions for solve hints
-
-- **Status / priority:** Open / P1
-- **Opened / updated:** 2026-11-16 / 2026-11-16
-- **Affected phase:** 3.1A panel metadata.
-- **Impact and evidence:** FITS writers may report native or effective pixel pitch. The current TIFF reader exposes FITS-style metadata from AstroMosaic's TIFF description. Supported external TIFF optical fields and resampled-image conventions need fixture evidence. [Phase 3.1 plan](astro_mosaic_python_first_architecture_en.md#phase-31-desktop-plate-solving) · [TIFF metadata reader](src/astromosaic/io/tiff.py)
-- **Current assumption:** Interpret only verified fields and units. Use panel overrides or a compatible blind solve when the image has no reliable scale hint.
-- **Next action / responsibility:** Select representative FITS and TIFF headers and verify focal length, pixel pitch, and binning semantics before implementing the import mappings.
-- **Closure condition:** Document supported conventions and verify the derived scale and missing-metadata behavior with representative fixtures, including a binned case.
-
 ## Resolved Topics
 
 ### Q-001 - Python, dependency, and platform compatibility matrix
@@ -149,6 +139,17 @@ This register tracks unresolved decisions, problems, and risks. It is not a work
 - **Next action / responsibility:** Recheck the solver matrix on catalog updates and during release packaging. Release notices and data terms remain under Q-005.
 - **Closure condition:** Record a tested solver/version/catalog matrix and deployment/update policy, including ordered fallbacks, cancellation, missing-catalog diagnostics, exhausted-chain behavior, and unchanged-source checks.
 - **Resolution:** 2026-11-15. [ADR-0010](docs/adr/0010-seiza-gaia-backend.md) records the backend. The [Phase 2 solver matrix and setup](docs/phase-2.md#offline-solvers) record results, catalog provenance, and the update procedure.
+
+### Q-013 - Optical metadata conventions for solve hints
+
+- **Status / priority:** Resolved / P1
+- **Opened / updated:** 2026-11-16 / 2026-11-16
+- **Affected phase:** 3.1A panel metadata.
+- **Impact and evidence:** FITS writers may report native or effective pixel pitch. The reader supports numeric FITS-style optical fields in FITS and AstroMosaic TIFF. Binned fixtures verify native and effective pitch, while a conventional TIFF resolution tag leaves the optical values unset. [Optics tests](tests/integration/test_panel_inspection.py)
+- **Current assumption:** Interpret the documented field conventions and use panel overrides or a compatible blind solve when the image has no reliable scale hint.
+- **Next action / responsibility:** Evaluate additional metadata mappings when a representative acquisition export establishes its field meaning and units.
+- **Closure condition:** Document supported conventions and verify the derived scale and missing-metadata behavior with representative fixtures, including a binned case.
+- **Resolution:** 2026-11-16. Synthetic FITS and TIFF cases passed, including stale masked WCS and ambiguous binning. Local Gaia and ASTAP solved M13 using embedded optical hints. [Supported metadata and Windows evidence](docs/phase-3b.md#panel-wcs-and-plate-solve-hints)
 
 ## New Entry Template
 

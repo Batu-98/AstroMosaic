@@ -22,11 +22,13 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from astromosaic.astrometry.hints import PanelOptics
 from astromosaic.display import DisplayFrame, highlight_overlap
 from astromosaic.storage.project import (
     FileReference,
     Layer,
     MosaicProject,
+    PanelInspection,
     ProjectPanel,
     load_project,
     save_project,
@@ -38,6 +40,7 @@ from astromosaic.ui.mosaic_job import (
     ForegroundJob,
     MaskEditorJob,
     MosaicJob,
+    PanelInspectionJob,
     PreviewJob,
 )
 from astromosaic.ui.project_settings import (
@@ -70,6 +73,10 @@ class ProjectWindow(QMainWindow):
         self._saved = self.project
         self.project_path: Path | None = None
         self.job: _Job | None = None
+        self._inspection_job: PanelInspectionJob | None = None
+        self._inspected_panels: tuple[ProjectPanel, ...] = ()
+        self._inspections: tuple[PanelInspection, ...] = ()
+        self._panel_dialog: tuple[int, PanelSettings] | None = None
         self._preview_project: MosaicProject | None = None
         self._display_frame: DisplayFrame | None = None
         self._close_after_job = False
@@ -180,7 +187,7 @@ class ProjectWindow(QMainWindow):
     def _refresh(self, selected: int = -1) -> None:
         self.panels.clear()
         linked = True
-        for panel in self.project.panels:
+        for index, panel in enumerate(self.project.panels):
             statuses = [(role, reference.status()) for role, reference in panel.references()]
             attention = [f"{role} {value.lower()}" for role, value in statuses if value != "Ready"]
             linked &= not attention
@@ -205,12 +212,20 @@ class ProjectWindow(QMainWindow):
             elif panel.foreground_tag in ("mixed", "uncertain"):
                 mask = "  ·  Sky mask needed"
             sky = "  ·  Sky skipped" if not panel.include_sky else ""
+            info = self._panel_inspection(index)
+            wcs = info.wcs_status if info is not None else "Checking…"
+            if statuses[0][1] != "Ready":
+                wcs = "Unavailable"
+            elif any(role == "WCS sidecar" and value != "Ready" for role, value in statuses):
+                wcs = "Invalid"
             item = QListWidgetItem(
-                f"{panel.source.path.name}  ·  Weight {panel.weight:g}  ·  {detail}  ·  {tag}{mask}{sky}"
+                f"{panel.source.path.name}  ·  WCS {wcs}  ·  Weight {panel.weight:g}"
+                f"  ·  {detail}  ·  {tag}{mask}{sky}"
             )
-            item.setToolTip(
-                "\n".join(f"{role}: {reference.path}" for role, reference in panel.references())
-            )
+            tooltip = [f"{role}: {reference.path}" for role, reference in panel.references()]
+            if info is not None:
+                tooltip.append(info.detail)
+            item.setToolTip("\n".join(tooltip))
             self.panels.addItem(item)
         if self.project.panels:
             self.panels.setCurrentRow(max(0, min(selected, self.panels.count() - 1)))
@@ -224,6 +239,47 @@ class ProjectWindow(QMainWindow):
         self.setWindowTitle(f"{name}{marker} — AstroMosaic")
         self._layer_controls()
         self.cancel_button.setEnabled(self.job is not None)
+        self._start_panel_inspection()
+
+    def _panel_inspection(self, index: int) -> PanelInspection | None:
+        if self._inspected_panels is self.project.panels and 0 <= index < len(self._inspections):
+            return self._inspections[index]
+        return None
+
+    def _start_panel_inspection(self) -> None:
+        if self._inspection_job is not None:
+            if self._inspection_job.project.panels is not self.project.panels:
+                self._inspection_job.cancel()
+            return
+        if (
+            not self._close_after_job
+            and self.project.panels
+            and self.project.panels is not self._inspected_panels
+        ):
+            job = PanelInspectionJob(self.project, self)
+            self._inspection_job = job
+            job.finished.connect(self._finish_panel_inspection)
+            job.start()
+
+    @Slot()
+    def _finish_panel_inspection(self) -> None:
+        job, self._inspection_job = self._inspection_job, None
+        assert job is not None
+        if job.project.panels is self.project.panels and not job.cancelled:
+            self._inspected_panels = job.project.panels
+            self._inspections = job.result or (
+                PanelInspection("Unavailable", job.error or "Panel metadata could not be read."),
+            ) * len(job.project.panels)
+            if self._panel_dialog is not None:
+                index, dialog = self._panel_dialog
+                dialog.show_embedded_optics(self._inspections[index].embedded_optics)
+        job.deleteLater()
+        if self._close_after_job:
+            if self.job is None:
+                self._close_after_job = False
+                QTimer.singleShot(0, self.close)
+            return
+        self._refresh(self.panels.currentRow())
 
     def _layer(self) -> Layer:
         return _LAYERS[self.layer_box.currentIndex()]
@@ -418,6 +474,9 @@ class ProjectWindow(QMainWindow):
         index = self.panels.currentRow()
         panels = self.project.panels
         dialog = PanelSettings(panels[index], self)
+        info = self._panel_inspection(index)
+        dialog.show_embedded_optics(info.embedded_optics if info is not None else PanelOptics())
+        self._panel_dialog = (index, dialog)
         try:
             while dialog.exec():
                 try:
@@ -428,6 +487,7 @@ class ProjectWindow(QMainWindow):
                 self._update_panel(index, panel)
                 break
         finally:
+            self._panel_dialog = None
             dialog.deleteLater()
 
     def _update_panel(self, index: int, panel: ProjectPanel) -> None:
@@ -734,7 +794,12 @@ class ProjectWindow(QMainWindow):
             self._close_after_job = True
             self._cancel()
             event.ignore()
+        elif self._inspection_job is not None:
+            self._close_after_job = True
+            self._inspection_job.cancel()
+            event.ignore()
         elif self._confirm_discard():
             event.accept()
         else:
             event.ignore()
+            self._start_panel_inspection()
