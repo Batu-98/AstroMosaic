@@ -12,9 +12,17 @@ from math import isfinite
 from pathlib import Path
 from stat import S_ISREG
 from typing import Any, Literal, TypedDict
+from uuid import uuid4
 
 from astromosaic.astrometry.hints import PanelOptics, read_optics
-from astromosaic.astrometry.solve import load_solution
+from astromosaic.astrometry.solve import (
+    SolveOptions,
+    SolverAttempt,
+    Stage,
+    load_solution,
+    solve_panel,
+    write_solution,
+)
 from astromosaic.core import Region, SourceFingerprint
 from astromosaic.core.job import JobContext
 from astromosaic.core.masks import (
@@ -267,6 +275,54 @@ def inspect_project_panel(panel: ProjectPanel, context: JobContext) -> PanelInsp
     except (ValueError, OverflowError) as error:
         return PanelInspection("Invalid", str(error), optics)
     return PanelInspection("Embedded", "Validated the image's embedded celestial WCS.", optics)
+
+
+def panels_needing_wcs(project: MosaicProject, context: JobContext) -> tuple[int, ...]:
+    return tuple(
+        index
+        for index in project.sky_indices()
+        if inspect_project_panel(project.panels[index], context).wcs_status
+        not in {"Embedded", "Sidecar"}
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class PanelSolveOutcome:
+    index: int
+    stage: Stage | None = None
+    sidecar: FileReference | None = None
+    attempts: tuple[SolverAttempt, ...] = ()
+    error: str | None = None
+
+
+def solve_project_panel(
+    index: int,
+    panel: ProjectPanel,
+    options: SolveOptions,
+    directory: Path,
+    context: JobContext,
+) -> PanelSolveOutcome:
+    """Resolve one candidate and publish a new sidecar with its input identity."""
+    attempts: tuple[SolverAttempt, ...] = ()
+    try:
+        with open_project_sky_panel(panel, options.max_working_bytes, context) as source:
+            result = solve_panel(source, replace(options, optics=panel.optics), context)
+            attempts = result.attempts
+            context.check_cancelled()
+            if result.geometry is None:
+                return PanelSolveOutcome(
+                    index, attempts=attempts, error="No solver produced a valid WCS."
+                )
+            _check_reference("Source", panel.source, context)
+            if panel.sky_mask is not None:
+                _check_reference("Sky mask", panel.sky_mask, context)
+            directory.mkdir(parents=True, exist_ok=True)
+            path = directory / f"panel-{index + 1}-{uuid4().hex}.wcs.json"
+            context.check_cancelled()
+            write_solution(path, source, result)
+            return PanelSolveOutcome(index, result.stage, FileReference.capture(path), attempts)
+    except (OSError, ValueError, OverflowError) as error:
+        return PanelSolveOutcome(index, attempts=attempts, error=str(error))
 
 
 def _verified_inputs(project: MosaicProject, context: JobContext) -> _PanelInputs:

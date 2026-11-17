@@ -8,8 +8,10 @@ import subprocess
 import sys
 from collections.abc import Callable
 from dataclasses import replace
+from hashlib import file_digest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from threading import Event
 from unittest.mock import patch
 
 import numpy as np
@@ -20,11 +22,13 @@ from PySide6.QtCore import QCoreApplication, QEvent, QEventLoop, QSettings, Qt, 
 from PySide6.QtWidgets import QApplication, QFileDialog
 from scipy.ndimage import gaussian_filter
 
+from astromosaic.astrometry import astap_probe
+from astromosaic.astrometry.solve import SolveOptions, SolverAttempt, SolveResult, write_solution
 from astromosaic.core import Region
 from astromosaic.core.job import JobContext
 from astromosaic.core.masks import FOREGROUND, SKY, UNCLASSIFIED, SourceMask
 from astromosaic.display import normalize_tile
-from astromosaic.geometry import tan_output_wcs
+from astromosaic.geometry import read_panel_geometry, tan_output_wcs
 from astromosaic.io import open_panel
 from astromosaic.pipeline.mosaic import RenderSpec
 from astromosaic.storage.project import (
@@ -91,7 +95,9 @@ def make_project(directory: Path) -> tuple[Path, Path]:
     return manifest, source.rename(directory / "Moved ground.tiff")
 
 
-def wait_for(window: ProjectWindow, condition: Callable[[], bool]) -> None:
+def wait_for(
+    window: ProjectWindow, condition: Callable[[], bool], timeout_ms: int = 15_000
+) -> None:
     if condition():
         return
     loop = QEventLoop()
@@ -100,7 +106,7 @@ def wait_for(window: ProjectWindow, condition: Callable[[], bool]) -> None:
     timeout.setSingleShot(True)
     timeout.timeout.connect(loop.quit)
     poll.start(10)
-    timeout.start(15_000)
+    timeout.start(timeout_ms)
     loop.exec()
     poll.stop()
     timeout.stop()
@@ -279,7 +285,169 @@ def check_solver_settings(window: ProjectWindow, directory: Path) -> None:
         assert options.gaia_catalog == missing_catalog and options.astap_database == "d50"
 
 
-def frozen_check(backend: str) -> None:
+def check_plate_solve(window: ProjectWindow, directory: Path, fixtures: Path) -> dict[str, str]:
+    directory.mkdir()
+    center, size, scale = (250.42, 36.46), (32, 24), 1.0069
+    spec = RenderSpec(center, size, scale)
+    metadata = fits.Header({"FILTER": "L", "BUNIT": "ADU"})
+    embedded = tan_output_wcs(center, size, scale, 0, spec.output_region()).to_header()
+    sky_ready, reuse, ground = (
+        directory / name for name in ("sky.fits", "reuse.fits", "ground.fits")
+    )
+    for path, header in ((sky_ready, embedded + metadata), (reuse, metadata), (ground, metadata)):
+        fits.writeto(path, np.full((size[1], size[0]), 10.0, dtype=np.float32), header)
+
+    reuse_path = directory / "reusable.wcs.json"
+    with open_panel(reuse) as opened:
+        solution = SolveResult(
+            read_panel_geometry(embedded, *size),
+            "existing-wcs",
+            (SolverAttempt("existing-wcs", "solved", "Reference WCS"),),
+        )
+        write_solution(reuse_path, opened, solution)
+
+    gaia_input, astap_input, retry_input = (
+        directory / name for name in ("gaia-m13.fits", "astap-m13.fits", "retry-m13.fits")
+    )
+    fixture = fixtures / "phase2-solve-evidence/m13-primary.fits"
+    with fits.open(fixture, memmap=False) as hdus:
+        pixels = hdus[0].data
+    for path in (gaia_input, astap_input, retry_input):
+        header = metadata.copy()
+        header["RA"], header["DEC"] = (60.0, 0.0) if path == retry_input else center
+        header["PIXSCALE"] = scale
+        fits.writeto(path, pixels, header)
+
+    def digest(path: Path) -> bytes:
+        with path.open("rb") as stream:
+            return file_digest(stream, "sha256").digest()
+
+    originals = {
+        path: digest(path)
+        for path in (sky_ready, reuse, ground, gaia_input, astap_input, retry_input, reuse_path)
+    }
+    options = SolveOptions(
+        gaia_catalog=fixtures / "phase2-gaia/stars-gaia.bin",
+        astap=fixtures / "astap/cli/astap_cli.exe",
+        astap_catalog=fixtures / "astap/catalog",
+    )
+    reused = FileReference.capture(reuse_path)
+    initial = MosaicProject(
+        (
+            ProjectPanel(FileReference.capture(sky_ready)),
+            ProjectPanel(FileReference.capture(reuse), wcs_sidecar=reused),
+            ProjectPanel(FileReference.capture(ground), include_sky=False),
+            ProjectPanel(FileReference.capture(gaia_input)),
+        ),
+        render=spec,
+        assume_surface_brightness=True,
+    )
+    manifest = directory / "Solve.astromosaic"
+    save_project(manifest, initial)
+    window._set_project(load_project(manifest), manifest)
+    window.layer_box.setCurrentText("Sky")
+
+    def result(index: int) -> dict[str, object]:
+        reference = window.project.panels[index].wcs_sidecar
+        assert reference is not None, window.panels.item(index).toolTip()
+        return json.loads(reference.path.read_text(encoding="utf-8"))
+
+    def solve_and_wait() -> None:
+        window.plate_solve_button.click()
+        assert window.job is not None
+        wait_for(window, lambda: window.job is None, 40_000)
+
+    settings_file = directory / "solver-settings.ini"
+    with patch.object(
+        plate_solve_settings,
+        "_settings",
+        side_effect=lambda: QSettings(str(settings_file), QSettings.Format.IniFormat),
+    ):
+        plate_solve_settings._save_plate_solve_settings(
+            replace(options, astap=None, astap_catalog=None)
+        )
+        solve_and_wait()
+        assert result(3)["stage"] == "gaia-dr3"
+        assert window.project.panels[0].wcs_sidecar is None
+        assert window.project.panels[1].wcs_sidecar == reused
+        assert window.project.panels[2].wcs_sidecar is None
+        assert window.status.text() == "Plate solve finished. 1 solved, 0 failed."
+
+        window.project = replace(
+            window.project,
+            panels=window.project.panels
+            + tuple(
+                ProjectPanel(FileReference.capture(path)) for path in (astap_input, retry_input)
+            ),
+        )
+        window._refresh()
+        plate_solve_settings._save_plate_solve_settings(replace(options, gaia_catalog=None))
+        paused, release = Event(), Event()
+        processes: list[subprocess.Popen[str]] = []
+        original_wait = astap_probe._wait_for_astap
+
+        def pause_second(
+            process: subprocess.Popen[str], timeout: float, context: JobContext
+        ) -> str:
+            processes.append(process)
+            if len(processes) == 2:
+                paused.set()
+                while not release.wait(0.01):
+                    context.check_cancelled()
+                context.check_cancelled()
+            return original_wait(process, timeout, context)
+
+        with (
+            patch.object(astap_probe, "_wait_for_astap", pause_second),
+            patch.object(
+                astap_probe,
+                "TemporaryDirectory",
+                side_effect=lambda **kwargs: TemporaryDirectory(dir=directory, **kwargs),
+            ),
+        ):
+            try:
+                window.plate_solve_button.click()
+                wait_for(window, paused.is_set, 40_000)
+                window.cancel_button.click()
+                wait_for(window, lambda: window.job is None)
+            finally:
+                release.set()
+        assert window.status.text() == "Plate solve cancelled. 1 solved, 0 failed."
+        first_astap = window.project.panels[4].wcs_sidecar
+        assert result(4)["stage"] == "astap-hinted"
+        assert window.project.panels[5].wcs_sidecar is None
+        assert len(processes) == 2 and all(process.poll() is not None for process in processes)
+        assert not list(directory.glob("astromosaic-astap-*"))
+
+        plate_solve_settings._save_plate_solve_settings(options)
+        solve_and_wait()
+        fallback = result(5)
+        assert fallback["stage"] == "astap-blind", window.panels.item(5).toolTip()
+        attempts = fallback["attempts"]
+        assert isinstance(attempts, list)
+        assert (attempts[1]["stage"], attempts[1]["outcome"]) == ("gaia-dr3", "failed")
+        assert window.project.panels[4].wcs_sidecar == first_astap
+        assert len(list(directory.rglob("panel-*.wcs.json"))) == 3
+
+    assert window._save()
+    reopened = load_project(manifest)
+    assert reopened == window.project
+    window._set_project(reopened, manifest)
+    window.preview_button.click()
+    wait_for(window, lambda: window.job is None)
+    assert window.viewport.frame is not None, window.status.text()
+    exported = directory / "solved-mosaic.fits"
+    export(window, exported)
+    wait_for(window, lambda: window.job is None)
+    with fits.open(exported) as hdus:
+        assert np.any(hdus[1].data > 0)
+        assert any("astap-blind WCS sidecar" in entry for entry in hdus[0].header["HISTORY"])
+    assert all(digest(path) == expected for path, expected in originals.items())
+    assert not list(directory.rglob("*.part"))
+    return {"gaia": "gaia-dr3", "astap": "astap-hinted", "fallback": "astap-blind"}
+
+
+def frozen_check(backend: str, solve_fixtures: Path | None) -> None:
     runtime = Path(sys.executable).parent / "_internal"
     assert Path(sys._MEIPASS).resolve() == runtime.resolve()  # type: ignore[attr-defined]
     app = QApplication([sys.argv[0]])
@@ -292,6 +460,11 @@ def frozen_check(backend: str) -> None:
     try:
         check_solver_settings(window, Path.cwd())
         covered = check_project(window, Path.cwd(), backend)
+        plate_solve = (
+            check_plate_solve(window, Path.cwd() / "solver", solve_fixtures)
+            if solve_fixtures is not None
+            else None
+        )
         print(
             json.dumps(
                 {
@@ -301,6 +474,7 @@ def frozen_check(backend: str) -> None:
                     "recovery": True,
                     "cancel_and_retry": True,
                     "solver_settings": True,
+                    "plate_solve": plate_solve,
                 }
             )
         )
@@ -314,7 +488,7 @@ def frozen_check(backend: str) -> None:
         QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
 
 
-def check_bundle(bundle: Path, probe: Path, backend: str) -> None:
+def check_bundle(bundle: Path, probe: Path, backend: str, solve_fixtures: Path | None) -> None:
     env = {
         key: value
         for key, value in os.environ.items()
@@ -330,8 +504,11 @@ def check_bundle(bundle: Path, probe: Path, backend: str) -> None:
         shutil.copytree(bundle, copied)
         check = copied / "astromosaic-desktop-check.exe"
         shutil.copy2(probe, check)
+        command = [str(check), "--backend", backend]
+        if solve_fixtures is not None:
+            command.extend(("--solve-fixtures", str(solve_fixtures.resolve())))
         result = subprocess.run(
-            [str(check), "--backend", backend],
+            command,
             cwd=working,
             env=env,
             check=False,
@@ -339,7 +516,7 @@ def check_bundle(bundle: Path, probe: Path, backend: str) -> None:
             text=True,
             encoding="utf-8",
             errors="replace",
-            timeout=90,
+            timeout=150 if solve_fixtures is not None else 90,
             creationflags=subprocess.CREATE_NO_WINDOW,
         )
         if result.returncode:
@@ -347,6 +524,8 @@ def check_bundle(bundle: Path, probe: Path, backend: str) -> None:
         report = json.loads(result.stdout)
         assert report["backend"] == backend
         assert report["recovery"] and report["cancel_and_retry"] and report["solver_settings"]
+        if solve_fixtures is not None:
+            assert report["plate_solve"]["fallback"] == "astap-blind"
         print(result.stdout.strip())
 
 
@@ -354,11 +533,12 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     frozen = getattr(sys, "frozen", False)
     parser.add_argument("--backend", choices=("CPU", "OpenGL"), default="CPU")
+    parser.add_argument("--solve-fixtures", type=Path, help="Local Phase 2 fixture directory.")
     if not frozen:
         parser.add_argument("bundle", type=Path)
         parser.add_argument("probe", type=Path)
     args = parser.parse_args()
     if frozen:
-        frozen_check(args.backend)
+        frozen_check(args.backend, args.solve_fixtures)
     else:
-        check_bundle(args.bundle, args.probe, args.backend)
+        check_bundle(args.bundle, args.probe, args.backend, args.solve_fixtures)

@@ -25,6 +25,7 @@ __pycache__/
 *.npy
 *.npz
 *.astromosaic
+panel-*.wcs.json
 .astromosaic-*.part
 .env
 .env.*

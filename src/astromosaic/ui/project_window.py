@@ -23,12 +23,14 @@ from PySide6.QtWidgets import (
 )
 
 from astromosaic.astrometry.hints import PanelOptics
+from astromosaic.astrometry.solve import Stage
 from astromosaic.display import DisplayFrame, highlight_overlap
 from astromosaic.storage.project import (
     FileReference,
     Layer,
     MosaicProject,
     PanelInspection,
+    PanelSolveOutcome,
     ProjectPanel,
     load_project,
     save_project,
@@ -41,9 +43,10 @@ from astromosaic.ui.mosaic_job import (
     MaskEditorJob,
     MosaicJob,
     PanelInspectionJob,
+    PlateSolveJob,
     PreviewJob,
 )
-from astromosaic.ui.plate_solve_settings import PlateSolveSettings
+from astromosaic.ui.plate_solve_settings import PlateSolveSettings, load_plate_solve_settings
 from astromosaic.ui.project_settings import (
     PANEL_FILES,
     CompositionSettings,
@@ -63,8 +66,15 @@ _Job = (
     | MaskEditorJob
     | ForegroundAlignmentJob
     | CompositionProposalJob
+    | PlateSolveJob
 )
 _LAYERS: tuple[Layer, ...] = ("sky", "foreground", "composition")
+_SOLVER_NAMES: dict[Stage, str] = {
+    "existing-wcs": "Embedded WCS",
+    "gaia-dr3": "Gaia DR3",
+    "astap-hinted": "ASTAP hinted",
+    "astap-blind": "ASTAP blind",
+}
 
 
 class ProjectWindow(QMainWindow):
@@ -77,6 +87,8 @@ class ProjectWindow(QMainWindow):
         self._inspection_job: PanelInspectionJob | None = None
         self._inspected_panels: tuple[ProjectPanel, ...] = ()
         self._inspections: tuple[PanelInspection, ...] = ()
+        self._solved_panels: tuple[ProjectPanel, ...] = ()
+        self._solve_outcomes: dict[int, PanelSolveOutcome] = {}
         self._panel_dialog: tuple[int, PanelSettings] | None = None
         self._preview_project: MosaicProject | None = None
         self._display_frame: DisplayFrame | None = None
@@ -142,6 +154,10 @@ class ProjectWindow(QMainWindow):
         ):
             buttons.addWidget(button)
         buttons.addStretch()
+        self.plate_solve_button = QPushButton("Plate Solve")
+        self.plate_solve_button.setToolTip("Solve sky panels that need a usable WCS.")
+        self.plate_solve_button.clicked.connect(self._plate_solve)
+        buttons.addWidget(self.plate_solve_button)
         controls.addLayout(buttons)
         self.panels.currentRowChanged.connect(self._selection_changed)
         splitter.addWidget(self._editor)
@@ -191,6 +207,9 @@ class ProjectWindow(QMainWindow):
 
     def _refresh(self, selected: int = -1) -> None:
         self.panels.clear()
+        if self._solved_panels is not self.project.panels:
+            self._solved_panels = ()
+            self._solve_outcomes.clear()
         linked = True
         for index, panel in enumerate(self.project.panels):
             statuses = [(role, reference.status()) for role, reference in panel.references()]
@@ -230,6 +249,17 @@ class ProjectWindow(QMainWindow):
             tooltip = [f"{role}: {reference.path}" for role, reference in panel.references()]
             if info is not None:
                 tooltip.append(info.detail)
+            if (outcome := self._solve_outcomes.get(index)) is not None:
+                if outcome.sidecar is not None and outcome.stage is not None:
+                    item.setText(f"{item.text()}  ·  Solved with {_SOLVER_NAMES[outcome.stage]}")
+                else:
+                    item.setText(f"{item.text()}  ·  Solve failed")
+                if outcome.error is not None:
+                    tooltip.append(outcome.error)
+                tooltip.extend(
+                    f"{_SOLVER_NAMES[attempt.stage]} {attempt.outcome}. {attempt.detail}"
+                    for attempt in outcome.attempts
+                )
             item.setToolTip("\n".join(tooltip))
             self.panels.addItem(item)
         if self.project.panels:
@@ -333,6 +363,7 @@ class ProjectWindow(QMainWindow):
         self.grid_summary.setText(summary)
         self.start_button.setEnabled(idle and ready)
         self.preview_button.setEnabled(idle and ready)
+        self.plate_solve_button.setEnabled(idle and sky)
 
     @Slot()
     def _layer_changed(self) -> None:
@@ -540,6 +571,19 @@ class ProjectWindow(QMainWindow):
         finally:
             dialog.deleteLater()
 
+    def _plate_solve(self) -> None:
+        if self.job is not None or not self.project.sky_indices():
+            return
+        if self.project_path is None:
+            chosen = QFileDialog.getExistingDirectory(self, "Choose Folder for WCS Sidecars")
+            if not chosen:
+                return
+            directory = Path(chosen)
+        else:
+            directory = self.project_path.with_name(f"{self.project_path.name}.wcs")
+        job = PlateSolveJob(self.project, load_plate_solve_settings(), directory, self)
+        self._launch_job(job, "Finding sky panels that need a WCS…")
+
     def _start(self) -> None:
         if self.job is not None or not self.project.panels:
             return
@@ -659,6 +703,8 @@ class ProjectWindow(QMainWindow):
             self._finish_mask_editor(job)
         elif isinstance(job, (ForegroundAlignmentJob, CompositionProposalJob)):
             self._finish_layer_job(job)
+        elif isinstance(job, PlateSolveJob):
+            self._finish_plate_solve(job)
         elif job.result is not None:
             self.progress.setValue(100)
             text = f"Saved {job.destination.name} · {job.result.covered_pixels:,} covered pixels."
@@ -676,6 +722,31 @@ class ProjectWindow(QMainWindow):
         if self._close_after_job:
             self._close_after_job = False
             QTimer.singleShot(0, self.close)
+
+    def _finish_plate_solve(self, job: PlateSolveJob) -> None:
+        panels = list(self.project.panels)
+        solved = 0
+        for outcome in job.outcomes:
+            if outcome.sidecar is not None:
+                panels[outcome.index] = replace(panels[outcome.index], wcs_sidecar=outcome.sidecar)
+                solved += 1
+        if solved:
+            self.project = replace(self.project, panels=tuple(panels))
+        self._solved_panels = self.project.panels
+        self._solve_outcomes = {outcome.index: outcome for outcome in job.outcomes}
+        self._refresh(self.panels.currentRow())
+        completed = len(job.outcomes)
+        if job.total:
+            self.progress.setValue(100 * completed // job.total)
+        summary = f"{solved} solved, {completed - solved} failed."
+        if job.cancelled:
+            self.status.setText(f"Plate solve cancelled. {summary}")
+        elif job.error is not None:
+            self.status.setText(f"Plate solve stopped. {summary} {job.error}")
+        elif not job.total:
+            self.status.setText("All sky panels already have a usable WCS.")
+        else:
+            self.status.setText(f"Plate solve finished. {summary}")
 
     def _finish_preview(self, job: PreviewJob) -> None:
         if job.result is not None:

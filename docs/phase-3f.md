@@ -24,6 +24,8 @@ poetry run python packaging/check-windows-desktop.py dist/windows/AstroMosaic bu
 
 The CPU check uses Qt's offscreen platform with the application's ordinary backend selection. The OpenGL check uses a hidden window with the native Windows driver and reads its framebuffer. Use `--test-secondary-screen` on the desktop launcher for a visible test when a second monitor is available. [Desktop checker](../packaging/check-windows-desktop.py) · [CLI checker](../packaging/check-windows-cli.py)
 
+To include the real desktop plate solve acceptance cases, add `--solve-fixtures .tooling` to either desktop check. The fixture directory supplies `phase2-solve-evidence/m13-primary.fits`, `phase2-gaia/stars-gaia.bin`, `astap/cli/astap_cli.exe`, and `astap/catalog`. The checker creates project inputs from the reference image in its scratch workspace. [M13 reference and catalog setup](phase-2.md#offline-solvers)
+
 ## Windows Evidence
 
 The checks passed on Windows 11 Pro x64, build 26200. Both desktop modes aligned the mixed FITS and Deflate TIFF project, relinked the moved source, preserved the saved manifest after a simulated publication failure, and reopened the edited composition. Both cancelled a running render after it reported tile progress, removed its temporary output, and successfully retried to the same filename. Preview samples and coverage matched the reopened exports. The sky FITS retained its WCS, and the composition TIFF contained all four layer contribution codes.

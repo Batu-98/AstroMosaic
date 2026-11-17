@@ -37,9 +37,17 @@ Open **Tools → Plate Solve Settings** even with an empty project. The paths an
 2. For ASTAP, select the ASTAP command-line executable and the folder containing the unpacked database tiles. Choose D05, D20, D50, or D80 to match the installed database. [ASTAP command line and databases](https://www.hnsky.org/astap.htm#astap_command_line)
 3. Select **Check Paths** to see each backend's results. Seiza attempts to open the selected files. ASTAP checks the layout of a matching sample tile and requests the executable's version through its help command. Select **Save** to retain the paths and database. Check the paths again after moving the catalog or reconnecting its drive. [Path check tests](../tests/integration/test_solver_setup.py)
 
-The settings can hold either backend or both. The offline chain tries Gaia DR3 before ASTAP after checking for usable WCS. Solve diagnostics retain the backend version and the Gaia catalog and index identities or the selected ASTAP database. The desktop solve job will use these settings in Phase 3.1C. [Offline solver order](adr/0005-offline-solver-chain.md) · [Desktop solve stages](../astro_mosaic_python_first_architecture_en.md#phase-31-desktop-plate-solving)
+The settings can hold either backend or both. The offline chain tries Gaia DR3 before ASTAP after checking for usable WCS. Solve diagnostics retain the backend version and the Gaia catalog and index identities or the selected ASTAP database. [Offline solver order](adr/0005-offline-solver-chain.md) · [Desktop solve stages](../astro_mosaic_python_first_architecture_en.md#phase-31-desktop-plate-solving)
 
 On Windows 11 x64, separate desktop processes checked and restored the real Gaia DR3 catalog and blind index and ASTAP CLI 2026.11.01 with D05 in an isolated settings store. The warning path identified missing files after reopening. The rebuilt CPU and OpenGL desktop bundles also checked missing paths and saved settings. [Desktop settings regression](../tests/integration/test_desktop_solver_settings.py) · [Packaged desktop checks](../packaging/check-windows-desktop.py)
+
+## Desktop Plate Solving
+
+1. Set the local solver paths and choose **Plate Solve** in the Panels controls. The job uses the selected sky layer inputs, each panel's optical hints and sky mask, and the saved backend settings. It shows how many panels need a WCS and reports progress as they finish. It reuses validated embedded WCS and sidecars.
+2. For a saved project, the job writes new sidecars in a sibling folder such as `Night.astromosaic.wcs`. For an untitled project, choose a folder for the sidecars. Each completed solution is written atomically with its source and sky mask identity.
+3. Read each attempted panel's result in the list and hover over the row to see the solver attempts and errors. **Cancel Job** finishes cleanup and attaches any completed results. Choose **Plate Solve** again to retry panels that still need a valid WCS. Preview and export use the attached WCS. Save the project to keep the links across sessions. [Desktop regression](../tests/integration/test_desktop_plate_solve.py)
+
+The rebuilt Windows 11 x64 desktop checks passed on offscreen CPU and native OpenGL. The mixed project reused its embedded and attached WCS, skipped its foreground-only panel, and used real Gaia DR3 and ASTAP D05 on the M13 reference. Cancelling the second ASTAP attempt reaped the process and removed staging files while keeping the first solution. The retry used blind ASTAP after Gaia and hinted ASTAP failed with shifted pointing. The saved project reopened, preview and FITS export used the attached solutions, and source image hashes matched. [Packaged desktop checks](phase-3f.md#background-checks)
 
 ## Verification
 

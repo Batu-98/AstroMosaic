@@ -9,6 +9,7 @@ from time import monotonic
 import numpy as np
 from PySide6.QtCore import QObject, QThread, Signal
 
+from astromosaic.astrometry.solve import SolveOptions
 from astromosaic.core import Tile
 from astromosaic.core.job import JobContext, MosaicCancelled
 from astromosaic.core.masks import MASK_EDGE, SKY, UNCLASSIFIED, SourceMask
@@ -27,14 +28,17 @@ from astromosaic.storage.project import (
     Layer,
     MosaicProject,
     PanelInspection,
+    PanelSolveOutcome,
     ProjectPanel,
     align_project_foreground,
     inspect_project_panel,
+    panels_needing_wcs,
     preview_project,
     preview_project_layer,
     propose_project_composition,
     render_project,
     render_project_layer,
+    solve_project_panel,
 )
 
 
@@ -87,6 +91,33 @@ class PanelInspectionJob(_ProjectJob[tuple[PanelInspection, ...]]):
 
     def perform(self, context: JobContext) -> tuple[PanelInspection, ...]:
         return tuple(inspect_project_panel(panel, context) for panel in self.project.panels)
+
+
+class PlateSolveJob(_ProjectJob[None]):
+    label = "plate solve"
+    progress_label = "Solving"
+    progress_units = "panels"
+
+    def __init__(
+        self, project: MosaicProject, options: SolveOptions, directory: Path, parent: QObject
+    ) -> None:
+        super().__init__(project, parent)
+        self.options = options
+        self.directory = directory
+        self.total = 0
+        self.outcomes: list[PanelSolveOutcome] = []
+
+    def perform(self, context: JobContext) -> None:
+        indices = panels_needing_wcs(self.project, context)
+        self.total = len(indices)
+        if self.total:
+            self._progress(0, self.total)
+        for done, index in enumerate(indices, 1):
+            outcome = solve_project_panel(
+                index, self.project.panels[index], self.options, self.directory, context
+            )
+            self.outcomes.append(outcome)
+            self._progress(done, self.total)
 
 
 class MosaicJob(_ProjectJob[MosaicResult]):
