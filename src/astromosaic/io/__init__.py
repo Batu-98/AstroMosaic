@@ -14,6 +14,7 @@ from astromosaic.core.masks import FOREGROUND, SKY, SourceMask
 from astromosaic.io.fits import open_fits_panel
 
 TIFF_SUFFIXES = {".tif", ".tiff"}
+XISF_SUFFIX = ".xisf"
 SkyMask = Path | SourceMask
 
 
@@ -73,10 +74,15 @@ def open_panel(
         raise ValueError("Choose one content selection per source reader.")
     supplied = sky_mask if isinstance(sky_mask, Path) else None
     opened: AbstractContextManager[PanelSource]
-    if path.suffix.lower() in TIFF_SUFFIXES:
+    suffix = path.suffix.lower()
+    if suffix in TIFF_SUFFIXES:
         from astromosaic.io.tiff import open_tiff_panel
 
         opened = open_tiff_panel(path, max_tile_bytes=max_tile_bytes, sky_mask=supplied)
+    elif suffix == XISF_SUFFIX:
+        from astromosaic.io.xisf import open_xisf_panel
+
+        opened = open_xisf_panel(path, max_tile_bytes=max_tile_bytes, sky_mask=supplied)
     else:
         opened = open_fits_panel(
             path, max_tile_bytes=max_tile_bytes, memmap=False, sky_mask=supplied

@@ -1,4 +1,4 @@
-"""Run the Phase 4A batch acceptance cases in a Windows console."""
+"""Run the batch acceptance cases in a Windows console."""
 
 import argparse
 import ctypes
@@ -26,9 +26,14 @@ from astromosaic.storage.project import FileReference, MosaicProject, ProjectPan
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def write_batch(path: Path, *entries: tuple[str, str]) -> None:
+def write_batch(path: Path, *entries: tuple[str, str] | tuple[str, str, str]) -> None:
     path.write_text(
-        json.dumps([{"project": project, "output": output} for project, output in entries]),
+        json.dumps(
+            [
+                {"project": project, "output": output, **({"band": band[0]} if band else {})}
+                for project, output, *band in entries
+            ]
+        ),
         encoding="utf-8",
     )
 
@@ -65,8 +70,8 @@ def check_cancel_and_retry(
     later = directory / "after interrupt.tiff"
     write_batch(
         plan,
-        ("Gökyüzü.astromosaic", first.name),
-        ("slow.astromosaic", interrupted.name),
+        ("Bands.astromosaic", first.name, "L"),
+        ("slow.astromosaic", interrupted.name, "L"),
         ("RGB project.astromosaic", later.name),
     )
     results, events = directory / "results.ndjson", directory / "progress.ndjson"
@@ -107,16 +112,18 @@ def check_cancel_and_retry(
     reports = read_records(results.read_text(encoding="utf-8"))
     assert exit_code == 130, reports
     assert [report["status"] for report in reports] == ["ok", "cancelled"]
+    assert [report["band"] for report in reports] == ["L", "L"]
     assert first.read_bytes() == earlier_output
     assert not interrupted.exists() and not later.exists()
     assert not list(directory.glob(".astromosaic-*.part"))
 
     retry = directory / "retry.json"
-    write_batch(retry, ("slow.astromosaic", interrupted.name))
+    write_batch(retry, ("slow.astromosaic", interrupted.name, "L"))
     retried = run_batch(command, retry, env)
     assert retried.returncode == 0, retried.stderr
     (report,) = read_records(retried.stdout)
-    assert report["status"] == "ok" and first.read_bytes() == earlier_output
+    assert report["status"] == "ok" and report["band"] == "L"
+    assert first.read_bytes() == earlier_output
     with fitsio.FITS(interrupted) as hdus:
         assert report["covered_pixels"] == int(hdus["COVERAGE"].read().sum()) > 0
 
@@ -159,6 +166,14 @@ def check_batches(
     ):
         project = MosaicProject((ProjectPanel(FileReference.capture(image)),), settings)
         save_project(directory / f"{name}.astromosaic", project)
+    bands = MosaicProject(
+        (
+            ProjectPanel(FileReference.capture(source)),
+            ProjectPanel(FileReference.capture(tiff), band_override="O III"),
+        ),
+        spec,
+    )
+    save_project(directory / "Bands.astromosaic", bands)
     missing.rename(directory / "moved panel.fits")
     original_sources = (source.read_bytes(), tiff.read_bytes())
 
@@ -167,15 +182,16 @@ def check_batches(
     plan = directory / "batch.json"
     write_batch(
         plan,
-        ("Gökyüzü.astromosaic", "sky output.fits"),
+        ("Bands.astromosaic", "sky output.fits", "L"),
         ("missing.astromosaic", "missing output.fits"),
         ("Gökyüzü.astromosaic", occupied.name),
-        ("RGB project.astromosaic", "RGB output.tiff"),
+        ("Bands.astromosaic", "RGB output.tiff", "O III"),
     )
     outcome = run_batch(command, plan, env)
     assert outcome.returncode == 1, outcome.stderr
     reports = read_records(outcome.stdout)
     assert [report["status"] for report in reports] == ["ok", "error", "error", "ok"]
+    assert reports[0]["band"] == "L" and reports[3]["band"] == "O III"
     assert "Source file is missing" in str(reports[1]["message"])
     assert "already exists" in str(reports[2]["message"])
     assert occupied.read_bytes() == b"Previous output"
@@ -234,7 +250,8 @@ def main() -> None:
         ):
             check_batches(command, directory / label, env, raster_check)
             print(
-                f"{label} passed FITS/TIFF progress, failure, cancellation and retry.", flush=True
+                f"{label} passed band exports, progress, failure, cancellation and retry.",
+                flush=True,
             )
 
 

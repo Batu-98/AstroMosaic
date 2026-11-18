@@ -23,8 +23,8 @@ from PySide6.QtWidgets import (
 from astromosaic.astrometry.hints import PanelOptics
 from astromosaic.core import Region
 from astromosaic.core.masks import ForegroundTag
+from astromosaic.geometry import SkyProjection
 from astromosaic.geometry.image import CompositionSpec, LayerPlacement
-from astromosaic.pipeline.mosaic import RenderSpec
 from astromosaic.pipeline.refinement import RefinementSpec
 from astromosaic.storage.project import (
     FileReference,
@@ -33,7 +33,7 @@ from astromosaic.storage.project import (
     default_composition,
 )
 
-PANEL_FILES = "Linear panels (*.fits *.fit *.fts *.tif *.tiff);;All files (*)"
+PANEL_FILES = "Linear panels (*.fits *.fit *.fts *.tif *.tiff *.xisf);;All files (*)"
 _OVERRIDES: tuple[ForegroundTag | None, ...] = (None, "mixed", "sky-only")
 
 
@@ -64,6 +64,11 @@ class ProjectSettings(_SettingsDialog):
         spec = project.render
         self.ra = self.field("Right ascension (°)", spec.center[0])
         self.dec = self.field("Declination (°)", spec.center[1])
+        self.projection = QComboBox()
+        self.projection.addItem("TAN (Gnomonic)", "TAN")
+        self.projection.addItem("ZEA (Zenithal equal area)", "ZEA")
+        self.projection.setCurrentIndex(self.projection.findData(spec.projection))
+        self.form.addRow("Sky projection", self.projection)
         self.output_width = self.field("Width (px)", spec.size[0])
         self.output_height = self.field("Height (px)", spec.size[1])
         self.scale = self.field("Pixel scale (arcsec/px)", spec.scale_arcsec)
@@ -97,15 +102,15 @@ class ProjectSettings(_SettingsDialog):
                 raise ValueError("Enter four comma-separated crop coordinates.")
             crop = Region(*(int(field) for field in fields))
         previous = self.project.render
-        spec = RenderSpec(
-            (float(self.ra.text()), float(self.dec.text())),
-            (int(self.output_width.text()), int(self.output_height.text())),
-            float(self.scale.text()),
-            float(self.rotation.text()),
-            crop,
-            previous.tile_size,
-            previous.max_working_bytes,
-            previous.max_output_bytes,
+        projection = cast(SkyProjection, self.projection.currentData())
+        spec = replace(
+            previous,
+            center=(float(self.ra.text()), float(self.dec.text())),
+            size=(int(self.output_width.text()), int(self.output_height.text())),
+            scale_arcsec=float(self.scale.text()),
+            rotation_deg=float(self.rotation.text()),
+            crop=crop,
+            projection=projection,
         )
         background = self.background.currentText().lower()
         refinement = (
@@ -121,6 +126,7 @@ class ProjectSettings(_SettingsDialog):
             filter_name=self.filter.text().strip() or None,
             assume_surface_brightness=self.assume.isChecked(),
             refinement=refinement,
+            composition=self.project.composition if projection == previous.projection else None,
         )
         project.validate()
         return project
@@ -130,11 +136,14 @@ class PanelSettings(_SettingsDialog):
     def __init__(self, panel: ProjectPanel, parent: QWidget) -> None:
         super().__init__("Panel settings", parent)
         self.panel = panel
+        self._autofilled: dict[QLineEdit, str] = {}
         source = QLabel()
         source.setTextFormat(Qt.TextFormat.PlainText)
         source.setText(panel.source.path.name)
         self.form.addRow("Source", source)
         self.weight = self.field("Blend weight", panel.weight)
+        self.band_override = self.field("Sky band override", panel.band_override or "")
+        self.band_override.setToolTip("Assign a saved filter label for this panel's sky samples.")
         self.foreground_override = QComboBox()
         self.foreground_override.addItems(
             ["Use suggestion", "Mixed sky and foreground", "Sky only"]
@@ -165,14 +174,31 @@ class PanelSettings(_SettingsDialog):
 
     def _optical_field(self, label: str, value: float | None) -> QLineEdit:
         field = self.field(label, "" if value is None else value)
+        if value is None:
+            self._autofilled[field] = ""
         field.setToolTip("Enter an override for this panel. Clear it to use embedded metadata.")
         return field
 
     def show_embedded_optics(self, optics: PanelOptics, camera_model: str | None = None) -> None:
         self.camera_model.setText(camera_model or "Not available")
-        self.focal_length.setPlaceholderText(_embedded_hint(optics.focal_length_mm))
-        self.pixel_size_x.setPlaceholderText(_embedded_hint(optics.pixel_size_x_um))
-        self.pixel_size_y.setPlaceholderText(_embedded_hint(optics.pixel_size_y_um))
+        for field, value in (
+            (self.focal_length, optics.focal_length_mm),
+            (self.pixel_size_x, optics.pixel_size_x_um),
+            (self.pixel_size_y, optics.pixel_size_y_um),
+        ):
+            text = format(value, ".9g") if value is not None else ""
+            hint = f"{text} (embedded)" if text else "No usable embedded value"
+            field.setPlaceholderText(hint)
+            field.setToolTip(f"{hint}. Edit to override. Clear to use the file value.")
+            if field.text() == self._autofilled.get(field) and not field.isModified():
+                field.setText(text)
+                self._autofilled[field] = text
+
+    def _optical_override(self, field: QLineEdit) -> float | None:
+        entered = field.text().strip()
+        if not entered or (entered == self._autofilled.get(field) and not field.isModified()):
+            return None
+        return float(entered)
 
     def _attachment(self, label: str, reference: FileReference | None, names: str) -> QLineEdit:
         path = QLineEdit(str(reference.path) if reference else "")
@@ -210,9 +236,9 @@ class PanelSettings(_SettingsDialog):
 
         sky_mask = attachment(self.sky_mask, self.panel.sky_mask)
         optics = PanelOptics(
-            _optical_override(self.focal_length),
-            _optical_override(self.pixel_size_x),
-            _optical_override(self.pixel_size_y),
+            self._optical_override(self.focal_length),
+            self._optical_override(self.pixel_size_x),
+            self._optical_override(self.pixel_size_y),
         )
         return replace(
             self.panel,
@@ -223,16 +249,8 @@ class PanelSettings(_SettingsDialog):
             foreground_override=_OVERRIDES[self.foreground_override.currentIndex()],
             include_sky=self.include_sky.isChecked(),
             optics=optics,
+            band_override=self.band_override.text().strip() or None,
         )
-
-
-def _embedded_hint(value: float | None) -> str:
-    return f"{value:g} (embedded)" if value is not None else "No usable embedded value"
-
-
-def _optical_override(field: QLineEdit) -> float | None:
-    entered = field.text().strip()
-    return float(entered) if entered else None
 
 
 class CompositionSettings(_SettingsDialog):

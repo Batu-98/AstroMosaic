@@ -166,16 +166,25 @@ class MosaicJob(_ProjectJob[MosaicResult]):
     progress_label = "Rendering"
 
     def __init__(
-        self, project: MosaicProject, destination: Path, parent: QObject, layer: Layer = "sky"
+        self,
+        project: MosaicProject,
+        destination: Path,
+        parent: QObject,
+        layer: Layer = "sky",
+        *,
+        band: str | None = None,
     ) -> None:
         super().__init__(project, parent)
         self.destination = destination
         self.layer = layer
+        self.band = band
 
     def perform(self, context: JobContext) -> MosaicResult:
-        if self.layer == "sky":
+        if self.layer == "sky" and self.band is None:
             return render_project(self.project, self.destination, context)
-        return render_project_layer(self.project, self.layer, self.destination, context)
+        return render_project_layer(
+            self.project, self.layer, self.destination, context, band=self.band
+        )
 
 
 class PreviewJob(_ProjectJob[DisplayFrame]):
@@ -183,9 +192,17 @@ class PreviewJob(_ProjectJob[DisplayFrame]):
     label = "preview"
     progress_label = "Previewing"
 
-    def __init__(self, project: MosaicProject, parent: QObject, layer: Layer = "sky") -> None:
+    def __init__(
+        self,
+        project: MosaicProject,
+        parent: QObject,
+        layer: Layer = "sky",
+        *,
+        band: str | None = None,
+    ) -> None:
         super().__init__(project, parent)
         self.layer = layer
+        self.band = band
 
     def _publish_proxy(self, preview: PreviewFrame) -> None:
         self.proxy_ready.emit(normalize_preview(preview))
@@ -193,8 +210,10 @@ class PreviewJob(_ProjectJob[DisplayFrame]):
     def perform(self, context: JobContext) -> DisplayFrame:
         preview = (
             preview_project(self.project, context, self._publish_proxy)
-            if self.layer == "sky"
-            else preview_project_layer(self.project, self.layer, context, self._publish_proxy)
+            if self.layer == "sky" and self.band is None
+            else preview_project_layer(
+                self.project, self.layer, context, self._publish_proxy, band=self.band
+            )
         )
         frame = normalize_preview(preview)
         context.check_cancelled()

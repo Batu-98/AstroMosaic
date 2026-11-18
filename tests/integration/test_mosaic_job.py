@@ -15,10 +15,11 @@ from astromosaic.pipeline.smoke import write_smoke_panel
 SPEC = RenderSpec((359.999, 20.0), (9, 7), 7.2, tile_size=3)
 
 
-def test_cancel_releases_handles_and_allows_retry(tmp_path: Path) -> None:
+@pytest.mark.parametrize("suffix", [".fits", ".xisf"])
+def test_cancel_releases_handles_and_allows_retry(tmp_path: Path, suffix: str) -> None:
     source = tmp_path / "source.fits"
     write_smoke_panel(source)
-    destination = tmp_path / "mosaic.fits"
+    destination = tmp_path / f"mosaic{suffix}"
     cancellation = Event()
     reports = []
 
@@ -39,7 +40,7 @@ def test_cancel_releases_handles_and_allows_retry(tmp_path: Path) -> None:
     assert render_mosaic([renamed], destination, SPEC).covered_pixels == 62
 
 
-@pytest.mark.parametrize("suffix", [".fits", ".tiff"])
+@pytest.mark.parametrize("suffix", [".fits", ".tiff", ".xisf"])
 def test_cancel_during_flush_prevents_raster_publication(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, suffix: str
 ) -> None:
@@ -64,7 +65,8 @@ def test_cancel_during_flush_prevents_raster_publication(
     assert render_mosaic([source], destination, SPEC).covered_pixels == 62
 
 
-def test_destination_race_and_input_alias_do_not_clobber(tmp_path: Path) -> None:
+@pytest.mark.parametrize("suffix", [".fits", ".xisf"])
+def test_destination_race_and_input_alias_do_not_clobber(tmp_path: Path, suffix: str) -> None:
     source = tmp_path / "source.fits"
     write_smoke_panel(source)
     original = source.read_bytes()
@@ -72,7 +74,7 @@ def test_destination_race_and_input_alias_do_not_clobber(tmp_path: Path) -> None
         render_mosaic([source], source, SPEC)
     assert source.read_bytes() == original
 
-    destination = tmp_path / "mosaic.fits"
+    destination = tmp_path / f"mosaic{suffix}"
 
     def progress(done: int, total: int) -> None:
         if done == total:

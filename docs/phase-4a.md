@@ -14,7 +14,7 @@ Keep the existing command arguments and the manifest schema compatible. Use the 
 
 ## Create and Validate
 
-Use a new project filename in an existing directory. The create command records source fingerprints and checks that the panels and supplied attachments can be opened. It can save unsolved panels for later plate solving. Supply an existing solution with `--wcs PANEL=PATH` and a FITS sky mask with `--sky-mask PANEL=PATH`. Panel numbers start at one.
+Use a new project filename in an existing directory. The create command records source fingerprints and checks that the panels and supplied attachments can be opened. It can save unsolved panels for later plate solving. Supply an existing solution with `--wcs PANEL=PATH` and a FITS sky mask with `--sky-mask PANEL=PATH`. Panel numbers start at one. Pass `--projection ZEA` to save an equal-area sky grid. [ZEA workflow](phase-5b.md)
 
 ```powershell
 poetry run astromosaic project create data/panel-a.fits data/panel-b.fits -o output/session.astromosaic --center 359.999 20 --size 1500 900 --scale 2
@@ -25,7 +25,7 @@ Validation opens the saved sky inputs and checks fingerprints, effective masks a
 
 ## Export a Saved Layer
 
-Use `project export` with a saved project and a new destination. It uses the same renderer and saved settings as the desktop. The default layer is `sky`. Use `--layer foreground` for the saved foreground alignment or `--layer composition` for the saved placement, crop and seam. Mono exports can use FITS or TIFF. RGB exports use TIFF.
+Use `project export` with a saved project and a new destination. It uses the same renderer and saved settings as the desktop. The default layer is `sky`. Use `--layer foreground` for the saved foreground alignment or `--layer composition` for the saved placement, crop and seam. Use FITS for mono, or TIFF or XISF for mono and RGB. [XISF workflow](phase-5a.md#use-the-format)
 
 ```powershell
 poetry run astromosaic project export output/session.astromosaic -o output/sky.fits --progress --json
@@ -40,6 +40,8 @@ Press Ctrl+C to cancel an active export. Windows automation can send `CTRL_BREAK
 
 Export reports include `layer` and `output`. A successful export also includes `width`, `height`, `covered_pixels`, `tiles`, `peak_reserved_bytes`, `rejected_coordinates` and `backend`. The rejection count covers unsuccessful mappings and layer clipping for evaluated panel candidates. `common_pixels` counts common coverage for compositions and is null for the other layers. `refinement` contains the fit report when available, including rejected overlap fits.
 
+Selected-band validation and export reports include `band`. The `project bands` result lists labels and one-based member panel numbers. [Per-band workflow](phase-5c.md)
+
 With `--progress`, export reports the first completed tile and each newly reached five-percent interval. Combine it with `--json` for one stderr record per update with `schema_version`, `event` set to `progress`, `stage` set to `render`, `completed_pixels` and `total_pixels`. The final stdout result and exit code confirm whether the file was published.
 
 | Exit code | Meaning |
@@ -51,13 +53,14 @@ With `--progress`, export reports the first completed tile and each newly reache
 
 ## Run a Batch
 
-Save a UTF-8 JSON job list beside the project files. Relative paths are resolved from the list's directory. Use a new destination for each export. The optional `layer` field defaults to `sky`.
+Save a UTF-8 JSON job list beside the project files. Relative paths are resolved from the list's directory. Use a new destination for each export. The optional `layer` field defaults to `sky`. For sky jobs, the optional `band` field selects a filter label.
 
 ```json
 [
   {"project": "session.astromosaic", "output": "batch-sky.fits"},
   {"project": "rgb.astromosaic", "output": "batch-rgb.tiff"},
-  {"project": "mixed.astromosaic", "output": "batch-composition.tiff", "layer": "composition"}
+  {"project": "mixed.astromosaic", "output": "batch-composition.tiff", "layer": "composition"},
+  {"project": "filters.astromosaic", "output": "batch-OIII.tiff", "band": "O III"}
 ]
 ```
 

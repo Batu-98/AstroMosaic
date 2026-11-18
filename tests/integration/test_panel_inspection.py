@@ -1,4 +1,5 @@
 import json
+import struct
 from dataclasses import replace
 from pathlib import Path
 
@@ -11,7 +12,7 @@ from astromosaic.astrometry import solve
 from astromosaic.astrometry.astap_probe import AstapCandidate
 from astromosaic.astrometry.gaia_solve import GaiaCandidate
 from astromosaic.astrometry.hints import PanelOptics
-from astromosaic.astrometry.solve import SolveOptions, solve_panel, write_solution
+from astromosaic.astrometry.solve import SolveOptions, _pointing, solve_panel, write_solution
 from astromosaic.cli import main
 from astromosaic.core.job import JobContext
 from astromosaic.core.masks import SKY, SourceMask
@@ -98,6 +99,86 @@ def test_missing_metadata_and_invalid_wcs_are_distinct(tmp_path: Path) -> None:
     assert unreadable.detail
 
 
+@pytest.mark.parametrize(
+    ("suffix", "writer"),
+    [(".fits", "N.I.N.A. 3.2.0"), (".fts", "MaxIm DL Version 6"), (".tif", ""), (".xisf", "")],
+)
+def test_imported_optics_reach_inspection_and_solve_hints(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], suffix: str, writer: str
+) -> None:
+    image = tmp_path / f"optics{suffix}"
+    pixels = np.ones((12, 16), dtype="<u2")
+    if writer:
+        header = fits.Header(
+            {
+                "FOCALLEN": "5D+2",
+                "XPIXSZ": "7.5",
+                "YPIXSZ": 7.5,
+                "XBINNING": "2",
+                "YBINNING": 2,
+                "INSTRUME": "Test camera",
+                "SWCREATE": writer,
+            }
+        )
+        fits.writeto(image, pixels, header)
+    elif suffix == ".tif":
+        tifffile.imwrite(
+            image,
+            pixels,
+            metadata=None,
+            extratags=[
+                (272, "s", 0, "Test camera", False),
+                (37386, "2I", 1, (500, 1), False),
+                (41486, "2I", 1, (4000, 3), False),
+                (41487, "2I", 1, (4000, 3), False),
+                (41488, "H", 1, 3, False),
+            ],
+        )
+    else:
+        xml = b"""
+<xisf xmlns="http://www.pixinsight.com/xisf" version="1.0">
+    <Image geometry="16:12:1" sampleFormat="UInt16" location="attachment:4096:384">
+        <FITSKeyword name="FOCALLEN" value="-1"/>
+        <Property id="Instrument:Telescope:FocalLength" type="Float64" value="0.5"/>
+        <Property id="Instrument:Sensor:XPixelSize" type="Float32" value="7.5"/>
+        <Property id="Instrument:Sensor:YPixelSize" type="Float32" value="7.5"/>
+        <Property id="Instrument:Camera:Name" type="String">Test camera</Property>
+        <Property id="Instrument:Telescope:Name" type="String">Test telescope</Property>
+        <Property id="Instrument:Filter:Name" type="String">Ha</Property>
+    </Image>
+</xisf>
+"""
+        with image.open("wb") as stream:
+            stream.write(struct.pack("<8sII", b"XISF0100", len(xml), 0))
+            stream.write(xml)
+            stream.seek(4096)
+            stream.write(pixels.tobytes())
+
+    original = image.read_bytes()
+    info = inspect_project_panel(ProjectPanel(FileReference.capture(image)), JobContext())
+    assert info.wcs_status == "Missing"
+    assert info.camera_model == "Test camera"
+    assert info.embedded_optics == PanelOptics(500, 7.5, 7.5)
+    scale = 206.264806 * 7.5 / 500
+    with open_panel(image) as panel:
+        _, gaia_scale, astap_scale = _pointing(panel, SolveOptions())
+        assert (gaia_scale, astap_scale) == pytest.approx((scale, scale))
+
+    assert main(["inspect", str(image)]) == 0
+    report = json.loads(capsys.readouterr().out)
+    assert report["camera_model"] == "Test camera"
+    assert report["optics"] == {
+        "focal_length_mm": 500,
+        "pixel_size_x_um": 7.5,
+        "pixel_size_y_um": 7.5,
+    }
+    assert report["optical_scale_arcsec"] == pytest.approx([scale, scale])
+    if suffix == ".xisf":
+        assert report["telescope_model"] == "Test telescope"
+        assert info.filter_name == report["filter_name"] == "Ha"
+    assert image.read_bytes() == original
+
+
 def test_cli_solve_uses_project_optics_and_scale_precedence(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -137,7 +218,7 @@ def test_cli_solve_uses_project_optics_and_scale_precedence(
         assert heights.pop() == pytest.approx(12 * expected / 3600)
 
     check(206.264806 * 5 / 500)
-    header["PIXSCALE"] = 1.75
+    header["PIXSCALE"] = "1.75"
     check(1.75)
     check(3.25, "--scale", "3.25")
     assert (

@@ -48,8 +48,8 @@ This register tracks unresolved decisions, problems, and risks. It is not a work
 
 - **Status / priority:** Open / P1
 - **Opened / updated:** 2026-11-15 / 2026-11-18
-- **Affected phase:** Dual FITS and TIFF workflows throughout phases 1-4; optional camera RAW import after a future scope decision.
-- **Impact and evidence:** The [Phase 3A Windows fixtures](docs/phase-3a.md#windows-evidence) verified mono and RGB TIFF import and export, including samples, channel order, WCS, and coverage. The [Phase 3B desktop workflow](docs/phase-3b.md#verification) reopens a mixed FITS/TIFF project and renders it to TIFF. [Phase 4B](docs/phase-4b.md#windows-baseline-results) independently verified all samples and coverage in full-size mono FITS, RGB TIFF and mixed exports. Camera RAW is deferred as an import-only feature.
+- **Affected phase:** Dual FITS and TIFF workflows throughout phases 1-4, Phase 5C band-local channels, and optional camera RAW import after a future scope decision.
+- **Impact and evidence:** The [Phase 3A Windows fixtures](docs/phase-3a.md#windows-evidence) verified mono and RGB TIFF import and export, including samples, channel order, WCS, and coverage. The [Phase 3B desktop workflow](docs/phase-3b.md#verification) reopens a mixed FITS/TIFF project and renders it to TIFF. [Phase 4B](docs/phase-4b.md#windows-baseline-results) independently verified all samples and coverage in full-size mono FITS, RGB TIFF and mixed exports. [Phase 5C](docs/phase-5c.md#local-windows-results) verified band-local units and channel order with mixed mono and RGB membership. Camera RAW is deferred as an import-only feature.
 - **Current assumption:** Provide first-class support for both scientific FITS panels and linear TIFF panels across the pipeline. If camera RAW is requested later, use an open-source linear decoder and preserve relevant sensor and color metadata.
 - **Next action / responsibility:** Repeat the [packaged Windows exports](docs/phase-3f.md#windows-evidence) on a clean Windows installation. Define and verify channel-specific calibration before enabling RGB photometric refinement. Revisit camera models and decoder compatibility when camera RAW import is requested.
 - **Closure condition:** Validate FITS and TIFF sample integrity, metadata, memory, and reproducible import-to-mosaic workflows on Windows. If camera RAW is activated, establish separate acceptance criteria for the selected models.
@@ -103,6 +103,16 @@ This register tracks unresolved decisions, problems, and risks. It is not a work
 - **Current assumption:** Fresh settings use one Automatic mode; preserve manual choices. Prefer verified native auto with recorded selected data, otherwise resolve to an explicit installed catalog. Use the actual local command-line program. ASTAP-only operation must meet the 15-match/RMS contract without requiring Seiza or treating detections as matches.
 - **Next action / responsibility:** Exercise D20, D50 and D80 in real installations with one and several complete sets. Fixtures currently cover alternatives and truncated/moved tiles. Review actual alternate executable versions and catalog terms before adding their support claims.
 - **Closure condition:** Automatic/manual modes, actual catalog provenance and the ASTAP-only quality path pass real Windows native cases, including missing/partial catalogs and unknown/bad FOV. Preserve user ASTAP settings and original images; unsupported cases remain explicit.
+
+### Q-020 - Additional XISF variants
+
+- **Status / priority:** Deferred / P2
+- **Opened / updated:** 2026-11-18 / 2026-11-18
+- **Affected phase:** Phase 5A interchange and future XISF expansion.
+- **Impact and evidence:** XISF permits block compression, non-attached storage, checksums and private astrometric metadata. The [Phase 5A checks](docs/phase-5a.md#local-windows-results) independently reopened raw attachments with FITS-compatible metadata. A compressed attachment produced a conversion diagnostic.
+- **Current assumption:** Use a compatible XISF attachment or a supported FITS/TIFF file for interchange. Solve or attach a sidecar when the XISF panel needs celestial WCS.
+- **Next action / responsibility:** Revisit when a representative workflow requires broader support. Check codec block sizes and bounded decode or staging, checksum cost, and native WCS agreement before extending the adapter.
+- **Closure condition:** Reopen representative files from named external writers and verify data integrity, WCS, channel order, resources and packaging for each variant added.
 
 ## Resolved Topics
 
@@ -185,6 +195,8 @@ This register tracks unresolved decisions, problems, and risks. It is not a work
 
 - **Extension:** 2026-11-18. [3.6A](docs/phase-36a.md#tiff-metadata-at-panel-import) verified standard EXIF/XMP physical focal length, focal-plane inch/centimeter units and camera display, including both owner TIFFs. Print DPI, 35 mm equivalents and ambiguous/invalid resampling or zoom metadata do not create sensor-scale hints. Explicit source fields and user overrides retain precedence; absent reference dimensions leave nominal pitch labeled as a hint.
 
+- **Follow-up:** 2026-11-18. The panel dialog now fills its optical fields from background inspection. Standard TIFF tags and XISF image properties enter the same solve-hint path as FITS optical fields. FITS fixtures verify already-binned pitch from N.I.N.A. and MaxIm DL. A saved panel edit still overrides its corresponding optical measurement. [Updated import behavior](docs/phase-3b.md#panel-wcs-and-plate-solve-hints) · [Cross-format checks](tests/integration/test_panel_inspection.py)
+
 ### Q-014 - Regression coverage for narrow overlaps, saturation, and WCS reuse
 
 - **Status / priority:** Resolved / P1
@@ -217,6 +229,17 @@ This register tracks unresolved decisions, problems, and risks. It is not a work
 - **Next action / responsibility:** Retain the private files as optional local regression inputs and continue to show insufficient regional support. Wide-field ASTAP catalog validation is a separate format and deployment follow-up.
 - **Closure condition:** The owner cases have reproducible source/portable outcomes under the finalized quality/budget policy, with unchanged image hashes, explicit supported catalog/scale ranges and independent spatial accuracy or documented support limitations. Native solve success alone does not close this topic.
 - **Resolution:** 2026-11-18. Both source and portable runs qualified SIP-3 after recovery. The independent D05 edge P95 values were 0.895 and 0.985 px. The original files matched their initial SHA-256 values, and each new sidecar drove an independently reopened RGB export. [Windows evidence](docs/phase-36-results.md#portable-windows-verification)
+
+### Q-021 - ZEA antipode and exported crop validation
+
+- **Status / priority:** Resolved / P1
+- **Opened / updated:** 2026-11-18 / 2026-11-18
+- **Affected phase:** Phase 5B sky geometry and format reimport.
+- **Impact and evidence:** The antipode is non-unique on the ZEA rim. With the installed WCSLIB, a polar rim coordinate could round-trip, and FITS header rounding could place a nominal rim sample just inside the domain.
+- **Current assumption:** Apply a native-latitude guard around the antipode and keep the bounded full mapper. Allow a cropped source with valid support to validate at a nearby in-frame reference position.
+- **Next action / responsibility:** Carry the fixture into future geometry changes and verify the domain of each added projection.
+- **Closure condition:** The rim and exterior are uncovered, the valid crop reopens with its WCS, and an entirely invalid crop leaves the destination free.
+- **Resolution:** 2026-11-18. The polar fixture passed with serialized WCS and a shifted panel. The rim-centered crop reopened with 12 valid positions. The fully outside crop removed its temporary output. [Windows results](docs/phase-5b.md#local-windows-results)
 
 ## New Entry Template
 

@@ -45,6 +45,7 @@ def test_project_manifest_reopens_with_settings_and_relocates_with_its_files(
     assert load_project(path) == project
     data = json.loads(path.read_text(encoding="utf-8"))
     assert data["version"] == 4
+    assert "projection" not in data["render"]
     assert data["panels"][0]["source"]["path"] == source.name
     relocated = original.rename(tmp_path / "relocated")
     reopened = load_project(relocated / path.name)
@@ -64,6 +65,28 @@ def test_project_manifest_reopens_with_settings_and_relocates_with_its_files(
         del data["panels"][0][key]
     legacy.write_text(json.dumps(data), encoding="utf-8")
     assert load_project(legacy) == old_project
+
+
+def test_zea_manifest_requires_a_versioned_projection_record(tmp_path: Path) -> None:
+    project = MosaicProject(render=RenderSpec((359.4, 23), (63, 39), 2880, projection="ZEA"))
+    path = tmp_path / "wide.astromosaic"
+    save_project(path, project)
+    data = json.loads(path.read_text(encoding="utf-8"))
+    assert data["version"] == 5 and data["render"]["projection"] == "ZEA"
+    assert load_project(path) == project
+    data["version"] = 4
+    path.write_text(json.dumps(data), encoding="utf-8")
+    with pytest.raises(ValueError, match="requires project manifest version 5"):
+        load_project(path)
+    data["version"] = 5
+    data["render"]["projection"] = "CAR"
+    path.write_text(json.dumps(data), encoding="utf-8")
+    with pytest.raises(ValueError, match="Expected TAN or ZEA"):
+        load_project(path)
+    del data["render"]["projection"]
+    path.write_text(json.dumps(data), encoding="utf-8")
+    with pytest.raises(ValueError, match="Invalid project manifest.*projection"):
+        load_project(path)
 
 
 def test_relink_requires_saved_fingerprint_and_changes_are_checked_before_render(

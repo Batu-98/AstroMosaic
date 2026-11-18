@@ -6,12 +6,12 @@ Use this file for concise development history and handoff state. Detailed techni
 
 - **Last updated:** 2026-11-18
 - **Active baseline:** Python-first architecture revision 3.10 covers [Phase 3.6 plate solve reliability](astro_mosaic_python_first_architecture_en.md#phase-36-plate-solve-reliability) and [Phase 4A–4C automation and scaling](astro_mosaic_python_first_architecture_en.md#102-phase-4-delivery-stages). [ADR-0017](docs/adr/0017-astap-first-validated-solving.md) records ASTAP priority, quality and budgets. See [ADR-0003](docs/adr/0003-windows-first-platform-scope.md) for Windows scope, [ADR-0006](docs/adr/0006-dual-fits-and-tiff-workflow.md) for formats, and [ADR-0007](docs/adr/0007-sky-and-foreground-mosaics.md) for mixed panels.
-- **Current stage:** Phase 4 meets its required local Windows gates. [Phase 4C](docs/phase-4c.md) adds the shared CLI command panel. [Phase 4B](docs/phase-4b.md) verifies large-mosaic scaling, and [Phase 4A](docs/phase-4a.md) verifies headless automation. Full 3.6 acceptance tracks real dense ASTAP catalogs and the narrow blind M42 case. The separate clean-machine check remains open. Linux and macOS support is deferred.
-- **Available artifacts:** [Phase 4C panel workflow](docs/phase-4c.md#desktop-workflow), [Phase 4B selection measurements](docs/phase-4b.md#footprint-selection-results), [Phase 4A automation](docs/phase-4a.md), [Phase 3.6 implementation evidence](docs/phase-36-results.md), and [frozen reference manifest](tests/fixtures/plate_solve_v36.json). The updated desktop and portable console bundles are in ignored `.tooling/phase4c-windows/dist/`.
-- **Implementation / verification:** All 155 native Windows tests passed with OpenGL on the second display. The windowed panel and portable console matched validation and FITS results. Copied desktop CPU/OpenGL and Qt-free console checks, Ruff, format, mypy and lock checks passed.
-- **Version control:** Phase 4A–4C form the verified Windows baseline following the Phase 3.5–3.6 commit `ebb0095`. [AstroMosaic GitHub repository](https://github.com/Batu-98/AstroMosaic)
-- **Next action:** Start Phase 5 by selecting the first extended format, projection or per-band workflow and defining its fixture and export acceptance criteria. Track the real dense ASTAP matrix, the narrow M42 blind case and clean-machine launcher/export verification separately.
-- **Open dependencies:** Q-003 tracks the frozen criteria, Q-015 the 40′ M42 coverage, Q-016 extended quality coverage, and Q-017 the real dense ASTAP catalog matrix. Q-005, Q-009, and Q-010 track distribution, formats and mixed-panel work. Q-008 tracks deferred platforms and Q-011 deferred visual fill. Q-004, Q-012, Q-018 and Q-019 record the verified resource, command panel, deadline and owner TIFF checks.
+- **Current stage:** Phase 5 meets the local Windows acceptance criteria for [per-band products](docs/phase-5c.md), [ZEA projection](docs/phase-5b.md) and [XISF interchange](docs/phase-5a.md). Full 3.6 acceptance tracks real dense ASTAP catalogs and the narrow blind M42 case. The separate clean-machine check remains open. Linux and macOS support is deferred.
+- **Available artifacts:** [Phase 5C band results](docs/phase-5c.md#local-windows-results), [Phase 5B projection results](docs/phase-5b.md#local-windows-results), [Phase 5A XISF results](docs/phase-5a.md#local-windows-results), [Phase 4C panel workflow](docs/phase-4c.md#desktop-workflow), and [Phase 3.6 evidence](docs/phase-36-results.md). The latest desktop and console bundles are in ignored `.tooling/panel-table-windows/dist/windows/`.
+- **Implementation / verification:** Automatic optical import passed for FITS, TIFF, and XISF. All 179 native Windows tests passed with OpenGL and test windows on the second display. The panel control table, edits and both themes passed the desktop checks. Copied desktop CPU/OpenGL and Qt-free console checks passed. Phase 5C also verified independent band exports and all four batch runs. Ruff, format, mypy, and the lock check passed.
+- **Version control:** The Phase 5A–5C, optical metadata, and desktop table and theme follow-ups are consolidated on `main` after the Phase 4 baseline at `e0a3a39`. [AstroMosaic GitHub repository](https://github.com/Batu-98/AstroMosaic)
+- **Next action:** Run the separate clean-machine Windows launcher and export check when a fresh installation is available. Track release notices and the remaining real ASTAP catalog and narrow M42 measurements in their existing topics.
+- **Open dependencies:** Q-003 tracks the frozen criteria, Q-015 the 40′ M42 coverage, Q-016 extended quality coverage, and Q-017 the real dense ASTAP catalog matrix. Q-005, Q-009, Q-010, and Q-020 track distribution, formats and mixed-panel work. Q-008 tracks deferred platforms and Q-011 deferred visual fill. Q-004, Q-012, Q-018 and Q-019 record the verified resource, command panel, deadline and owner TIFF checks.
 
 ## Phase Overview
 
@@ -44,7 +44,9 @@ The table is a status summary, not a replacement for the full exit gates in Sect
 | 4A - Headless project automation | Complete | Creation, sky preflight, saved-layer export, desktop parity and scripted FITS/TIFF batch, progress, failure and cancellation checks passed on Windows. |
 | 4B - Large mosaics and improved blends | Complete | Full FITS, RGB TIFF and mixed Windows runs matched the reference after conservative candidate selection. Resource, halo, cancellation and output-limit checks passed. Optional multiband evaluation is deferred. |
 | 4C - Desktop command panel | Complete | Standalone CLI parity, live progress, history, cancellation, and window-close cleanup verified on Windows. |
-| 5 - Extended formats and channels | Not started | Format/channel/projection contracts and packaging checks for each added workflow. |
+| 5A - XISF interchange | Complete | Bounded mono and RGB attachments, WCS, units, coverage and contribution masks verified through independent reopening and copied Windows workflows. |
+| 5B - ZEA sky projection | Complete | Saved projection, longitude wrap, projection domain, preview and export agreement, and copied Windows workflows passed. |
+| 5C - Per-band output | Complete | Saved membership, band-local units and channels, common geometry, independent exports, and Windows desktop, CLI and batch checks passed. |
 
 ## Journal Rules
 
@@ -549,6 +551,102 @@ The table is a status summary, not a replacement for the full exit gates in Sect
 - **Changed:** Collected the Phase 4A–4C implementation, packaging checks, examples, and evidence in one baseline commit.
 - **Verified:** Reran all 155 Windows tests with native OpenGL on the second display. Ruff lint and format, mypy, and the Poetry lock check passed. Reviewed the changed paths for repository scope.
 - **Next:** Publish the baseline on `main`, then define the first extended format workflow for Phase 5.
+
+### 2026-11-18 - Phase 5A - Published Phase 4 and selected XISF
+
+- **Changed:** Pushed Phase 4A–4C as `e0a3a39` and defined the first Phase 5 workflow and fixture criteria.
+- **Verified:** Queried the remote `main` reference and confirmed that it points to the published commit. Reviewed the format contract and the shared panel and export paths.
+- **Related:** [Phase 5A](docs/phase-5a.md) and [ADR-0020](docs/adr/0020-bounded-xisf-interchange.md).
+- **Next:** Implement the bounded reader and atomic export and run the acceptance checks.
+
+### 2026-11-18 - Phase 5A - Implemented bounded XISF interchange
+
+- **Changed:** Added tiled mono and RGB XISF imports, FITS-compatible WCS and calibration metadata, and atomic sky, foreground and composition exports through the CLI and desktop.
+- **Verified:** The 24 focused source tests passed, including rotated RGB comparison, both byte orders, composition contribution codes, cancellation, and exact output-byte refusal. An independent `xisf` 1.0.1 RGB fixture round trip preserved 71 covered positions, sample values, and metadata.
+- **Related:** Q-020 tracks broader XISF variants.
+- **Next:** Finish the native Windows suite and copied-bundle checks.
+
+### 2026-11-18 - Phase 5A - Completed local Windows acceptance
+
+- **Changed:** Extended the copied Windows CLI and desktop checkers with XISF project, export and preview workflows. Updated the format and workflow documentation.
+- **Verified:** All 165 native Windows tests passed with OpenGL on the second display. The copied Qt-free CLI and desktop CPU/OpenGL checks passed. Independent decoding matched the RGB sky export and both composition references, including coverage and contribution codes.
+- **Verified:** Ruff lint and format, mypy, the Poetry lock check, and the added documentation links passed. The clean-machine distribution check remains open.
+- **Next:** Define and verify the first additional sky projection.
+
+### 2026-11-18 - Phase 5B - Selected ZEA and froze the geometry cases
+
+- **Changed:** Defined the first additional sky grid, its manifest compatibility, and the acceptance fixtures for wide fields, the antipode, and cropped exports.
+- **Verified:** The installed WCSLIB handled oblique and polar ZEA. A nominal antipodal coordinate serialized through FITS could round-trip at the rim because of floating-point rounding, so the projection needs an explicit validity guard.
+- **Related:** [Phase 5B](docs/phase-5b.md) and [ADR-0021](docs/adr/0021-zea-sky-grid.md). Q-021 tracks the limiter check.
+- **Next:** Wire the projection through saved settings, the tile mapper, and both entry points.
+
+### 2026-11-18 - Phase 5B - Implemented the shared ZEA grid
+
+- **Changed:** Added a projection setting to the CLI and desktop and persisted ZEA in manifest version 5. Preview and export share the selected geometry. Projection changes clear the desktop composition placement.
+- **Verified:** The initial geometry tests passed for the oblique grid across RA zero, equivalent FITS, TIFF and XISF exports, and coverage and reimport at the polar rim. Legacy project and TAN preview tests passed.
+- **Related:** Q-021 and ADR-0021.
+- **Next:** Finish the native Windows suite and copied-bundle checks.
+
+### 2026-11-18 - Phase 5B - Completed local Windows acceptance
+
+- **Changed:** Added copied-package checks for saved ZEA projects and desktop projection selection, preview and export. Updated the workflow documentation.
+- **Verified:** All 169 native Windows tests passed on the second display. The Qt-free console and CPU and OpenGL desktop package checks passed. The independently reopened wide-field exports matched preview pixels and coverage, and the tight-budget run matched the reference.
+- **Related:** Closed Q-021. The clean-machine distribution check remains open.
+- **Next:** Define per-band output with an explicit filter and unit contract on the saved sky grid.
+
+### 2026-11-18 - Phase 5C - Defined saved band selection
+
+- **Changed:** Defined band discovery, saved panel assignments, a single-band render, and the batch job selector on the existing sky grid.
+- **Verified:** Reviewed the common-filter and brightness-scale checks, mask and sidecar handling, and the shared preview and export jobs.
+- **Related:** [Phase 5C](docs/phase-5c.md) and [ADR-0022](docs/adr/0022-per-band-sky-products.md).
+- **Next:** Add the selection through the project reader, renderer and both entry points.
+
+### 2026-11-18 - Phase 5C - Implemented selected-band rendering
+
+- **Changed:** Added saved panel band assignments, discovery, band-local validation, and selection in preview, export, and both batch runners.
+- **Verified:** Focused source tests exercised independent mono and RGB products on the same ZEA grid, remapped masks, rejected incompatible units and layouts, and verified cancellation, retry, and CLI reports.
+- **Next:** Run the full native test suite and the copied Windows and batch acceptance cases.
+
+### 2026-11-18 - Phase 5C - Completed local Windows acceptance
+
+- **Changed:** Added copied-package band selection checks and verified batch jobs that export multiple bands from one saved project.
+- **Verified:** All 173 native Windows tests passed on the second display. Independent FITS, TIFF and XISF comparisons matched the per-band samples, coverage, units and ZEA grid. Copied CLI and desktop CPU/OpenGL checks passed. Both batch runners passed on both launchers, including cancellation and retry.
+- **Related:** [Phase 5C results](docs/phase-5c.md#local-windows-results) and ADR-0022. The clean-machine distribution check remains open.
+- **Next:** Complete the outstanding distribution and real catalog acceptance checks as the required test environments become available.
+
+### 2026-11-18 - Panel import - Filled optical metadata across all supported formats
+
+- **Changed:** Panel settings now fills available focal length and pixel size fields during background inspection. Added native XISF instrument properties, primary-directory TIFF optics, and producer-aware FITS pitch. The CLI `inspect` command now reports optical metadata and scales. Saved panel edits override the corresponding embedded values.
+- **Verified:** All 33 focused tests passed for TIFF, FITS, and XISF inspection, solver hints, numeric units, missing metadata, and panel edits. Ruff, format, mypy, and Poetry lock checks passed.
+- **Related:** Q-013 and [Panel WCS and plate solve hints](docs/phase-3b.md#panel-wcs-and-plate-solve-hints).
+- **Next:** Run the full native Windows suite and verify the rebuilt Windows bundles.
+
+### 2026-11-18 - Panel import - Verified Windows optical metadata workflows
+
+- **Changed:** Rebuilt the desktop and console launchers in `.tooling/metadata-windows/dist/windows/`.
+- **Verified:** All 178 source tests passed on Windows 11 x64. The native desktop import and panel settings check filled the synthetic FITS, TIFF, and XISF fields and the fields for both owner TIFFs. Both owner files returned 24 mm and about 3.9083 µm per axis. The packaged `inspect` command agreed across the formats. The copied console and desktop CPU/OpenGL acceptance checks passed.
+- **Related:** Q-013, Q-019, and [Panel WCS and plate solve hints](docs/phase-3b.md#panel-wcs-and-plate-solve-hints).
+- **Next:** Run the separate clean-machine Windows check and remaining catalog acceptance cases when their test environments are available.
+
+### 2026-11-18 - Desktop - Introduced the panel control table and application themes
+
+- **Changed:** Added a Qt table model with four property views, editable sky inclusion, weight, band and optics, and the existing panel actions. Placed the preview below the table. Added per-user dark and light themes with dark as the default.
+- **Verified:** Native Windows tests covered editing, clearing overrides, saving, relinking, solving, and theme persistence. Inspected both themes in an M13 example. Fixed stale widget colors when switching to light. Ruff, format and mypy passed.
+- **Related:** [Panel control table](docs/phase-3b.md#panel-control-table) and [desktop regression](tests/integration/test_panel_table.py).
+- **Next:** Verify the full Windows test suite and copied desktop workflows.
+
+### 2026-11-18 - Desktop - Verified the panel table and theme packages
+
+- **Changed:** Built the updated Windows launchers in `.tooling/panel-table-windows/dist/windows/`.
+- **Verified:** All 179 native Windows tests passed. A second desktop process loaded the saved light theme. Copied desktop bundles passed the table, theme, preview, and export workflows with CPU and OpenGL. The copied console passed its regression suite.
+- **Related:** [Panel control table](docs/phase-3b.md#panel-control-table) and [packaged desktop checks](packaging/check-windows-desktop.py).
+- **Next:** Run the separate clean-machine distribution check when a fresh Windows environment is available.
+
+### 2026-11-18 - Version control - Consolidated the verified Phase 5 and desktop changes
+
+- **Changed:** Consolidated XISF, ZEA, per-band exports, optical metadata import, the panel control table, and desktop themes into the next commit on `main`.
+- **Verified:** The remote contained one branch at the Phase 4 baseline. Ruff, mypy, and whitespace checks passed before publication. The preceding desktop verification recorded 179 passing native Windows tests.
+- **Next:** Run the outstanding clean-machine and catalog checks when their environments are available.
 
 ## Entry Template
 

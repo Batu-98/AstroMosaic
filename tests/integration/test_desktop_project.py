@@ -152,6 +152,8 @@ def test_desktop_project_roundtrip_progress_cancel_and_retry(
         assert dialog.focal_length.placeholderText() == "450 (embedded)"
         assert dialog.pixel_size_x.placeholderText() == "3.75 (embedded)"
         assert dialog.pixel_size_y.placeholderText() == "3.75 (embedded)"
+        assert dialog.focal_length.text() == "450"
+        assert dialog.pixel_size_x.text() == dialog.pixel_size_y.text() == "3.75"
         dialog.focal_length.setText("500")
         dialog.wcs.setText(str(wcs))
         dialog.sky_mask.setText(str(mask))
@@ -160,15 +162,17 @@ def test_desktop_project_roundtrip_progress_cancel_and_retry(
     try:
         window.show()
         click(window.add_button)
-        assert window.panels.count() == 2 and window.windowTitle().startswith("Untitled*")
+        assert window.panels.properties.rowCount() == 2 and window.windowTitle().startswith(
+            "Untitled*"
+        )
         until(lambda: window.job is None)
-        until(lambda: "WCS Embedded" in window.panels.item(0).text())
-        window.panels.setCurrentRow(0)
+        until(lambda: window.panels.cell(0, "WCS").data() == "Embedded")
+        window.panels.selectRow(0)
         QTimer.singleShot(0, set_panel_options)
         click(window.panel_button)
         assert window.project.panels[0].weight == 1.5
         assert window.project.panels[0].optics == PanelOptics(500)
-        until(lambda: "WCS Sidecar" in window.panels.item(0).text())
+        until(lambda: window.panels.cell(0, "WCS").data() == "Sidecar")
         QTimer.singleShot(0, set_geometry)
         click(window.settings_button)
         assert window.project.render.size == (140, 140)
@@ -176,16 +180,16 @@ def test_desktop_project_roundtrip_progress_cancel_and_retry(
         save.trigger()
         assert load_project(manifest).render == window.project.render
         new.trigger()
-        assert window.panels.count() == 0
+        assert window.panels.properties.rowCount() == 0
         original = source.read_bytes()
         moved = source.rename(tmp_path / "Taşınan panel.fits")
         open_project.trigger()
-        assert "missing" in window.panels.item(0).text()
-        assert "WCS Unavailable" in window.panels.item(0).text()
+        assert "missing" in window.panels.cell(0, "Link").data()
+        assert window.panels.cell(0, "WCS").data() == "Unavailable"
         open_target = moved
-        click(window.relink_button)
-        assert "Linked" in window.panels.item(0).text()
-        until(lambda: "WCS Sidecar" in window.panels.item(0).text())
+        window.relink_action.trigger()
+        assert "Linked" in window.panels.cell(0, "Link").data()
+        until(lambda: window.panels.cell(0, "WCS").data() == "Sidecar")
         save.trigger()
         assert load_project(manifest).panels[0].source.path == moved
         assert window.project.panels[0].optics == PanelOptics(500)
@@ -406,17 +410,17 @@ def test_desktop_sky_mask_proposal_manual_edits_and_reopen(
         first_mask = window.project.panels[0].source_mask
         assert first_mask is not None and first_mask.grid()[15, 30] == UNCLASSIFIED
 
-        window.panels.setCurrentRow(1)
+        window.panels.selectRow(1)
         set_tag(1)
-        with_mask_dialog(window.mask_button.click, trace_mask)
+        with_mask_dialog(window.mask_action.trigger, trace_mask)
         second_mask = window.project.panels[1].source_mask
         assert second_mask is not None
         new, open_project, save, _ = window._file_actions
         save.trigger()
         new.trigger()
-        assert window.panels.count() == 0
+        assert window.panels.properties.rowCount() == 0
         open_project.trigger()
-        assert window.panels.count() == 2
+        assert window.panels.properties.rowCount() == 2
         assert window.project.panels[0].source_mask == first_mask
         assert window.project.panels[1].source_mask == second_mask
         assert window.project.panels[1].foreground_override == "mixed"
@@ -426,7 +430,7 @@ def test_desktop_sky_mask_proposal_manual_edits_and_reopen(
             assert dialog.canvas.grid[20, 60] == SKY and dialog.canvas.grid[86, 58] == FOREGROUND
             dialog.reject()
 
-        with_mask_dialog(window.mask_button.click, check_reopened)
+        with_mask_dialog(window.mask_action.trigger, check_reopened)
         assert originals == (source.read_bytes(), tiff.read_bytes())
     finally:
         release.set()
@@ -447,7 +451,7 @@ def test_desktop_composition_propose_edit_and_export(
     from PySide6.QtCore import QEventLoop, QTimer
     from PySide6.QtWidgets import QApplication, QFileDialog
 
-    from astromosaic.ui.project_settings import CompositionSettings
+    from astromosaic.ui.project_settings import CompositionSettings, ProjectSettings
     from astromosaic.ui.project_window import ProjectWindow
 
     if "QT_QPA_PLATFORM" not in os.environ:
@@ -587,6 +591,25 @@ def test_desktop_composition_propose_edit_and_export(
                     atol=1e-9,
                     rtol=0,
                 )
+
+        def select_zea() -> None:
+            dialog = QApplication.activeModalWidget()
+            assert isinstance(dialog, ProjectSettings)
+            assert dialog.projection.currentData() == "TAN"
+            dialog.projection.setCurrentIndex(dialog.projection.findData("ZEA"))
+            dialog.accept()
+
+        ground = window.project.foreground
+        window.layer_box.setCurrentText("Sky")
+        QTimer.singleShot(0, select_zea)
+        window.settings_button.click()
+        assert window.project.render.projection == "ZEA"
+        assert window.project.composition is None and window.project.foreground == ground
+        assert "ICRS ZEA" in window.grid_summary.text()
+        save.trigger()
+        open_action.trigger()
+        assert window.project.render.projection == "ZEA"
+        assert window.project.composition is None
     finally:
         for job in (window.job, window._inspection_job):
             if job is not None:

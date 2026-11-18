@@ -25,6 +25,9 @@ A Windows-first desktop application in development for assembling linear astrono
 | [Phase 3.6 results](docs/phase-36-results.md) | Source and Windows verification, including the two private TIFFs, supported catalog modes and remaining gates. |
 | [Phase 3.6A evidence](docs/phase-36a.md) | Native capabilities, frozen contracts, TIFF EXIF/XMP import and the reference experiments. |
 | [Phase 4B large mosaics](docs/phase-4b.md) | Reproducible 12-panel benchmarks, memory measurements and independent FITS/TIFF checks. |
+| [Phase 5A XISF interchange](docs/phase-5a.md) | Linear XISF inputs, exports, supported metadata, and verification. |
+| [Phase 5B sky projection](docs/phase-5b.md) | Equal-area ZEA grids, saved settings, and wide-field geometry checks. |
+| [Phase 5C per-band output](docs/phase-5c.md) | Saved sky band assignments, individual previews and exports, and batch jobs. |
 | [ADR-0001](docs/adr/0001-python-first-baseline.md) | Records which architecture is active and which decisions remain unverified. |
 
 All project Markdown, source comments, identifiers, logs, and default application text are written in English.
@@ -35,7 +38,7 @@ AstroMosaic is licensed under the [GNU General Public License version 3](LICENSE
 
 ## Initial Product Boundary
 
-The headless reference processes calibrated, integrated, unstretched panels with matching channel layouts and brightness scales. It uses local astrometry, optional mono refinement, Gnomonic reprojection, and weighted blending. Float32 exports carry WCS and coverage in the same FITS or TIFF file. RGB mosaics export to TIFF. The desktop workflow follows in Phase 3B–3F.
+The headless reference processes calibrated, integrated, unstretched panels with matching channel layouts and brightness scales. It uses local astrometry, optional mono refinement, TAN or ZEA sky reprojection, and weighted blending. Float32 exports carry sky WCS and coverage in one file. Use FITS for mono or TIFF and XISF for mono and RGB.
 
 The user workflow provides first-class support for both FITS and linear TIFF panels, with a target benchmark of 12 panels at 6000 × 4000 pixels across both formats and optional camera RAW import deferred. AstroMosaic will be open source and use open-source components. [Dual format decision](docs/adr/0006-dual-fits-and-tiff-workflow.md) · [Product scope decision](docs/adr/0004-open-source-image-workflow.md)
 
@@ -58,11 +61,13 @@ poetry run astromosaic inspect path/to/panel.fits
 poetry run astromosaic mosaic data/panel-a.fits data/panel-b.fits -o output/mosaic.fits --center 359.999 20 --size 1500 900 --scale 2 --progress
 ```
 
-`smoke` generates a tiny FITS fixture in a temporary directory and checks all 20 projected pixels and their coverage. `inspect` reads metadata from mono FITS and mono/RGB TIFF panels. Put local inputs in `data/` and experimental outputs in `output/` to keep them outside version control. Create the output directory before rendering.
+`smoke` generates a tiny FITS fixture in a temporary directory and checks all 20 projected pixels and their coverage. `inspect` reports available camera and telescope names, focal length, pixel pitch, embedded scale, and the scale derived from optics for mono FITS and mono/RGB TIFF or XISF panels. Put local inputs in `data/` and experimental outputs in `output/` to keep them outside version control. Create the output directory before rendering.
 
-Set `--center`, `--size`, and `--scale` for your field. The `mosaic` command uses the supplied ICRS TAN grid and the panels' WCS. Choose `.fits` for mono FITS or `.tif`/`.tiff` for mono or RGB TIFF. Run `astromosaic mosaic --help` for filter and brightness declarations, blend weights, crop and rotation, and resource limits. [TIFF sample and metadata contract](docs/phase-3a.md#sample-and-metadata-contract)
+Set `--center`, `--size`, and `--scale` for your field. The `mosaic` and `project create` commands default to TAN. Pass `--projection ZEA` for a zenithal equal-area sky grid. Choose `.fits` for mono FITS, `.tif`/`.tiff` for TIFF, or `.xisf` for uncompressed XISF. Run `astromosaic mosaic --help` for filter and brightness declarations, blend weights, crop and rotation, and resource limits. [ZEA workflow](docs/phase-5b.md) · [TIFF contract](docs/phase-3a.md#sample-and-metadata-contract) · [XISF contract](docs/phase-5a.md#scope)
 
 Use `astromosaic project create` to save a sky project that the desktop can reopen. Use `astromosaic project validate` to check the saved sky layer. Use `astromosaic project export` to render a saved sky, foreground or composition layer. Project commands accept `--json` for scripts. Pass `--progress` to report export progress. [Project commands](docs/phase-4a.md) · [Python and PowerShell batch examples](docs/phase-4a.md#run-a-batch)
+
+Use `astromosaic project bands` to list a saved project's filter groups. Pass `--band FILTER` to `project validate` or `project export` to work with one band on the saved grid. Add a `band` to each job in a batch list to export several bands. [Per-band workflow](docs/phase-5c.md)
 
 Use `solve` for panels that need a WCS. This example uses a separately installed local Gaia catalog with approximate pointing and scale. Use the saved sidecar for the matching input panel and add `--refine` to fit relative shifts, stellar gains, and a background offset. Add `--background plane` to evaluate a plane. Pass any supplied sky mask to both commands. [Catalog setup and diagnostics](docs/phase-2.md#offline-solvers)
 
@@ -79,15 +84,23 @@ poetry sync -E desktop
 poetry run python -m astromosaic.ui
 ```
 
+The panel control table opens in **Overview**. Choose **Optics**, **Files**, or **All properties** to compare additional columns. Double-click a weight, band, focal length, or pixel size to edit it. Use the **Sky** checkbox to include a panel in the sky layer. The desktop starts in dark mode. Choose **View → Theme** to switch between dark and light appearances. [Panel controls](docs/phase-3b.md#panel-control-table)
+
 Add panels, set the mosaic grid, and save the project. Use the layer selector with **Build Preview** and **Export Mosaic** for sky, foreground, or composition. The **Layers** menu contains foreground alignment and composition controls. Both preview and export report progress and support cancellation. [Sky workflow](docs/phase-3c.md#desktop-workflow) · [Mixed-panel workflow](docs/phase-3e.md#desktop-workflow)
 
-For a mixed panel, choose **Panel → Propose Sky Mask** and review the overlay, or draw the mask with **Edit Sky Mask**. Use **Panel Settings** to override the foreground tag. [Mixed-panel workflow](docs/phase-3d.md#desktop-workflow)
+Choose **TAN** or **ZEA** under **Mosaic Settings → Sky projection**. Set a new composition placement after changing the projection. [Sky projection](docs/phase-5b.md)
+
+Choose an available **Sky band** for a band-specific preview and export. Assign a filter label with **Panel Settings → Sky band override**. [Per-band workflow](docs/phase-5c.md)
+
+Choose **XISF mosaic** in the export dialog for a single file containing linear samples and coverage. **Add Panels** can reopen the exported sky image or another supported uncompressed XISF file. [XISF interchange](docs/phase-5a.md)
+
+For a mixed panel, choose **Panel → Propose Sky Mask** and review the overlay, or draw the mask with **More → Edit Sky Mask**. Use **Panel Settings** to override the foreground tag. [Mixed-panel workflow](docs/phase-3d.md#desktop-workflow)
 
 Use **Tools → Plate Solve Settings** to choose and check the local ASTAP CLI and Gaia paths. Fresh ASTAP settings use **Automatic**. Set the per-panel, per-attempt and optional batch limits there. Select **Plate Solve** and save the project to retain the results. **Panel → Plate Solve Details** shows predicted distortion and measured regional errors. **Panel → Revalidate Plate Solution** requests a fresh catalog fit. [Desktop plate solving](docs/phase-3b.md#desktop-plate-solving)
 
 Open **Tools → Command Panel** to run AstroMosaic CLI commands such as `project validate` and `project export` inside the desktop app. The panel shows command output and render progress and supports cancellation and session history. [Command panel workflow](docs/phase-4c.md#desktop-workflow)
 
-Panel import reads supported TIFF EXIF/XMP focal length, camera model and nominal pitch from focal-plane resolution. **Panel Settings** shows the embedded hints and preserves manual overrides. Print DPI and 35 mm equivalent focal length do not determine sensor pitch/physical focal length. [Supported conventions and owner TIFF checks](docs/phase-36a.md#tiff-metadata-at-panel-import)
+On import or project reopen, **Panel Settings** automatically fills the available focal length and X and Y pixel sizes and shows the camera model. The readers use FITS keywords, TIFF EXIF/XMP and FITS-style metadata, and XISF instrument properties and FITS keywords. Per-panel edits override the corresponding file values. [Supported optics and units](docs/phase-3b.md#panel-wcs-and-plate-solve-hints)
 
 ## Develop and Verify
 

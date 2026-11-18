@@ -152,18 +152,18 @@ def _run_mosaic(
 
 def main(argv: list[str] | None = None, *, context: JobContext | None = None) -> int:
     parser = argparse.ArgumentParser(
-        prog="astromosaic", description="Work with linear FITS and TIFF panels."
+        prog="astromosaic", description="Work with linear FITS, TIFF, and XISF panels."
     )
     parser.add_argument("--version", action="version", version=version("astromosaic"))
     commands = parser.add_subparsers(dest="command", required=True)
 
-    inspect = commands.add_parser("inspect", help="Read FITS or TIFF image metadata.")
+    inspect = commands.add_parser("inspect", help="Read FITS, TIFF, or XISF image metadata.")
     inspect.add_argument("path", type=Path)
     smoke = commands.add_parser("smoke", help="Run a small synthetic FITS/WCS processing job.")
     smoke.add_argument("--spawn", action="store_true", help="Run the job in a spawned worker.")
-    solve = commands.add_parser("solve", help="Resolve a FITS or TIFF panel with local astrometry.")
+    solve = commands.add_parser("solve", help="Resolve a panel with local astrometry.")
     solve.add_argument(
-        "path", type=Path, help="Linear FITS or TIFF panel, or an AstroMosaic project."
+        "path", type=Path, help="Linear FITS, TIFF, or XISF panel, or an AstroMosaic project."
     )
     solve.add_argument("--panel", type=int, help="One-based panel number in the saved project.")
     solve.add_argument("-o", "--output", type=Path, help="Save a new JSON WCS sidecar on success.")
@@ -211,7 +211,7 @@ def main(argv: list[str] | None = None, *, context: JobContext | None = None) ->
         "panels", nargs="+", type=Path, help="Linear inputs with a common channel layout."
     )
     mosaic.add_argument(
-        "-o", "--output", required=True, type=Path, help="A new FITS (mono) or TIFF output path."
+        "-o", "--output", required=True, type=Path, help="A new FITS (mono), TIFF, or XISF path."
     )
     add_render_options(mosaic)
     mosaic.add_argument("--progress", action="store_true", help="Report tile progress to stderr.")
@@ -235,10 +235,21 @@ def main(argv: list[str] | None = None, *, context: JobContext | None = None) ->
     try:
         job.check_cancelled()
         if arguments.command == "inspect":
+            from astromosaic.astrometry.hints import positive_header_number, read_optics
             from astromosaic.io import open_panel
+            from astromosaic.io.fits import optional_header_text
 
             with open_panel(arguments.path) as panel:
-                result = asdict(panel.descriptor)
+                header = panel.header
+                optics = read_optics(header)
+                result = {
+                    **asdict(panel.descriptor),
+                    "camera_model": optional_header_text(header, "INSTRUME"),
+                    "telescope_model": optional_header_text(header, "TELESCOP"),
+                    "optics": asdict(optics),
+                    "optical_scale_arcsec": optics.scales_arcsec(),
+                    "embedded_scale_arcsec": positive_header_number(header.get("PIXSCALE")),
+                }
             job.check_cancelled()
         elif arguments.command == "mosaic":
             result, status = _run_mosaic(arguments, job)

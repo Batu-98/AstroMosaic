@@ -310,7 +310,7 @@ def composition_raster(
         "PC2_2",
     ):
         if key in sky.header:
-            header.add_history(f"Sky TAN grid {key}={sky.header[key]}.")
+            header.add_history(f"Sky {sky.spec.projection} grid {key}={sky.header[key]}.")
     for layer_header in (sky.header, ground_plan.header):
         for card in layer_header.cards:
             if card.keyword == "HISTORY":

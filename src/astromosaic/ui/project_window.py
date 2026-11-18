@@ -2,8 +2,9 @@
 
 from dataclasses import replace
 from pathlib import Path
+from typing import cast
 
-from PySide6.QtCore import Qt, QTimer, Slot
+from PySide6.QtCore import QSettings, QSignalBlocker, Qt, QTimer, Slot
 from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -12,19 +13,19 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QHBoxLayout,
     QLabel,
-    QListWidget,
-    QListWidgetItem,
     QMainWindow,
+    QMenu,
     QMessageBox,
     QProgressBar,
     QPushButton,
     QSplitter,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
 
 from astromosaic.astrometry.hints import PanelOptics
-from astromosaic.astrometry.solve import Stage, read_solution_quality
+from astromosaic.astrometry.solve import read_solution_quality
 from astromosaic.display import DisplayFrame, highlight_overlap
 from astromosaic.storage.project import (
     FileReference,
@@ -36,6 +37,7 @@ from astromosaic.storage.project import (
     load_project,
     save_project,
 )
+from astromosaic.ui.appearance import add_theme_menu
 from astromosaic.ui.command_panel import CommandPanel
 from astromosaic.ui.mask_editor import MaskEditor
 from astromosaic.ui.mosaic_job import (
@@ -48,6 +50,7 @@ from astromosaic.ui.mosaic_job import (
     PlateSolveJob,
     PreviewJob,
 )
+from astromosaic.ui.panel_table import VIEWS, PanelTable, panel_row
 from astromosaic.ui.plate_solve_details import PlateSolveDetails
 from astromosaic.ui.plate_solve_settings import PlateSolveSettings, load_plate_solve_settings
 from astromosaic.ui.project_settings import (
@@ -61,6 +64,7 @@ from astromosaic.ui.sky_viewport import SkyViewport
 _PROJECT_FILTER = "AstroMosaic project (*.astromosaic)"
 _TIFF_FILTER = "TIFF mosaic (*.tiff *.tif)"
 _FITS_FILTER = "FITS mosaic (*.fits *.fit *.fts)"
+_XISF_FILTER = "XISF mosaic (*.xisf)"
 _Button = QMessageBox.StandardButton
 _Job = (
     MosaicJob
@@ -72,16 +76,10 @@ _Job = (
     | PlateSolveJob
 )
 _LAYERS: tuple[Layer, ...] = ("sky", "foreground", "composition")
-_SOLVER_NAMES: dict[Stage, str] = {
-    "existing-wcs": "Existing WCS",
-    "gaia-dr3": "Gaia DR3",
-    "astap-hinted": "ASTAP hinted",
-    "astap-blind": "ASTAP recovery",
-}
 
 
 class ProjectWindow(QMainWindow):
-    def __init__(self, *, use_gpu: bool = True) -> None:
+    def __init__(self, *, use_gpu: bool = True, preferences: QSettings | None = None) -> None:
         super().__init__()
         self.project = MosaicProject()
         self._saved = self.project
@@ -97,7 +95,7 @@ class ProjectWindow(QMainWindow):
         self._display_frame: DisplayFrame | None = None
         self._close_after_job = False
         self.setWindowTitle("AstroMosaic")
-        self.resize(1040, 780)
+        self.resize(1140, 780)
         self.setMinimumWidth(630)
 
         file_menu = self.menuBar().addMenu("&File")
@@ -106,6 +104,11 @@ class ProjectWindow(QMainWindow):
             file_menu.addAction("&Open Project…", "Ctrl+O", self._open),
             file_menu.addAction("&Save Project", "Ctrl+S", self._save),
             file_menu.addAction("Save Project &As…", "Ctrl+Shift+S", self._save_as),
+        )
+        view_menu = self.menuBar().addMenu("&View")
+        add_theme_menu(
+            view_menu,
+            preferences if preferences is not None else QSettings("AstroMosaic", "AstroMosaic"),
         )
         panel_menu = self.menuBar().addMenu("&Panel")
         self.check_foreground = panel_menu.addAction("Check Foreground", self._check_foreground)
@@ -144,69 +147,97 @@ class ProjectWindow(QMainWindow):
         splitter = QSplitter(Qt.Orientation.Vertical)
         splitter.setChildrenCollapsible(False)
         self.viewport = SkyViewport(use_gpu=use_gpu)
-        splitter.addWidget(self.viewport)
         self._editor = QWidget(body)
         controls = QVBoxLayout(self._editor)
-        controls.setContentsMargins(0, 0, 0, 0)
-        controls.addWidget(QLabel("Panels"))
-        self.panels = QListWidget()
-        self.panels.setAccessibleName("Project panels")
-        controls.addWidget(self.panels, 1)
+        controls.setContentsMargins(0, 0, 0, 6)
         buttons = QHBoxLayout()
+        self.panel_heading = QLabel("Panels")
+        self.panel_heading.setProperty("sectionTitle", True)
+        buttons.addWidget(self.panel_heading)
+        buttons.addStretch()
+        self.table_view = QComboBox()
+        self.table_view.addItems(list(VIEWS))
+        self.table_view.setAccessibleName("Panel table columns")
+        self.table_view.setToolTip("Choose the panel properties to display")
+        buttons.addWidget(self.table_view)
         self.add_button = QPushButton("Add Panels…")
         self.add_button.clicked.connect(self._add)
-        self.relink_button = QPushButton("Relink…")
-        self.relink_button.clicked.connect(self._relink)
+        buttons.addWidget(self.add_button)
         self.panel_button = QPushButton("Panel Settings…")
         self.panel_button.clicked.connect(self._panel_settings)
-        self.mask_button = QPushButton("Edit Sky Mask…")
-        self.mask_button.clicked.connect(self._edit_mask)
-        self.remove_button = QPushButton("Remove")
-        self.remove_button.clicked.connect(self._remove)
-        for button in (
-            self.add_button,
-            self.relink_button,
-            self.panel_button,
-            self.mask_button,
-            self.remove_button,
-        ):
-            buttons.addWidget(button)
-        buttons.addStretch()
+        buttons.addWidget(self.panel_button)
         self.plate_solve_button = QPushButton("Plate Solve")
         self.plate_solve_button.setToolTip("Solve sky panels that need a usable WCS.")
         self.plate_solve_button.clicked.connect(self._plate_solve)
         buttons.addWidget(self.plate_solve_button)
+        more = QToolButton()
+        more.setText("More")
+        more.setAccessibleName("More panel actions")
+        more.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        more_menu = QMenu(more)
+        self.relink_action = more_menu.addAction("Relink…", self._relink)
+        self.mask_action = more_menu.addAction("Edit Sky Mask…", self._edit_mask)
+        more_menu.addSeparator()
+        self.remove_action = more_menu.addAction("Remove Panel", self._remove)
+        more.setMenu(more_menu)
+        buttons.addWidget(more)
         controls.addLayout(buttons)
-        self.panels.currentRowChanged.connect(self._selection_changed)
+        self.panels = PanelTable()
+        self.table_view.currentTextChanged.connect(self.panels.show_view)
+        self.panels.properties.panelEdited.connect(self._update_panel)
+        self.panels.selectionModel().currentRowChanged.connect(self._selection_changed)
+        controls.addWidget(self.panels, 1)
         splitter.addWidget(self._editor)
-        splitter.setStretchFactor(0, 4)
-        splitter.setStretchFactor(1, 1)
-        splitter.setSizes([500, 150])
+        preview = QWidget()
+        preview_layout = QVBoxLayout(preview)
+        preview_layout.setContentsMargins(0, 6, 0, 0)
+        preview_header = QHBoxLayout()
+        preview_title = QLabel("Preview")
+        preview_title.setProperty("sectionTitle", True)
+        preview_header.addWidget(preview_title)
+        self.grid_summary = QLabel()
+        self.grid_summary.setTextFormat(Qt.TextFormat.PlainText)
+        self.grid_summary.setWordWrap(True)
+        self.grid_summary.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        preview_header.addWidget(self.grid_summary, 1)
+        preview_layout.addLayout(preview_header)
+        preview_layout.addWidget(self.viewport, 1)
+        splitter.addWidget(preview)
+        splitter.setStretchFactor(0, 2)
+        splitter.setStretchFactor(1, 3)
+        splitter.setSizes([235, 380])
+        splitter.setHandleWidth(3)
         layout.addWidget(splitter, 1)
 
-        self.grid_summary = QLabel()
-        self.grid_summary.setWordWrap(True)
-        layout.addWidget(self.grid_summary)
         actions = QHBoxLayout()
         self.settings_button = QPushButton("Mosaic Settings…")
         self.settings_button.clicked.connect(self._settings)
         self.preview_button = QPushButton("Build Preview")
         self.preview_button.clicked.connect(self._preview)
         self.start_button = QPushButton("Export Mosaic…")
+        self.start_button.setProperty("primary", True)
         self.start_button.clicked.connect(self._start)
         self.cancel_button = QPushButton("Cancel Job")
+        self.cancel_button.hide()
         self.cancel_button.clicked.connect(self._cancel)
         self.layer_box = QComboBox()
         self.layer_box.addItems(["Sky", "Foreground", "Composition"])
         self.layer_box.setAccessibleName("Mosaic layer")
         self.layer_box.setToolTip("Choose the layer to preview and export.")
         self.layer_box.currentIndexChanged.connect(self._layer_changed)
+        self.band_label = QLabel("Sky band")
+        self.band_box = QComboBox()
+        self.band_box.setAccessibleName("Sky band")
+        self.band_label.setBuddy(self.band_box)
+        self.band_box.currentIndexChanged.connect(self._layer_changed)
         self.overlap_check = QCheckBox("Highlight Overlap")
         self.overlap_check.toggled.connect(self._paint_display)
         actions.addWidget(self.settings_button)
         actions.addWidget(self.overlap_check)
         actions.addStretch()
         actions.addWidget(self.layer_box)
+        actions.addWidget(self.band_label)
+        actions.addWidget(self.band_box)
         actions.addWidget(self.preview_button)
         actions.addWidget(self.start_button)
         actions.addWidget(self.cancel_button)
@@ -215,83 +246,39 @@ class ProjectWindow(QMainWindow):
         self.progress = QProgressBar()
         self.progress.setRange(0, 100)
         self.progress.setValue(0)
-        layout.addWidget(self.progress)
-        self.status = QLabel("Add linear FITS or TIFF panels to begin.")
+        self.progress.setMaximumWidth(185)
+        self.progress.hide()
+        self.status = QLabel("Add linear FITS, TIFF, or XISF panels to begin.")
         self.status.setTextFormat(Qt.TextFormat.PlainText)
         self.status.setWordWrap(True)
-        self.status.setMinimumHeight(36)
-        layout.addWidget(self.status)
+        footer = QHBoxLayout()
+        footer.addWidget(self.status, 1)
+        footer.addWidget(self.progress)
+        layout.addLayout(footer)
+        self.panels.properties.invalidEdit.connect(self.status.setText)
         self._refresh()
 
     def _refresh(self, selected: int = -1) -> None:
-        self.panels.clear()
         if self._solved_panels is not self.project.panels:
             self._solved_panels = ()
             self._solve_outcomes.clear()
-        linked = True
-        for index, panel in enumerate(self.project.panels):
-            statuses = [(role, reference.status()) for role, reference in panel.references()]
-            attention = [f"{role} {value.lower()}" for role, value in statuses if value != "Ready"]
-            linked &= not attention
-            detail = ", ".join(attention) or "Linked"
-            tag = {
-                None: "Foreground unchecked",
-                "mixed": "Foreground suggested",
-                "uncertain": "Uncertain foreground",
-                "sky-only": "No foreground detected",
-            }[panel.foreground_tag]
-            if panel.foreground_override is not None:
-                tag = (
-                    "Mixed (manual)"
-                    if panel.foreground_override == "mixed"
-                    else "Sky only (manual)"
-                )
-            elif panel.source_mask is not None:
-                tag = "Mixed"
-            mask = ""
-            if panel.source_mask is not None or panel.sky_mask is not None:
-                mask = "  ·  Sky mask saved"
-            elif panel.foreground_tag in ("mixed", "uncertain"):
-                mask = "  ·  Sky mask needed"
-            sky = "  ·  Sky skipped" if not panel.include_sky else ""
-            info = self._panel_inspection(index)
-            wcs = info.wcs_status if info is not None else "Checking…"
-            if statuses[0][1] != "Ready":
-                wcs = "Unavailable"
-            elif any(role == "WCS sidecar" and value != "Ready" for role, value in statuses):
-                wcs = "Invalid"
-            item = QListWidgetItem(
-                f"{panel.source.path.name}  ·  WCS {wcs}  ·  Weight {panel.weight:g}"
-                f"  ·  {detail}  ·  {tag}{mask}{sky}"
+        rows = [
+            panel_row(
+                panel,
+                self._panel_inspection(index),
+                self._solve_outcomes.get(index),
+                self.project.filter_name,
             )
-            tooltip = [f"{role}: {reference.path}" for role, reference in panel.references()]
-            if info is not None:
-                tooltip.append(info.detail)
-                if info.camera_model is not None:
-                    tooltip.append(f"Camera: {info.camera_model}")
-            if (outcome := self._solve_outcomes.get(index)) is not None:
-                if outcome.sidecar is not None and outcome.stage is not None:
-                    item.setText(f"{item.text()}  ·  Solved with {_SOLVER_NAMES[outcome.stage]}")
-                else:
-                    item.setText(
-                        f"{item.text()}  ·  {outcome.status.replace('-', ' ').capitalize()}"
-                    )
-                if outcome.error is not None:
-                    tooltip.append(outcome.error)
-                tooltip.extend(
-                    f"{_SOLVER_NAMES[attempt.stage]} {attempt.outcome}. {attempt.detail}"
-                    + (f" Catalog {attempt.catalog}." if attempt.catalog is not None else "")
-                    + (
-                        f" {attempt.matched_stars} matches, RMS {attempt.rms_arcsec:.2f}″."
-                        if attempt.matched_stars is not None and attempt.rms_arcsec is not None
-                        else ""
-                    )
-                    for attempt in outcome.attempts
-                )
-            item.setToolTip("\n".join(tooltip))
-            self.panels.addItem(item)
-        if self.project.panels:
-            self.panels.setCurrentRow(max(0, min(selected, self.panels.count() - 1)))
+            for index, panel in enumerate(self.project.panels)
+        ]
+        self.panels.properties.refresh(rows)
+        self.panel_heading.setText(f"Panels ({len(rows)})" if rows else "Panels")
+        linked = all(row.linked for row in rows)
+        if rows:
+            current = self.panels.currentIndex()
+            row = max(0, min(selected, len(rows) - 1))
+            if current.row() != row:
+                self.panels.selectRow(row)
         if self._preview_project is not None and (
             self._preview_project != self.project or not linked
         ):
@@ -301,6 +288,7 @@ class ProjectWindow(QMainWindow):
         marker = "*" if self.project != self._saved else ""
         self.setWindowTitle(f"{name}{marker} — AstroMosaic")
         self.command_panel.set_project_path(self.project_path)
+        self._refresh_bands()
         self._layer_controls()
         self.cancel_button.setEnabled(self.job is not None)
         self._start_panel_inspection()
@@ -338,17 +326,39 @@ class ProjectWindow(QMainWindow):
                 index, dialog = self._panel_dialog
                 info = self._inspections[index]
                 dialog.show_embedded_optics(info.embedded_optics, info.camera_model)
+                dialog.band_override.setPlaceholderText(info.filter_name or "")
         job.deleteLater()
         if self._close_after_job:
             self._finish_close_if_ready()
             return
-        self._refresh(self.panels.currentRow())
+        self._refresh(self.panels.currentIndex().row())
 
     def _is_running(self) -> bool:
         return self.job is not None or self.command_panel.is_running
 
     def _layer(self) -> Layer:
         return _LAYERS[self.layer_box.currentIndex()]
+
+    def _sky_band(self) -> str | None:
+        return cast(str | None, self.band_box.currentData()) if self._layer() == "sky" else None
+
+    def _refresh_bands(self) -> None:
+        selected = self.band_box.currentData()
+        bands: dict[str, None] = {}
+        for index in self.project.sky_indices():
+            info = self._panel_inspection(index)
+            if info is not None and info.wcs_status != "Unavailable":
+                label = self.project.panels[index].sky_band(
+                    info.filter_name, self.project.filter_name
+                )
+                if label is not None:
+                    bands[label] = None
+        with QSignalBlocker(self.band_box):
+            self.band_box.clear()
+            self.band_box.addItem("Select a band" if len(bands) > 1 else "All sky panels")
+            for label in bands:
+                self.band_box.addItem(label, label)
+            self.band_box.setCurrentIndex(max(0, self.band_box.findData(selected)))
 
     def _layer_controls(self) -> None:
         idle = not self._is_running()
@@ -359,6 +369,10 @@ class ProjectWindow(QMainWindow):
         self.placement_action.setEnabled(idle and ground is not None and sky)
         self.composition_action.setEnabled(idle and ground is not None and sky)
         self.layer_box.setEnabled(idle and bool(self.project.panels))
+        show_band = layer == "sky" and self.band_box.count() > 1
+        self.band_label.setVisible(show_band)
+        self.band_box.setVisible(show_band)
+        self.band_box.setEnabled(idle and show_band)
         self.overlap_check.setVisible(layer == "composition")
         self.overlap_check.setEnabled(
             self._display_frame is not None and self._display_frame.common_coverage is not None
@@ -369,10 +383,13 @@ class ProjectWindow(QMainWindow):
         ready = False
         if layer == "sky":
             summary = (
-                f"ICRS TAN  ·  RA {ra:.7g}°, Dec {dec:.7g}°"
+                f"ICRS {spec.projection}  ·  RA {ra:.7g}°, Dec {dec:.7g}°"
                 f"  ·  {region.width} × {region.height} px  ·  {spec.scale_arcsec:g} arcsec/px"
             )
-            ready = sky
+            band = self._sky_band()
+            ready = sky and (self.band_box.count() <= 2 or band is not None)
+            if band is not None:
+                summary += f"  ·  {band}"
         elif ground is None:
             summary = "Apply editable foreground masks and choose Layers → Align Foreground."
         elif layer == "foreground":
@@ -404,10 +421,15 @@ class ProjectWindow(QMainWindow):
         self.status.setText("")
 
     def _selection_changed(self) -> None:
-        index = self.panels.currentRow()
+        index = self.panels.currentIndex().row()
         selected = index >= 0 and not self._is_running()
-        for button in (self.relink_button, self.panel_button, self.mask_button, self.remove_button):
-            button.setEnabled(selected)
+        for control in (
+            self.relink_action,
+            self.panel_button,
+            self.mask_action,
+            self.remove_action,
+        ):
+            control.setEnabled(selected)
         self.check_foreground.setEnabled(selected)
         self.propose_mask.setEnabled(
             selected and self.project.panels[index].foreground_tag in ("mixed", "uncertain")
@@ -432,6 +454,8 @@ class ProjectWindow(QMainWindow):
 
     def _set_project(self, project: MosaicProject, path: Path | None) -> None:
         self._clear_preview()
+        with QSignalBlocker(self.band_box):
+            self.band_box.setCurrentIndex(0)
         self.project = self._saved = project
         self.project_path = path
         self.progress.setValue(0)
@@ -495,7 +519,7 @@ class ProjectWindow(QMainWindow):
             self._error("Save failed", error)
             return False
         self.project_path, self._saved = path, self.project
-        self._refresh(self.panels.currentRow())
+        self._refresh(self.panels.currentIndex().row())
         self.status.setText(f"Saved {path.name}.")
         return True
 
@@ -523,7 +547,7 @@ class ProjectWindow(QMainWindow):
             self._error("Add failed", error)
 
     def _relink(self) -> None:
-        index = self.panels.currentRow()
+        index = self.panels.currentIndex().row()
         panel = self.project.panels[index]
         name, _ = QFileDialog.getOpenFileName(
             self, "Relink Panel", panel.source.path.name, PANEL_FILES
@@ -537,13 +561,13 @@ class ProjectWindow(QMainWindow):
                 self._error("Relink failed", error)
 
     def _remove(self) -> None:
-        index = self.panels.currentRow()
+        index = self.panels.currentIndex().row()
         panels = self.project.panels
         self.project = replace(self.project, panels=panels[:index] + panels[index + 1 :])
         self._refresh(index)
 
     def _panel_settings(self) -> None:
-        index = self.panels.currentRow()
+        index = self.panels.currentIndex().row()
         panels = self.project.panels
         dialog = PanelSettings(panels[index], self)
         info = self._panel_inspection(index)
@@ -551,6 +575,8 @@ class ProjectWindow(QMainWindow):
             info.embedded_optics if info is not None else PanelOptics(),
             info.camera_model if info is not None else None,
         )
+        if info is not None:
+            dialog.band_override.setPlaceholderText(info.filter_name or "")
         self._panel_dialog = (index, dialog)
         try:
             while dialog.exec():
@@ -567,11 +593,25 @@ class ProjectWindow(QMainWindow):
 
     def _update_panel(self, index: int, panel: ProjectPanel) -> None:
         panels = self.project.panels
+        previous = panels[index]
+        if panel == previous:
+            return
         self.project = replace(self.project, panels=panels[:index] + (panel,) + panels[index + 1 :])
+        # Table edits only change how the project uses the inspected source.
+        if self._inspected_panels is panels and panel == replace(
+            previous,
+            optics=panel.optics,
+            include_sky=panel.include_sky,
+            weight=panel.weight,
+            band_override=panel.band_override,
+        ):
+            self._inspected_panels = self.project.panels
+            if self._solved_panels is panels:
+                self._solved_panels = self.project.panels
         self._refresh(index)
 
     def _check_foreground(self) -> None:
-        index = self.panels.currentRow()
+        index = self.panels.currentIndex().row()
         if index >= 0 and not self._is_running():
             self._launch_job(ForegroundJob(self.project, (index,), self), "Checking foreground…")
 
@@ -582,7 +622,7 @@ class ProjectWindow(QMainWindow):
         self._open_mask_editor(propose=True)
 
     def _open_mask_editor(self, *, propose: bool) -> None:
-        index = self.panels.currentRow()
+        index = self.panels.currentIndex().row()
         if index >= 0 and not self._is_running():
             self._launch_job(
                 MaskEditorJob(self.project, index, propose, self), "Preparing sky mask…"
@@ -593,11 +633,14 @@ class ProjectWindow(QMainWindow):
         try:
             while dialog.exec():
                 try:
+                    previous = self.project
                     self.project = dialog.settings()
                 except (ValueError, OverflowError) as error:
                     self._error("Invalid mosaic settings", error)
                     continue
-                self._refresh(self.panels.currentRow())
+                self._refresh(self.panels.currentIndex().row())
+                if previous.composition is not None and self.project.composition is None:
+                    self.status.setText("Set the composition placement for the new sky projection.")
                 break
         finally:
             dialog.deleteLater()
@@ -614,12 +657,12 @@ class ProjectWindow(QMainWindow):
         self._start_plate_solve()
 
     def _revalidate_plate_solve(self) -> None:
-        index = self.panels.currentRow()
+        index = self.panels.currentIndex().row()
         if index in self.project.sky_indices():
             self._start_plate_solve(index)
 
     def _plate_solve_details(self) -> None:
-        index = self.panels.currentRow()
+        index = self.panels.currentIndex().row()
         info = self._panel_inspection(index)
         if info is None or info.wcs_status not in ("Embedded", "Sidecar"):
             return
@@ -661,15 +704,20 @@ class ProjectWindow(QMainWindow):
             self,
             "Render Mosaic",
             "",
-            f"{_TIFF_FILTER};;{_FITS_FILTER}",
+            f"{_TIFF_FILTER};;{_FITS_FILTER};;{_XISF_FILTER}",
             options=QFileDialog.Option.DontConfirmOverwrite,
         )
         if not name:
             return
         path = Path(name)
         if not path.suffix:
-            path = path.with_suffix(".fits" if selected == _FITS_FILTER else ".tiff")
-        self._launch_job(MosaicJob(self.project, path, self, self._layer()), "Preparing mosaic…")
+            path = path.with_suffix(
+                {_FITS_FILTER: ".fits", _XISF_FILTER: ".xisf"}.get(selected, ".tiff")
+            )
+        self._launch_job(
+            MosaicJob(self.project, path, self, self._layer(), band=self._sky_band()),
+            "Preparing mosaic…",
+        )
 
     def _clear_preview(self) -> None:
         self._preview_project = None
@@ -683,7 +731,7 @@ class ProjectWindow(QMainWindow):
         self._clear_preview()
         self._preview_project = self.project
         layer = self._layer()
-        job = PreviewJob(self.project, self, layer)
+        job = PreviewJob(self.project, self, layer, band=self._sky_band())
         job.proxy_ready.connect(self._show_proxy)
         self._launch_job(job, f"Preparing {layer} preview…")
 
@@ -727,7 +775,7 @@ class ProjectWindow(QMainWindow):
                     self._error("Invalid composition settings", error)
                     continue
                 self.project = replace(self.project, composition=composition)
-                self._refresh(self.panels.currentRow())
+                self._refresh(self.panels.currentIndex().row())
                 self.layer_box.setCurrentIndex(_LAYERS.index("composition"))
                 self.status.setText("Composition settings applied.")
                 break
@@ -755,6 +803,8 @@ class ProjectWindow(QMainWindow):
 
     def _set_running(self) -> None:
         running = self._is_running()
+        self.progress.setVisible(self.job is not None)
+        self.cancel_button.setVisible(self.job is not None)
         for action in self._file_actions:
             action.setEnabled(not running)
         self.plate_solve_settings_action.setEnabled(not running)
@@ -799,7 +849,7 @@ class ProjectWindow(QMainWindow):
         else:
             self.progress.setValue(0)
             self.status.setText(f"Mosaic failed. {job.error or 'No result was returned.'}")
-            self._refresh(self.panels.currentRow())
+            self._refresh(self.panels.currentIndex().row())
         job.deleteLater()
         self._finish_close_if_ready()
 
@@ -814,7 +864,7 @@ class ProjectWindow(QMainWindow):
             self.project = replace(self.project, panels=tuple(panels))
         self._solved_panels = self.project.panels
         self._solve_outcomes = {outcome.index: outcome for outcome in job.outcomes}
-        self._refresh(self.panels.currentRow())
+        self._refresh(self.panels.currentIndex().row())
         completed = len(job.outcomes)
         if job.total:
             self.progress.setValue(100 * completed // job.total)
@@ -854,7 +904,7 @@ class ProjectWindow(QMainWindow):
                 self.status.setText("Preview cancelled.")
             else:
                 self.status.setText(f"Preview failed. {job.error or 'No result was returned.'}")
-                self._refresh(self.panels.currentRow())
+                self._refresh(self.panels.currentIndex().row())
 
     def _finish_layer_job(self, job: ForegroundAlignmentJob | CompositionProposalJob) -> None:
         if job.result is None:
@@ -878,7 +928,7 @@ class ProjectWindow(QMainWindow):
             assert placement.reference_panel is not None and placement.placement_rms_px is not None
             layer = "composition"
             message = f"Placement from panel {placement.reference_panel + 1} · {placement.placement_rms_px:.2f} px RMS."
-        self._refresh(self.panels.currentRow())
+        self._refresh(self.panels.currentIndex().row())
         self.layer_box.setCurrentIndex(_LAYERS.index(layer))
         self.progress.setValue(100)
         self.status.setText(message)
@@ -888,7 +938,7 @@ class ProjectWindow(QMainWindow):
             self._mask_job_status(job)
             return
         self.project, problems = job.result
-        self._refresh(self.panels.currentRow())
+        self._refresh(self.panels.currentIndex().row())
         self.progress.setValue(100)
         if problems:
             self.status.setText(

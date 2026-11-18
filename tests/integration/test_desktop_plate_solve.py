@@ -28,7 +28,7 @@ def test_desktop_plate_solve_skips_reusable_wcs_and_retries_unsolved_panels(
     stub_solve_evidence: None,
 ) -> None:
     pytest.importorskip("PySide6")
-    from PySide6.QtCore import QEventLoop, QTimer
+    from PySide6.QtCore import QEventLoop, Qt, QTimer
     from PySide6.QtWidgets import QApplication, QFileDialog
 
     from astromosaic.ui import project_window
@@ -175,8 +175,10 @@ def test_desktop_plate_solve_skips_reusable_wcs_and_retries_unsolved_panels(
         wait_for(lambda: window.job is None and window._inspection_job is None)
         assert window.progress.value() == 66
         assert window.status.text() == "Plate solve cancelled. 1 solved, 1 failed."
-        assert "Solved with Gaia DR3" in window.panels.item(3).text()
-        assert "ASTAP found no match." in window.panels.item(4).toolTip()
+        assert window.panels.cell(3, "Solve result").data() == "Gaia DR3"
+        assert "ASTAP found no match." in window.panels.cell(4, "Solve result").data(
+            Qt.ItemDataRole.ToolTipRole
+        )
         assert window.project.panels[4].wcs_sidecar == panels[4].wcs_sidecar
         assert window.project.panels[5].wcs_sidecar is None
         assert len(list(sidecars.glob("*.wcs.json"))) == 1
@@ -189,7 +191,7 @@ def test_desktop_plate_solve_skips_reusable_wcs_and_retries_unsolved_panels(
         assert window.status.text() == "Plate solve finished. 2 solved, 0 failed."
         assert window.project.panels[3].wcs_sidecar == load_project(manifest).panels[3].wcs_sidecar
         assert window.project.panels[1].wcs_sidecar == panels[1].wcs_sidecar
-        assert "Solved with ASTAP hinted" in window.panels.item(5).text()
+        assert window.panels.cell(5, "Solve result").data() == "ASTAP hinted"
         assert [index for index, backend in calls if backend == "gaia"] == [3, 4, 5]
         assert len(list((tmp_path / "night.astromosaic.wcs").glob("*.wcs.json"))) == 2
         assert old_sidecar.read_text(encoding="utf-8") == "{}"

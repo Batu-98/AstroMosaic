@@ -20,7 +20,7 @@ from astromosaic.astrometry.astap_probe import (
 )
 from astromosaic.astrometry.distortion import validate_models
 from astromosaic.astrometry.gaia_solve import GAIA_BROAD_SCALES, search_gaia, validate_gaia
-from astromosaic.astrometry.hints import PanelOptics, positive_number, read_optics
+from astromosaic.astrometry.hints import PanelOptics, positive_header_number, read_optics
 from astromosaic.astrometry.solve_budget import (
     DEFAULT_PANEL_SECONDS,
     SolveBudget,
@@ -117,7 +117,7 @@ def _pointing(
         ra, dec = float(header["RA"]), float(header["DEC"])
         if 0 <= ra < 360 and -90 <= dec <= 90:
             position = ra, dec
-    scale = scale if scale is not None else positive_number(header.get("PIXSCALE"))
+    scale = scale if scale is not None else positive_header_number(header.get("PIXSCALE"))
     if scale is not None:
         return position, scale, scale
     scale_x, scale_y = read_optics(header).with_overrides(options.optics).scales_arcsec()
@@ -484,11 +484,12 @@ def solve_panel(
                     geometry, detail = load_solution(existing_sidecar, source)
                 else:
                     geometry = read_panel_geometry(source.header, *run.size)
-                    detail = (
-                        "Validated embedded TIFF WCS."
-                        if source.descriptor.wcs_provenance == "tiff-description"
-                        else "Validated primary FITS WCS."
-                    )
+                    detail = {
+                        "tiff-description": "Validated embedded TIFF WCS.",
+                        "xisf-fits-keywords": "Validated embedded XISF WCS.",
+                        None: "Validated primary FITS WCS.",
+                        "primary-header": "Validated primary FITS WCS.",
+                    }[source.descriptor.wcs_provenance]
             except (OSError, ValueError, OverflowError) as error:
                 attempts.append(SolverAttempt("existing-wcs", "failed", str(error)))
             else:
@@ -509,7 +510,7 @@ def solve_panel(
         if scale is not None or vertical_scale is not None:
             if options.scale_arcsec is not None:
                 scale_origin = "explicit scale"
-            elif positive_number(source.header.get("PIXSCALE")) is not None:
+            elif positive_header_number(source.header.get("PIXSCALE")) is not None:
                 scale_origin = "embedded PIXSCALE"
             elif options.optics != PanelOptics():
                 scale_origin = "optical metadata with project overrides"

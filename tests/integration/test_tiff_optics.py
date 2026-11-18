@@ -12,13 +12,15 @@ from astromosaic.io import open_panel
 from astromosaic.storage.project import FileReference, ProjectPanel, inspect_project_panel
 
 
-def _image(path: Path, fields: dict[str, str], header: fits.Header | None = None) -> None:
+def _image(
+    path: Path, fields: dict[str, str], header: fits.Header | None = None, *, padding: bytes = b""
+) -> None:
     root = ElementTree.Element("metadata")
     for key, value in fields.items():
         namespace = "tiff" if key == "Model" else "exif"
         element = ElementTree.SubElement(root, f"{{http://ns.adobe.com/{namespace}/1.0/}}{key}")
         element.text = value
-    xml = ElementTree.tostring(root, encoding="utf-8")
+    xml = ElementTree.tostring(root, encoding="utf-8") + padding
     description = (
         "AstroMosaic TIFF 1\n" + header.tostring(sep="\n", padding=False)
         if header is not None
@@ -151,6 +153,13 @@ def test_malformed_xmp_leaves_pixels_readable(tmp_path: Path) -> None:
     assert info.embedded_optics == PanelOptics()
 
 
+def test_invalid_fits_focal_length_uses_padded_xmp(tmp_path: Path) -> None:
+    image = tmp_path / "padded-xmp.tif"
+    _image(image, {"FocalLength": "24/1"}, fits.Header({"FOCALLEN": -1}), padding=b"\0\0")
+    info = inspect_project_panel(ProjectPanel(FileReference.capture(image)), JobContext())
+    assert info.embedded_optics == PanelOptics(24)
+
+
 def test_invalid_optional_camera_text_does_not_invalidate_an_image(tmp_path: Path) -> None:
     image = tmp_path / "numeric-instrument.tif"
     _image(image, {}, fits.Header({"INSTRUME": 42, "FOCALLEN": 24}))
@@ -165,28 +174,42 @@ def test_panel_settings_displays_imported_camera_and_optical_hints(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     pytest.importorskip("PySide6")
-    monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
+    import os
+
+    from PySide6.QtTest import QTest
     from PySide6.QtWidgets import QApplication, QWidget
 
     from astromosaic.ui.project_settings import PanelSettings
 
+    if "QT_QPA_PLATFORM" not in os.environ:
+        monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
     app = QApplication.instance()
     if not isinstance(app, QApplication):
         app = QApplication([])
     image = tmp_path / "camera.tif"
     _image(image, {"FocalLength": "24", "Model": "Test camera"})
-    panel = ProjectPanel(FileReference.capture(image), optics=PanelOptics(50))
+    panel = ProjectPanel(FileReference.capture(image))
     info = inspect_project_panel(panel, JobContext())
     parent = QWidget()
     dialog = PanelSettings(panel, parent)
-    dialog.show_embedded_optics(info.embedded_optics, info.camera_model)
     try:
         dialog.show()
         app.processEvents()
+        QTest.keyClicks(dialog.pixel_size_x, "5.5")
+        dialog.show_embedded_optics(info.embedded_optics, info.camera_model)
         assert dialog.camera_model.text() == "Test camera"
+        assert dialog.focal_length.text() == "24"
+        assert dialog.pixel_size_x.text() == "5.5"
+        assert dialog.settings().optics == PanelOptics(pixel_size_x_um=5.5)
+        dialog.focal_length.selectAll()
+        QTest.keyClicks(dialog.focal_length, "50")
+        dialog.show_embedded_optics(info.embedded_optics, info.camera_model)
         assert dialog.focal_length.text() == "50"
-        assert "24" in dialog.focal_length.placeholderText()
-        assert dialog.settings().optics.focal_length_mm == 50
+        assert dialog.settings().optics == PanelOptics(50, 5.5)
+        dialog.focal_length.clear()
+        dialog.pixel_size_x.clear()
+        assert dialog.focal_length.placeholderText() == "24 (embedded)"
+        assert dialog.settings().optics == PanelOptics()
     finally:
         dialog.close()
         parent.close()

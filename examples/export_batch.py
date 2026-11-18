@@ -19,6 +19,7 @@ class ExportJob:
     project: Path
     output: Path
     layer: str
+    band: str | None = None
 
 
 def load_jobs(batch: Path) -> list[ExportJob]:
@@ -37,7 +38,10 @@ def load_jobs(batch: Path) -> list[ExportJob]:
             raise ValueError(f"Job {index} requires an output path.")
         if not isinstance(layer, str) or layer not in ("sky", "foreground", "composition"):
             raise ValueError(f"Job {index} has an invalid layer.")
-        jobs.append(ExportJob(directory / project, directory / output, layer))
+        band = item.get("band")
+        if band is not None and (not isinstance(band, str) or not band.strip() or layer != "sky"):
+            raise ValueError(f"Job {index} requires a nonempty band and the sky layer.")
+        jobs.append(ExportJob(directory / project, directory / output, layer, band))
     return jobs
 
 
@@ -76,6 +80,7 @@ def run_batch(launcher: list[str], jobs: list[ExportJob]) -> int:
                     str(job.output),
                     "--layer",
                     job.layer,
+                    *((f"--band={job.band}",) if job.band is not None else ()),
                     "--json",
                     "--progress",
                 ],

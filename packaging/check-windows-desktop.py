@@ -20,6 +20,7 @@ import tifffile
 from astropy.io import fits
 from astropy.wcs import WCS
 from PySide6.QtCore import QCoreApplication, QEvent, QEventLoop, QSettings, Qt, QTimer
+from PySide6.QtGui import QAction, QPalette
 from PySide6.QtWidgets import QApplication, QFileDialog
 from scipy.ndimage import gaussian_filter
 
@@ -44,7 +45,7 @@ from astromosaic.storage.project import (
 from astromosaic.ui import plate_solve_settings
 from astromosaic.ui.plate_solve_settings import PlateSolveSettings
 from astromosaic.ui.preview_gl import OpenGLPreview
-from astromosaic.ui.project_settings import CompositionSettings
+from astromosaic.ui.project_settings import CompositionSettings, ProjectSettings
 from astromosaic.ui.project_window import ProjectWindow
 
 
@@ -179,16 +180,16 @@ def check_project(window: ProjectWindow, directory: Path, backend: str) -> dict[
         assert window.status.text() == f"Opened {path.name}.", window.status.text()
 
     open_project(manifest)
-    assert "Source missing" in window.panels.item(1).text()
-    assert "WCS Unavailable" in window.panels.item(1).text()
-    window.panels.setCurrentRow(1)
+    assert "Source missing" in window.panels.cell(1, "Link").data()
+    assert window.panels.cell(1, "WCS").data() == "Unavailable"
+    window.panels.selectRow(1)
     with patch.object(QFileDialog, "getOpenFileName", return_value=(str(moved), "")):
-        window.relink_button.click()
-    assert "Linked" in window.panels.item(1).text()
+        window.relink_action.trigger()
+    assert "Linked" in window.panels.cell(1, "Link").data()
     assert window.project.panels[1].source.path == moved
     wait_for(window, lambda: window._inspection_job is None)
-    assert "WCS Embedded" in window.panels.item(0).text()
-    assert "WCS Missing" in window.panels.item(1).text()
+    assert window.panels.cell(0, "WCS").data() == "Embedded"
+    assert window.panels.cell(1, "WCS").data() == "Missing"
 
     snapshot = manifest.read_bytes()
     with (
@@ -249,6 +250,134 @@ def check_project(window: ProjectWindow, directory: Path, backend: str) -> dict[
     assert destination.is_file() and window.progress.value() == 100
     assert window.project.composition == composition
     return covered
+
+
+def check_zea(window: ProjectWindow, directory: Path, backend: str) -> int:
+    previous = window.project
+    assert previous.composition is not None
+
+    def select_projection(dialog: ProjectSettings) -> int:
+        assert dialog.projection.currentData() == "TAN"
+        dialog.projection.setCurrentIndex(dialog.projection.findData("ZEA"))
+        return 1
+
+    window.layer_box.setCurrentText("Sky")
+    with patch.object(ProjectSettings, "exec", select_projection):
+        window.settings_button.click()
+    assert window.project.render.projection == "ZEA"
+    assert window.project.composition is None and window.project.foreground == previous.foreground
+    assert "ICRS ZEA" in window.grid_summary.text()
+    manifest = directory / "Saved equal area grid.astromosaic"
+    _, open_action, _, save_as = window._file_actions
+    with patch.object(QFileDialog, "getSaveFileName", return_value=(str(manifest), "")):
+        save_as.trigger()
+    with patch.object(QFileDialog, "getOpenFileName", return_value=(str(manifest), "")):
+        open_action.trigger()
+    assert window.status.text() == f"Opened {manifest.name}.", window.status.text()
+    assert window.project.render.projection == "ZEA"
+
+    window.preview_button.click()
+    wait_for(window, lambda: window.job is None)
+    frame = window.viewport.frame
+    assert frame is not None and frame.has_coverage, window.status.text()
+    assert window.viewport.backend == backend
+    destination = directory / "Equal area sky.fits"
+    export(window, destination)
+    wait_for(window, lambda: window.job is None)
+    reference = preview_project_layer(window.project, "sky", JobContext())
+    with open_panel(destination) as reopened:
+        assert reopened.header["CTYPE1"] == "RA---ZEA"
+        tile = reopened.read_tile(reference.tile.region)
+        np.testing.assert_array_equal(tile.pixels, reference.tile.pixels)
+        np.testing.assert_array_equal(tile.valid, reference.tile.valid)
+        np.testing.assert_array_equal(normalize_tile(tile, frame.size).rgba, frame.rgba)
+    return int(reference.tile.valid.sum())
+
+
+def check_xisf(window: ProjectWindow, directory: Path, backend: str) -> int:
+    project = window.project
+    window.layer_box.setCurrentText("Sky")
+    reference = preview_project_layer(project, "sky", JobContext())
+    destination = directory / "Interchange sky.xisf"
+    with patch.object(
+        QFileDialog,
+        "getSaveFileName",
+        return_value=(str(destination.with_suffix("")), "XISF mosaic (*.xisf)"),
+    ) as dialog:
+        window.start_button.click()
+        assert "*.xisf" in dialog.call_args.args[-1]
+    wait_for(window, lambda: window.job is None)
+    assert destination.is_file(), window.status.text()
+
+    window._set_project(MosaicProject(render=project.render), None)
+    with patch.object(
+        QFileDialog, "getOpenFileNames", return_value=([str(destination)], "")
+    ) as dialog:
+        window.add_button.click()
+        assert "*.xisf" in dialog.call_args.args[-1]
+    wait_for(window, lambda: window.job is None and window._inspection_job is None)
+    assert window.panels.cell(0, "WCS").data() == "Embedded"
+    panel = replace(window.project.panels[0], foreground_override="sky-only")
+    window._set_project(replace(window.project, panels=(panel,)), None)
+    window.preview_button.click()
+    wait_for(window, lambda: window.job is None)
+    frame = window.viewport.frame
+    assert frame is not None and frame.has_coverage, window.status.text()
+    assert window.viewport.backend == backend
+    np.testing.assert_array_equal(frame.rgba, normalize_tile(reference.tile, frame.size).rgba)
+    return int(reference.tile.valid.sum())
+
+
+def check_bands(window: ProjectWindow, directory: Path, backend: str) -> int:
+    spec = RenderSpec((359.999, 20.0), (16, 12), 7.2, projection="ZEA")
+    header = spec.output_wcs().to_header()
+    first, second = directory / "H-alpha panel.fits", directory / "O III panel.fits"
+    expected = np.arange(192, dtype=np.float32).reshape(12, 16) - 30
+    expected[5, 3] = np.nan
+    header["FILTER"], header["BUNIT"] = "H-alpha", "MJy/sr"
+    fits.writeto(first, -2 * expected, header)
+    del header["FILTER"]
+    header["BUNIT"] = "Jy/sr"
+    fits.writeto(second, expected, header)
+    project = MosaicProject(
+        tuple(ProjectPanel(FileReference.capture(p)) for p in (first, second)), spec
+    )
+    window._set_project(project, None)
+    wait_for(window, lambda: window._inspection_job is None)
+    window.panels.selectRow(1)
+
+    window.table_view.setCurrentText("All properties")
+    assert window.panels.cell(1, "Size (px)").data() == "16 × 12"
+    assert window.panels.properties.setData(window.panels.cell(1, "Band"), "O III")
+    assert window.project.panels[1].band_override == "O III"
+    manifest = directory / "Saved band selection.astromosaic"
+    _, open_action, _, save_as = window._file_actions
+    with patch.object(QFileDialog, "getSaveFileName", return_value=(str(manifest), "")):
+        save_as.trigger()
+    with patch.object(QFileDialog, "getOpenFileName", return_value=(str(manifest), "")):
+        open_action.trigger()
+    wait_for(window, lambda: window._inspection_job is None)
+    assert window.project.panels[1].band_override == "O III"
+    window.layer_box.setCurrentText("Sky")
+    assert not window.start_button.isEnabled()
+    window.band_box.setCurrentIndex(window.band_box.findData("O III"))
+    assert window.start_button.isEnabled() and "O III" in window.grid_summary.text()
+    window.preview_button.click()
+    wait_for(window, lambda: window.job is None)
+    frame = window.viewport.frame
+    assert frame is not None and frame.has_coverage, window.status.text()
+    assert window.viewport.backend == backend
+    destination = directory / "O III from desktop.fits"
+    export(window, destination)
+    wait_for(window, lambda: window.job is None)
+    with open_panel(destination) as reopened:
+        tile = reopened.read_tile(Region(0, 0, *spec.size))
+        assert reopened.descriptor.filter_name == "O III" and reopened.descriptor.unit == "Jy/sr"
+        assert reopened.header["CTYPE1"] == "RA---ZEA"
+        np.testing.assert_array_equal(tile.pixels, expected)
+        np.testing.assert_array_equal(tile.valid, np.isfinite(expected))
+        np.testing.assert_array_equal(normalize_tile(tile, frame.size).rgba, frame.rgba)
+    return int(tile.valid.sum())
 
 
 def check_commands(window: ProjectWindow, directory: Path) -> dict[str, object]:
@@ -395,7 +524,9 @@ def check_plate_solve(window: ProjectWindow, directory: Path, fixtures: Path) ->
 
     def result(index: int) -> dict[str, object]:
         reference = window.project.panels[index].wcs_sidecar
-        assert reference is not None, window.panels.item(index).toolTip()
+        assert reference is not None, window.panels.cell(index, "Solve result").data(
+            Qt.ItemDataRole.ToolTipRole
+        )
         return json.loads(reference.path.read_text(encoding="utf-8"))
 
     def solve_and_wait() -> None:
@@ -478,7 +609,9 @@ def check_plate_solve(window: ProjectWindow, directory: Path, fixtures: Path) ->
         )
         solve_and_wait()
         fallback = result(5)
-        assert fallback["stage"] == "gaia-dr3", window.panels.item(5).toolTip()
+        assert fallback["stage"] == "gaia-dr3", window.panels.cell(5, "Solve result").data(
+            Qt.ItemDataRole.ToolTipRole
+        )
         attempts = fallback["attempts"]
         assert isinstance(attempts, list)
         assert (attempts[1]["stage"], attempts[1]["outcome"]) == ("astap-hinted", "skipped")
@@ -511,10 +644,15 @@ def frozen_check(backend: str, solve_fixtures: Path | None) -> None:
     app.setQuitOnLastWindowClosed(False)
     platform = "offscreen" if backend == "CPU" else "windows"
     assert app.platformName() == platform
-    window = ProjectWindow()
+    preferences = QSettings(str(Path.cwd() / "appearance.ini"), QSettings.Format.IniFormat)
+    window = ProjectWindow(preferences=preferences)
     window.setAttribute(Qt.WidgetAttribute.WA_DontShowOnScreen)
     window.show()
     try:
+        for name in ("Dark", "Light", "Dark"):
+            next(a for a in window.findChildren(QAction) if a.text() == name).trigger()
+            base = window.panels.viewport().palette().color(QPalette.ColorRole.Base)
+            assert (base.lightness() < 128) == (name == "Dark")
         check_solver_settings(window, Path.cwd())
         covered = check_project(window, Path.cwd(), backend)
         plate_solve = (
@@ -523,6 +661,11 @@ def frozen_check(backend: str, solve_fixtures: Path | None) -> None:
             else None
         )
         commands = check_commands(window, Path.cwd())
+        zea = check_zea(window, Path.cwd(), backend)
+        mixed = Path.cwd() / "Mixed.astromosaic"
+        window._set_project(load_project(mixed), mixed)
+        xisf = check_xisf(window, Path.cwd(), backend)
+        band = check_bands(window, Path.cwd(), backend)
         print(
             json.dumps(
                 {
@@ -534,6 +677,9 @@ def frozen_check(backend: str, solve_fixtures: Path | None) -> None:
                     "solver_settings": True,
                     "plate_solve": plate_solve,
                     "command_panel": commands,
+                    "xisf_covered_pixels": xisf,
+                    "zea_covered_pixels": zea,
+                    "band_covered_pixels": band,
                 }
             )
         )
@@ -587,6 +733,9 @@ def check_bundle(bundle: Path, probe: Path, backend: str, solve_fixtures: Path |
         assert report["backend"] == backend
         assert report["recovery"] and report["cancel_and_retry"] and report["solver_settings"]
         assert report["command_panel"]["matching_layers"] == ["sky", "composition"]
+        assert report["xisf_covered_pixels"] == report["covered_pixels"]["sky"]
+        assert report["zea_covered_pixels"] > 0
+        assert report["band_covered_pixels"] == 191
         if solve_fixtures is not None:
             assert report["plate_solve"]["fallback"] == "gaia-dr3"
         print(result.stdout.strip())

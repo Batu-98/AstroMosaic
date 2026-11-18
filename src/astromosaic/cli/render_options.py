@@ -56,17 +56,21 @@ def with_render_reporting(
     return replace(context, on_progress=report_both)
 
 
-def panel_files(values: list[str], count: int) -> dict[int, Path]:
-    paths: dict[int, Path] = {}
+def panel_assignments(values: list[str], count: int, kind: str) -> dict[int, str]:
+    assignments: dict[int, str] = {}
     for value in values:
-        index, _, path = value.partition("=")
-        if not (index.isascii() and index.isdecimal() and path):
-            raise ValueError("Expected PANEL=PATH with a one-based panel number.")
+        index, _, assigned = value.partition("=")
+        if not (index.isascii() and index.isdecimal() and assigned):
+            raise ValueError(f"Expected PANEL={kind} with a one-based panel number.")
         number = int(index) - 1
-        if not 0 <= number < count or number in paths:
-            raise ValueError("Each PANEL=PATH must identify a distinct input panel.")
-        paths[number] = Path(path)
-    return paths
+        if not 0 <= number < count or number in assignments:
+            raise ValueError(f"Each PANEL={kind} must identify a distinct input panel.")
+        assignments[number] = assigned
+    return assignments
+
+
+def panel_files(values: list[str], count: int) -> dict[int, Path]:
+    return {index: Path(value) for index, value in panel_assignments(values, count, "PATH").items()}
 
 
 def add_render_options(parser: ArgumentParser) -> None:
@@ -76,7 +80,14 @@ def add_render_options(parser: ArgumentParser) -> None:
         type=float,
         nargs=2,
         metavar=("RA", "DEC"),
-        help="ICRS tangent point in degrees.",
+        help="ICRS reference position in degrees.",
+    )
+    parser.add_argument(
+        "--projection",
+        type=str.upper,
+        choices=("TAN", "ZEA"),
+        default="TAN",
+        help="Sky projection, gnomonic or zenithal equal area (default: TAN).",
     )
     parser.add_argument(
         "--scale",
@@ -169,6 +180,7 @@ def render_options(arguments: Namespace) -> tuple[RenderSpec, RefinementSpec | N
         size=tuple(arguments.size),
         scale_arcsec=arguments.scale,
         rotation_deg=arguments.rotation,
+        projection=arguments.projection,
         crop=Region(*arguments.crop) if arguments.crop else None,
         tile_size=DEFAULT_TILE_SIZE if arguments.tile_size is None else arguments.tile_size,
         max_working_bytes=(

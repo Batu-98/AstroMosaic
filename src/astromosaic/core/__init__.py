@@ -26,7 +26,7 @@ class PanelDescriptor:
     bitpix: int
     bscale: float
     bzero: float
-    wcs_provenance: Literal["primary-header", "tiff-description"] | None
+    wcs_provenance: Literal["primary-header", "tiff-description", "xisf-fits-keywords"] | None
     blank: int | None
     mask_provenance: tuple[str, ...]
 

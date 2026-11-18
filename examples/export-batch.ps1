@@ -43,10 +43,15 @@ try {
         if ($layer -isnot [string] -or $layer -cnotin @('sky', 'foreground', 'composition')) {
             throw "Job $number has an invalid layer."
         }
+        $band = $item['band']
+        if ($null -ne $band -and ($band -isnot [string] -or [string]::IsNullOrWhiteSpace($band) -or $layer -cne 'sky')) {
+            throw "Job $number requires a nonempty band and the sky layer."
+        }
         @{
             Project = [IO.Path]::GetFullPath($item['project'], $directory)
             Output = [IO.Path]::GetFullPath($item['output'], $directory)
             Layer = $layer
+            Band = $band
         }
     }
 } catch {
@@ -124,6 +129,9 @@ public static class AstroMosaicBatchInterrupt
             '--layer', $job.Layer, '--json', '--progress'
         )) {
             $start.ArgumentList.Add($argument)
+        }
+        if ($null -ne $job.Band) {
+            $start.ArgumentList.Add("--band=$($job.Band)")
         }
 
         $child = [Diagnostics.Process]::Start($start)

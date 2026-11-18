@@ -384,10 +384,10 @@ Start 3.1A after local Phase 3F acceptance. Run the [clean Windows 11 x64 check]
 
 #### 3.1A Panel WCS status and optical metadata
 
-- Show the effective WCS state for every panel in the project list. Distinguish validated embedded WCS, validated sidecar WCS, missing WCS, and invalid or stale WCS. Show why an input cannot be checked when its source is missing or unreadable. Refresh status on import, reopen, relink, mask edits, and solve completion.
-- Populate focal length in millimeters and effective X and Y pixel sizes in micrometers from supported embedded FITS or TIFF metadata. Start with FITS producer conventions such as `FOCALLEN`, `XPIXSZ`, and `YPIXSZ`, including FITS-style metadata already read by the TIFF adapter. Accept other embedded fields when their meaning and units are verified against representative files. Generic TIFF resolution tags are excluded as a source of sensor pitch. Record the metadata source and let users fill or override values per panel. Save explicit edits in the project and support reopening earlier manifests. [N.I.N.A. FITS fields](https://nighttime-imaging.eu/docs/master/site/advanced/file_formats/fits.html) · [MaxIm DL FITS field definitions](https://cdn.diffractionlimited.com/help/maximdl/FITS_File_Header_Definitions.htm)
+- Display project panels in a control table with one row per source, editable panel settings, and selectable property columns. Show the effective WCS state for every row. Default to a dark desktop theme and remember the user’s choice of dark or light appearance. Distinguish validated embedded WCS, validated sidecar WCS, missing WCS, and invalid or stale WCS. Show why an input cannot be checked when its source is missing or unreadable. Refresh status on import, reopen, relink, mask edits, and solve completion.
+- Populate focal length in millimeters and effective X and Y pixel sizes in micrometers from supported embedded FITS, TIFF, and XISF metadata. Read FITS producer conventions such as `FOCALLEN`, `XPIXSZ`, and `YPIXSZ`, TIFF EXIF/XMP sensor fields, and XISF instrument properties. Verify field meaning and units against representative files. Use focal-plane resolution for TIFF sensor pitch. Record the metadata source and let users fill or override values per panel. Save explicit edits in the project and support reopening earlier manifests. [Panel optics](docs/phase-3b.md#panel-wcs-and-plate-solve-hints)
 - Derive an approximate image scale in arcseconds per pixel from the effective pixel pitch and focal length when both are usable. Use the axis geometry consistently when deriving the solver's field-of-view hint. Prefer an explicit scale if supplied, then a validated embedded scale, then a derived scale. Use valid pointing hints when present. Treat optical values as scale hints and use the applicable blind fallback when pointing is missing. Account for binning or resampling only when confirmed by the metadata convention. Leave ambiguous, missing, or invalid hints unset.
-- Verify status and hint precedence with FITS and TIFF inputs containing valid, absent, and malformed metadata, including stale sidecar and binned-image cases. Verify manual overrides and reopening older projects.
+- Verify status and hint precedence across supported formats using valid, absent, and malformed metadata, including stale sidecar and binned-image cases. Verify automatic panel settings, manual overrides, and reopening older projects.
 
 #### 3.1B Local plate solve settings
 
@@ -398,7 +398,7 @@ Start 3.1A after local Phase 3F acceptance. Run the [clean Windows 11 x64 check]
 
 - Add a **Plate Solve** button that runs the existing Qt-free solver in a cancellable background job for sky-bearing panels without a validated effective WCS. Skip panels with validated WCS or no sky contribution. Use each panel's current hints and effective sky mask. Show the number of applicable panels, progress and per-panel outcomes, including the solver used and diagnostic reasons for failures.
 - Publish each successful WCS atomically as a new source- and mask-bound sidecar. Use a sibling folder beside the saved project or a folder chosen for an untitled project. Attach successful results at job completion, refresh the WCS status and invalidate any stale preview. The normal project save persists the new references. Preserve original images and any earlier sidecars.
-- Show each attempted panel's result in the panel list and solver details in its tooltip. Retain completed results when another panel fails or the user cancels. Keep the remaining panels eligible for retry and clean up incomplete output and solver staging.
+- Show each attempted panel's result in the panel control table and solver details in its tooltip. Retain completed results when another panel fails or the user cancels. Keep the remaining panels eligible for retry and clean up incomplete output and solver staging.
 - Verify a mixed project with embedded WCS, a reusable sidecar, an unsolved sky panel, and a foreground-only panel in the Windows desktop bundle. Confirm only eligible panels reach the solver. Exercise Gaia DR3 and ASTAP configurations, fallback when both are configured, cancellation and retry, project save and reopen, and reuse of the solved WCS by preview and export. Verify unchanged inputs and that the CLI remains Qt-free.
 
 <a name="phase-31-astronomy-engine-revalidation"></a>
@@ -452,6 +452,14 @@ The owner authorized starting [Phase 4A](docs/phase-4a.md) from the locally veri
 | 4B | [Large mosaics and improved blends](docs/phase-4b.md) | Run 12-panel 6000 x 4000 FITS and TIFF jobs, including RGB and a mixed sky and foreground case, with enforced memory limits and incremental export. Verify output-tile correctness, seamless halo boundaries, bounded queue growth, and measured quality improvement for any optional multiband blend. |
 | 4C | [Desktop command panel](docs/phase-4c.md) | Validate a saved project and export from the panel using the same commands and results as the standalone CLI. Verify command history, progress, and cancellation with partial-output cleanup while the Windows desktop stays responsive. |
 
+### 10.3 Phase 5 Delivery Stages
+
+Start with [Phase 5A XISF interchange](docs/phase-5a.md). Use the shared panel and raster interfaces so a saved project supports XISF in preview, solving, and export. Verify mono and RGB sample values, coverage, FITS-compatible metadata, and resource limits before extending output geometry. Independent reopening must cover the sky grid, masked pixels, and composition contributions. The copied Windows CLI and desktop bundles must exercise XISF through their normal entry points.
+
+[Phase 5B](docs/phase-5b.md) adds ICRS ZEA as an equal-area sky grid. Save the projection choice, preserve legacy TAN interpretation, and share preview and export geometry. Exercise longitude wrap, crop and rotation, the antipode, masked samples, and independently reopened WCS in every supported sky export format. Verify Qt-free CLI and desktop workflows with the copied Windows packages.
+
+[Phase 5C](docs/phase-5c.md) renders one filter band's sky panels on the saved grid. Resolve explicit panel assignments and embedded labels, validate band-local units and layout, and retain independent coverage and WCS in each output. Verify desktop selection, Qt-free automation, batch cancellation, and independent reopening of the mono and RGB products.
+
 ## 11. Validation and Acceptance Criteria
 
 Use synthetic data with known geometry, gains, gradients, and faint structures, plus representative real data. Include sparse/dense stars, saturation, low signal-to-noise, narrow overlaps, disconnected groups, strong distortion, negative/zero pixels, scaled FITS, holes in coverage, and oversized outputs.
@@ -474,7 +482,7 @@ Performance targets must name hardware, data dimensions, filters/channels, panel
 
 ## 12. Immediate Implementation Backlog
 
-The bootstrap list below records the original implementation sequence. The current next task is [Phase 3.6A](docs/phase-36.md#36a--freeze-contracts-capabilities-and-reference-evidence); [progression.md](progression.md) records completed work and the active handoff.
+The bootstrap list below records the original implementation sequence. See [progression.md](progression.md) for completed work and the active handoff.
 
 1. Create the minimal Python package and a UI-independent CLI entry point.
 2. Lock candidate dependencies and test compiled imports on Windows 11 x64.

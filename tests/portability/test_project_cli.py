@@ -144,6 +144,76 @@ raise SystemExit(main(sys.argv[1:]))
     assert [path.read_bytes() for path in (source, mask, sidecar, tiff)] == original
 
 
+def test_cli_uses_the_saved_zea_grid(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    source = tmp_path / "panel.fits"
+    write_smoke_panel(source)
+    path = tmp_path / "wide.astromosaic"
+    output = tmp_path / "saved-zea.fits"
+    options = ["--projection", "zea", "--rotation", "16", "--crop", "2", "1", "8", "7"]
+    assert main([*_create_args(path, source), *options]) == 0
+    assert load_project(path).render.projection == "ZEA"
+    capsys.readouterr()
+
+    assert main(["project", "validate", str(path), "-o", str(output), "--json"]) == 0
+    report = json.loads(capsys.readouterr().out)
+    assert report["status"] == "ok" and (report["width"], report["height"]) == (8, 7)
+    assert main(["project", "export", str(path), "-o", str(output), "--json"]) == 0
+    assert json.loads(capsys.readouterr().out)["covered_pixels"] > 0
+    assert fits.getheader(output)["CTYPE1"] == "RA---ZEA"
+
+    direct = tmp_path / "direct-zea.fits"
+    assert (
+        main(
+            [
+                "mosaic",
+                str(source),
+                "-o",
+                str(direct),
+                "--center",
+                "359.999",
+                "20",
+                "--scale",
+                "7.2",
+                "--size",
+                "12",
+                "10",
+                *options,
+            ]
+        )
+        == 0
+    )
+    assert direct.read_bytes() == output.read_bytes()
+
+
+def test_saved_band_reports_select_only_the_requested_panel(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    first, second, path = (
+        tmp_path / name for name in ("L.fits", "O III.fits", "bands.astromosaic")
+    )
+    write_smoke_panel(first)
+    with fits.open(first, do_not_scale_image_data=True) as original:
+        header = original[0].header.copy()
+        del header["FILTER"]
+        fits.writeto(second, original[0].data, header)
+    assert main([*_create_args(path, first, second), "--panel-band", "2=O III"]) == 0
+    capsys.readouterr()
+    assert main(["project", "bands", str(path), "--json"]) == 0
+    listing = json.loads(capsys.readouterr().out)
+    assert listing["schema_version"] == 1
+    assert listing["bands"] == [{"band": "L", "panels": [1]}, {"band": "O III", "panels": [2]}]
+    output = tmp_path / "only O III.fits"
+    selected = [str(path), "--band", "O III", "-o", str(output), "--json"]
+    assert main(["project", "validate", *selected]) == 0
+    checked = json.loads(capsys.readouterr().out)
+    assert checked["band"] == "O III" and checked["panels"] == 1
+    assert main(["project", "export", *selected, "--progress"]) == 0
+    exported = capsys.readouterr()
+    assert json.loads(exported.out)["band"] == "O III"
+    assert json.loads(exported.err.splitlines()[-1])["completed_pixels"] == 120
+    assert fits.getheader(output)["FILTER"] == "O III"
+
+
 def test_project_command_failures_report_json_and_preserve_files(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

@@ -2,9 +2,9 @@
 
 ## Desktop Workflow
 
-1. Use **Add Panels** to import FITS or linear TIFF sources. The app checks each panel for a horizon in a background job. The panel list shows mixed suggestions, uncertain cases, and panels for which the check found no horizon. **Panel → Check Foreground** repeats the check for the selected panel.
+1. Use **Add Panels** to import FITS or linear TIFF sources. The app checks each panel for a horizon in a background job. Under **All properties**, the foreground columns show the suggested and effective classifications. **Panel → Check Foreground** repeats the check for the selected panel.
 2. Use **Panel Settings → Foreground tag** to mark an undetected mixed panel or declare a panel **Sky only**. A saved manual tag takes precedence over later suggestions. Mixed or uncertain panels need a mask for sky jobs. Select **Sky only** for a false positive.
-3. Choose **Panel → Propose Sky Mask** for a mixed or uncertain panel. Review the overlay before applying. To open the saved mask or draw one from scratch, choose **Edit Sky Mask**. Drag with **Trace horizon** to set sky above and foreground below. Use the three paint tools to refine the selection and restore any uncertain cells. **Reset Edits** restores the displayed starting mask for that editing session.
+3. Choose **Panel → Propose Sky Mask** for a mixed or uncertain panel. Review the overlay before applying. To open the saved mask or draw one from scratch, choose **More → Edit Sky Mask**. Drag with **Trace horizon** to set sky above and foreground below. Use the three paint tools to refine the selection and restore any uncertain cells. **Reset Edits** restores the displayed starting mask for that editing session.
 4. Choose **Apply Mask** and save the project. The mask appears when the project reopens. Preview and export use the edited selection. A new mask change clears the cached mosaic preview.
 
 The mask can also come from an existing binary FITS file in **Panel Settings**. Applying edits to the FITS mask overlay replaces its attachment in the project with the editable grid. The original external mask file stays on disk. Keep the full-resolution FITS attachment when its precise pixel boundaries are required.

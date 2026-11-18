@@ -2,9 +2,9 @@
 
 ## Desktop Workflow
 
-1. Add linear FITS or TIFF panels to a project. Set the ICRS TAN center, dimensions, scale, rotation, and optional crop under **Mosaic Settings**. Attach WCS solutions or supplied sky masks under **Panel Settings** as needed.
+1. Add linear FITS, TIFF, or supported XISF panels to a project. Set the ICRS center, sky projection, dimensions, scale, rotation, and optional crop under **Mosaic Settings**. Attach WCS solutions or supplied sky masks under **Panel Settings** as needed. [Sky projection](phase-5b.md)
 2. Choose **Build Preview**. Drag to pan, use the wheel to zoom around the pointer, and choose **Fit View** to reset framing. Adjust **Midtones** to see faint detail. The display mode appears beside the stretch control.
-3. Choose **Export Mosaic** to write float32 FITS or TIFF with WCS and coverage. Use TIFF for RGB panels. The project grid and panel settings control both jobs. Preview pan, zoom, and stretch are display controls.
+3. Choose **Export Mosaic** to write float32 samples with WCS and coverage. Use FITS for mono, or TIFF or XISF for mono and RGB. The project grid and panel settings control both jobs. Preview pan, zoom, and stretch are display controls. [XISF workflow](phase-5a.md#use-the-format)
 
 Preview and export jobs run one at a time. **Cancel Job** stops at the next cancellation checkpoint. Editing the panels or mosaic settings clears the preview. Build it again after applying the edits. The app uses CPU raster display when OpenGL is unavailable. To choose CPU on startup, use `poetry run python -m astromosaic.ui --cpu-preview`.
 

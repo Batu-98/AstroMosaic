@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass
 from math import cos, isfinite, radians, sin
-from typing import Self, cast
+from typing import Literal, Self, cast
 
 import numpy as np
 from astropy.coordinates import BaseCoordinateFrame, SkyCoord
@@ -15,6 +15,9 @@ from astromosaic.core import Region
 
 ROUND_TRIP_TOLERANCE = 1e-4  # pixels
 _INVERSE_TOLERANCE = 1e-8  # pixels
+# FITS header rounding can move a nominal rim point slightly inside the ZEA disk.
+_ZEA_MIN_NATIVE_LATITUDE = -90.0 + 1e-4  # degrees
+SkyProjection = Literal["TAN", "ZEA"]
 
 
 def raster_pixels(
@@ -28,13 +31,17 @@ def raster_pixels(
     )
 
 
-def tan_output_wcs(
+def sky_output_wcs(
     center: tuple[float, float],
     size: tuple[int, int],
     scale_arcsec: float,
     rotation_deg: float,
     crop: Region,
+    *,
+    projection: SkyProjection,
 ) -> WCS:
+    if projection not in ("TAN", "ZEA"):
+        raise ValueError("Expected TAN or ZEA for the sky projection.")
     ra, dec = center
     scale = scale_arcsec / 3600
     if not (isfinite(ra) and -90 <= dec <= 90 and isfinite(scale) and scale > 0):
@@ -45,7 +52,7 @@ def tan_output_wcs(
     width, height = size
     angle = radians(rotation_deg % 360)
     wcs = WCS(naxis=2)
-    wcs.wcs.ctype = ["RA---TAN", "DEC--TAN"]
+    wcs.wcs.ctype = [f"RA---{projection}", f"DEC--{projection}"]
     wcs.wcs.radesys = "ICRS"
     wcs.wcs.crval = [ra % 360, dec]
     wcs.wcs.crpix = [(width + 1) / 2 - crop.x, (height + 1) / 2 - crop.y]
@@ -55,23 +62,52 @@ def tan_output_wcs(
     return wcs
 
 
+def tan_output_wcs(
+    center: tuple[float, float],
+    size: tuple[int, int],
+    scale_arcsec: float,
+    rotation_deg: float,
+    crop: Region,
+) -> WCS:
+    return sky_output_wcs(center, size, scale_arcsec, rotation_deg, crop, projection="TAN")
+
+
 @dataclass(frozen=True, slots=True)
 class PanelGeometry:
     wcs: WCS
     frame: BaseCoordinateFrame
 
+    @property
+    def _plain_zea(self) -> bool:
+        return bool(
+            self.wcs.wcs.ctype[self.wcs.wcs.lng][5:] == "ZEA" and not self.wcs.has_distortion
+        )
+
     def forward(self, x: NDArray[np.float64], y: NDArray[np.float64]) -> SkyCoord:
-        world = self.wcs.all_pix2world(x, y, 0)
+        if self._plain_zea:
+            xy = np.stack(np.broadcast_arrays(x, y), axis=-1)
+            result = self.wcs.wcs.p2s(xy.reshape(-1, 2), 0)
+            usable = (result["stat"] == 0) & (result["theta"] > _ZEA_MIN_NATIVE_LATITUDE)
+            result["world"][~usable] = np.nan
+            world = result["world"].T.reshape((2, *xy.shape[:-1]))
+        else:
+            world = self.wcs.all_pix2world(x, y, 0)
         return SkyCoord(
             world[self.wcs.wcs.lng], world[self.wcs.wcs.lat], unit="deg", frame=self.frame
         )
 
     def inverse(self, sky: SkyCoord) -> NDArray[np.float64]:
-        """Return pixel coordinates, marking failed SIP inversions as NaN."""
+        """Return pixel coordinates with NaN for failed or singular inversions."""
         sphere = sky.transform_to(self.frame).spherical
         world = np.empty((sky.size, 2), dtype=np.float64)
         world[:, self.wcs.wcs.lng] = sphere.lon.deg
         world[:, self.wcs.wcs.lat] = sphere.lat.deg
+        if self._plain_zea:
+            result = self.wcs.wcs.s2p(world, 0)
+            usable = (result["stat"] == 0) & (result["theta"] > _ZEA_MIN_NATIVE_LATITUDE)
+            pixels = result["pixcrd"]
+            pixels[~usable] = np.nan
+            return cast(NDArray[np.float64], pixels)
         try:
             pixels = self.wcs.all_world2pix(world, 0, tolerance=_INVERSE_TOLERANCE)
         except NoConvergence as error:
@@ -95,9 +131,16 @@ def read_panel_geometry(header: fits.Header, width: int, height: int) -> PanelGe
     if wcs.pixel_n_dim != 2 or wcs.world_n_dim != 2 or not wcs.is_celestial:
         raise ValueError("Expected a two-dimensional celestial WCS.")
     geometry = PanelGeometry(wcs, wcs_to_celestial_frame(wcs))
-    center = np.array([[(width - 1) / 2, (height - 1) / 2]], dtype=np.float64)
-    sky = geometry.forward(*center.T)
-    if not np.allclose(geometry.inverse(sky), center, rtol=0, atol=ROUND_TRIP_TOLERANCE):
+    points = np.array([[(width - 1) / 2, (height - 1) / 2]], dtype=np.float64)
+    if geometry._plain_zea:
+        # A crop can contain valid pixels even when its center is outside the disk.
+        inside = np.clip(wcs.wcs.crpix - 1, (0, 0), (width - 1, height - 1))
+        points = np.vstack((points, inside))
+    sky = geometry.forward(*points.T)
+    matches = np.isclose(geometry.inverse(sky), points, rtol=0, atol=ROUND_TRIP_TOLERANCE)
+    if not matches.all(axis=1).any():
+        if geometry._plain_zea:
+            raise ValueError("The ZEA WCS does not round-trip at an in-frame reference position.")
         raise ValueError("The celestial WCS does not round-trip at the panel center.")
     return geometry
 
@@ -135,4 +178,7 @@ class TileSky:
             & (np.abs(check_x + dx - self.x) <= ROUND_TRIP_TOLERANCE)
             & (np.abs(check_y + dy - self.y) <= ROUND_TRIP_TOLERANCE)
         )
+        if shift != (0.0, 0.0) and self.geometry._plain_zea:
+            # A fitted sample shift must not fill invalid output coordinates.
+            usable &= np.isfinite(self.sky.spherical.lat.deg)
         return source_x, source_y, usable

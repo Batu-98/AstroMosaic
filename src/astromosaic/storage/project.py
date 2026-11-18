@@ -14,7 +14,7 @@ from stat import S_ISREG
 from typing import Any, Literal, TypedDict
 from uuid import uuid4
 
-from astromosaic.astrometry.hints import PanelOptics, read_optics
+from astromosaic.astrometry.hints import PanelOptics, positive_header_number, read_optics
 from astromosaic.astrometry.solve import (
     SolveOptions,
     SolverAttempt,
@@ -25,7 +25,7 @@ from astromosaic.astrometry.solve import (
     write_solution,
 )
 from astromosaic.astrometry.solve_budget import SolveBudget, SolveBudgetExceeded
-from astromosaic.core import Region, SourceFingerprint
+from astromosaic.core import PanelDescriptor, Region, SourceFingerprint
 from astromosaic.core.job import JobContext
 from astromosaic.core.masks import (
     FOREGROUND,
@@ -36,10 +36,11 @@ from astromosaic.core.masks import (
     SourceMask,
     bounded_grid,
 )
-from astromosaic.geometry import read_panel_geometry, tan_output_wcs
+from astromosaic.geometry import read_panel_geometry
 from astromosaic.geometry.image import CompositionSpec, LayerPlacement
 from astromosaic.io import PanelSource, SkyMask, open_panel
 from astromosaic.io.atomic import atomic_binary_file
+from astromosaic.io.fits import optional_header_text
 from astromosaic.pipeline.foreground import (
     ForegroundAlignment,
     GroundOverlap,
@@ -65,7 +66,9 @@ from astromosaic.pipeline.mosaic import (
 )
 from astromosaic.pipeline.refinement import RefinementSpec, validate_refinement_inputs
 
-_SCHEMA_VERSION = 4
+_TAN_SCHEMA_VERSION = 4
+_PROJECTION_SCHEMA_VERSION = 5
+_BAND_SCHEMA_VERSION = 6
 _MAX_MANIFEST_BYTES = 4 * 1024**2
 type Layer = Literal["sky", "foreground", "composition"]
 type _GroundInputs = tuple[tuple[int, SourceMask], ...]
@@ -111,10 +114,22 @@ class ProjectPanel:
     source_mask: SourceMask | None = None
     include_sky: bool = True
     optics: PanelOptics = PanelOptics()
+    band_override: str | None = None
 
     def __post_init__(self) -> None:
         if self.sky_mask is not None and self.source_mask is not None:
             raise ValueError("Choose either an attached FITS mask or an edited sky mask.")
+        label = self.band_override
+        if label is not None and (
+            not isinstance(label, str)
+            or not label.isascii()
+            or not label.isprintable()
+            or label.strip() != label
+        ):
+            raise ValueError("Supply a nonempty band override using printable FITS characters.")
+
+    def sky_band(self, embedded: str | None, fallback: str | None) -> str | None:
+        return self.band_override or embedded or ((fallback or "").strip() or None)
 
     @property
     def foreground_tag(self) -> ForegroundSuggestion | None:
@@ -165,7 +180,7 @@ class MosaicProject:
     def validate(self) -> None:
         spec = self.render
         region = spec.output_region()
-        tan_output_wcs(spec.center, spec.size, spec.scale_arcsec, spec.rotation_deg, region)
+        spec.output_wcs()
         if any(not isfinite(panel.weight) or panel.weight <= 0 for panel in self.panels):
             raise ValueError("Panel weights must be positive and finite.")
         if self.composition is not None and self.composition.sky_crop_bottom >= region.height:
@@ -219,6 +234,7 @@ class _PanelInputs(TypedDict):
     assume_surface_brightness: bool
     sky_masks: dict[int, SkyMask]
     wcs_sidecars: dict[int, Path]
+    filter_overrides: dict[int, str]
     refinement: RefinementSpec | None
 
 
@@ -249,6 +265,10 @@ class PanelInspection:
     detail: str
     embedded_optics: PanelOptics = PanelOptics()
     camera_model: str | None = None
+    filter_name: str | None = None
+    descriptor: PanelDescriptor | None = None
+    telescope_model: str | None = None
+    embedded_scale_arcsec: float | None = None
 
 
 def inspect_project_panel(panel: ProjectPanel, context: JobContext) -> PanelInspection:
@@ -261,28 +281,33 @@ def inspect_project_panel(panel: ProjectPanel, context: JobContext) -> PanelInsp
     except (OSError, ValueError, OverflowError) as error:
         return PanelInspection("Unavailable", str(error))
 
-    optics = read_optics(header)
-    instrument = header.get("INSTRUME")
-    camera = instrument.strip() or None if isinstance(instrument, str) else None
+    info = PanelInspection(
+        "Missing",
+        "The input has no embedded celestial WCS.",
+        read_optics(header),
+        optional_header_text(header, "INSTRUME"),
+        descriptor.filter_name,
+        descriptor,
+        optional_header_text(header, "TELESCOP"),
+        positive_header_number(header.get("PIXSCALE")),
+    )
     if panel.wcs_sidecar is not None:
         try:
             _check_reference("WCS sidecar", panel.wcs_sidecar, context)
             with open_project_sky_panel(panel, 32 * 1024**2, context) as source:
                 _, provenance = load_solution(panel.wcs_sidecar.path, source)
         except (OSError, ValueError, OverflowError) as error:
-            return PanelInspection("Invalid", str(error), optics, camera)
-        return PanelInspection("Sidecar", provenance, optics, camera)
+            return replace(info, wcs_status="Invalid", detail=str(error))
+        return replace(info, wcs_status="Sidecar", detail=provenance)
 
     if not any(key in header for key in ("CTYPE1", "CTYPE2", "CRVAL1", "CRVAL2")):
-        return PanelInspection(
-            "Missing", "The input has no embedded celestial WCS.", optics, camera
-        )
+        return info
     try:
         read_panel_geometry(header, descriptor.width, descriptor.height)
     except (ValueError, OverflowError) as error:
-        return PanelInspection("Invalid", str(error), optics, camera)
-    return PanelInspection(
-        "Embedded", "Validated the image's embedded celestial WCS.", optics, camera
+        return replace(info, wcs_status="Invalid", detail=str(error))
+    return replace(
+        info, wcs_status="Embedded", detail="Validated the image's embedded celestial WCS."
     )
 
 
@@ -371,9 +396,45 @@ def solve_project_panel(
         return PanelSolveOutcome(index, attempts=attempts, error=str(error), budget=budget.report())
 
 
-def _verified_inputs(project: MosaicProject, context: JobContext) -> _PanelInputs:
+def project_sky_bands(project: MosaicProject, context: JobContext) -> dict[str, list[int]]:
+    """Read verified sky membership in saved panel order without opening pixel windows."""
+    bands: dict[str, list[int]] = {}
+    for index in project.sky_indices():
+        panel = project.panels[index]
+        try:
+            _check_reference("Source", panel.source, context)
+            with open_panel(
+                panel.source.path, max_tile_bytes=project.render.max_working_bytes
+            ) as source:
+                if source.descriptor.fingerprint != panel.source.fingerprint:
+                    raise ValueError("The source changed during band discovery.")
+                label = panel.sky_band(source.descriptor.filter_name, project.filter_name)
+            if label is None:
+                raise ValueError("Assign a sky band or supply an embedded FILTER.")
+        except (OSError, ValueError, OverflowError) as error:
+            raise ValueError(f"Panel {index + 1} ({panel.source.path.name}): {error}") from error
+        bands.setdefault(label, []).append(index)
+    if not bands:
+        raise ValueError("Include at least one panel with sky samples in the sky layer.")
+    return bands
+
+
+def _verified_inputs(
+    project: MosaicProject, context: JobContext, band: str | None = None
+) -> _PanelInputs:
     sky_masks = {}
-    panels = [project.panels[i] for i in project.sky_indices()]
+    filter_name = project.filter_name
+    if band is None:
+        indices = project.sky_indices()
+    else:
+        band = band.strip()
+        bands = project_sky_bands(project, context)
+        if band not in bands:
+            choices = ", ".join(bands)
+            raise ValueError(f"Unknown sky band {band!r}. Available bands are {choices}.")
+        indices = tuple(bands[band])
+        filter_name = band
+    panels = [project.panels[i] for i in indices]
     if not panels:
         raise ValueError("Include at least one panel with sky samples in the sky layer.")
     for index, panel in enumerate(panels):
@@ -384,10 +445,13 @@ def _verified_inputs(project: MosaicProject, context: JobContext) -> _PanelInput
     return {
         "paths": [panel.source.path for panel in panels],
         "weights": [panel.weight for panel in panels],
-        "filter_name": project.filter_name,
+        "filter_name": filter_name,
         "assume_surface_brightness": project.assume_surface_brightness,
         "sky_masks": sky_masks,
         "wcs_sidecars": {i: p.wcs_sidecar.path for i, p in enumerate(panels) if p.wcs_sidecar},
+        "filter_overrides": {
+            i: p.band_override for i, p in enumerate(panels) if p.band_override is not None
+        },
         "refinement": project.refinement,
     }
 
@@ -401,13 +465,17 @@ class SkyPreflight:
 
 
 def validate_project_sky(
-    project: MosaicProject, context: JobContext, destination: Path | None = None
+    project: MosaicProject,
+    context: JobContext,
+    destination: Path | None = None,
+    *,
+    band: str | None = None,
 ) -> SkyPreflight:
     """Check the saved sky inputs and render settings without fitting or writing pixels."""
     project.validate()
     if destination is not None and not destination.parent.is_dir():
         raise FileNotFoundError(f"The output directory does not exist: {destination.parent}")
-    inputs = _verified_inputs(project, context)
+    inputs = _verified_inputs(project, context, band)
     inputs["refinement"] = None
     with _prepare_mosaic(
         spec=project.render, destination=destination, context=context, **inputs
@@ -418,12 +486,14 @@ def validate_project_sky(
         return SkyPreflight(len(sky.panels), width, height, sky.channels)
 
 
-def render_project(project: MosaicProject, destination: Path, context: JobContext) -> MosaicResult:
+def render_project(
+    project: MosaicProject, destination: Path, context: JobContext, *, band: str | None = None
+) -> MosaicResult:
     return render_mosaic(
         destination=destination,
         spec=project.render,
         context=context,
-        **_verified_inputs(project, context),
+        **_verified_inputs(project, context, band),
     )
 
 
@@ -431,12 +501,14 @@ def preview_project(
     project: MosaicProject,
     context: JobContext,
     on_proxy: Callable[[PreviewFrame], None] | None = None,
+    *,
+    band: str | None = None,
 ) -> PreviewFrame:
     return preview_mosaic(
         spec=project.render,
         context=context,
         on_proxy=on_proxy,
-        **_verified_inputs(project, context),
+        **_verified_inputs(project, context, band),
     )
 
 
@@ -555,9 +627,13 @@ def preview_project_layer(
     layer: Layer,
     context: JobContext,
     on_proxy: Callable[[PreviewFrame], None] | None = None,
+    *,
+    band: str | None = None,
 ) -> PreviewFrame:
     if layer == "sky":
-        return preview_project(project, context, on_proxy)
+        return preview_project(project, context, on_proxy, band=band)
+    if band is not None:
+        raise ValueError("A band selection requires the sky layer.")
     with _project_layer(project, layer, context) as raster:
         return _preview_raster(raster, context, on_proxy)
 
@@ -567,9 +643,13 @@ def render_project_layer(
     layer: Layer,
     destination: Path,
     context: JobContext,
+    *,
+    band: str | None = None,
 ) -> MosaicResult:
     if layer == "sky":
-        return render_project(project, destination, context)
+        return render_project(project, destination, context, band=band)
+    if band is not None:
+        raise ValueError("A band selection requires the sky layer.")
     if destination.exists() or destination.is_symlink():
         raise FileExistsError(f"The output file already exists: {destination}")
     with _project_layer(project, layer, context) as raster:
@@ -604,10 +684,18 @@ def save_project(path: Path, project: MosaicProject, *, replace_existing: bool =
         raise ValueError("Choose a project filename separate from the panel files and attachments.")
     project.validate()
     directory = path.absolute().parent
+    render = asdict(project.render)
+    schema_version = _PROJECTION_SCHEMA_VERSION
+    if project.render.projection == "TAN":
+        schema_version = _TAN_SCHEMA_VERSION
+    if any(panel.band_override is not None for panel in project.panels):
+        schema_version = _BAND_SCHEMA_VERSION
+    if schema_version == _TAN_SCHEMA_VERSION:
+        del render["projection"]
     data = {
-        "version": _SCHEMA_VERSION,
+        "version": schema_version,
         "application_version": version("astromosaic"),
-        "render": asdict(project.render),
+        "render": render,
         "filter_name": project.filter_name,
         "assume_surface_brightness": project.assume_surface_brightness,
         "refinement": asdict(project.refinement) if project.refinement else None,
@@ -624,6 +712,11 @@ def save_project(path: Path, project: MosaicProject, *, replace_existing: bool =
                 "source_mask": _encode_mask(panel.source_mask),
                 "include_sky": panel.include_sky,
                 "optics": asdict(panel.optics),
+                **(
+                    {"band_override": panel.band_override}
+                    if schema_version >= _BAND_SCHEMA_VERSION
+                    else {}
+                ),
             }
             for panel in project.panels
         ],
@@ -679,8 +772,13 @@ def _decode_reference(value: object, directory: Path) -> FileReference:
     )
 
 
-def _decode_render(value: object) -> RenderSpec:
+def _decode_render(value: object, schema_version: int) -> RenderSpec:
     render = _object(value)
+    projection = render.get("projection", "TAN")
+    if schema_version >= _PROJECTION_SCHEMA_VERSION:
+        projection = render["projection"]
+    elif projection != "TAN":
+        raise ValueError("A non-TAN grid requires project manifest version 5.")
     ra, dec = _pair(render["center"])
     width, height = _pair(render["size"])
     crop = None
@@ -695,6 +793,7 @@ def _decode_render(value: object) -> RenderSpec:
         _integer(render["tile_size"]),
         _integer(render["max_working_bytes"]),
         _integer(render["max_output_bytes"]),
+        projection=projection,
     )
 
 
@@ -803,6 +902,9 @@ def _decode_panel(value: object, directory: Path, schema_version: int) -> Projec
     if not isinstance(include_sky, bool):
         raise ValueError("Invalid sky-layer selection.")
     optics = _object(record["optics"]) if schema_version >= 4 else {}
+    band_override = record["band_override"] if schema_version >= _BAND_SCHEMA_VERSION else None
+    if schema_version < _BAND_SCHEMA_VERSION and record.get("band_override") is not None:
+        raise ValueError("Sky band overrides require project manifest version 6.")
 
     def optical_value(key: str) -> float | None:
         value = optics.get(key)
@@ -822,6 +924,7 @@ def _decode_panel(value: object, directory: Path, schema_version: int) -> Projec
             optical_value("pixel_size_x_um"),
             optical_value("pixel_size_y_um"),
         ),
+        band_override,
     )
 
 
@@ -833,7 +936,7 @@ def load_project(path: Path) -> MosaicProject:
     try:
         data = _object(json.loads(payload.decode("utf-8")))
         schema_version = _integer(data["version"])
-        if not 1 <= schema_version <= _SCHEMA_VERSION:
+        if not 1 <= schema_version <= _BAND_SCHEMA_VERSION:
             raise ValueError("Unsupported project manifest version.")
         if not isinstance(data["panels"], list):
             raise ValueError("Expected an ordered panel list.")
@@ -847,7 +950,7 @@ def load_project(path: Path) -> MosaicProject:
                 _decode_panel(record, path.absolute().parent, schema_version)
                 for record in data["panels"]
             ),
-            _decode_render(data["render"]),
+            _decode_render(data["render"], schema_version),
             filter_name,
             assume,
             _decode_refinement(data["refinement"]),

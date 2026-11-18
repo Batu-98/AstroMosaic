@@ -1,4 +1,4 @@
-"""Render an ICRS TAN mosaic with a bounded, synchronous tile loop."""
+"""Render an ICRS sky mosaic with a bounded, synchronous tile loop."""
 
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from contextlib import ExitStack, contextmanager
@@ -21,13 +21,14 @@ from astromosaic.core.job import JobContext as JobContext
 from astromosaic.core.job import MosaicCancelled as MosaicCancelled
 from astromosaic.geometry import (
     PanelGeometry,
+    SkyProjection,
     TileSky,
     raster_pixels,
     read_panel_geometry,
-    tan_output_wcs,
+    sky_output_wcs,
 )
 from astromosaic.geometry.footprint import PixelBounds, raster_bounds, tan_footprint
-from astromosaic.io import TIFF_SUFFIXES, PanelSource, SkyMask, open_panel
+from astromosaic.io import TIFF_SUFFIXES, XISF_SUFFIX, PanelSource, SkyMask, open_panel
 from astromosaic.io.fits_export import open_fits_mosaic
 from astromosaic.photometry import PanelCorrection
 from astromosaic.pipeline.refinement import RefinementReport, RefinementSpec, refine_panels
@@ -55,6 +56,7 @@ class RenderSpec:
     tile_size: int = DEFAULT_TILE_SIZE
     max_working_bytes: int = DEFAULT_WORKING_BYTES
     max_output_bytes: int = DEFAULT_OUTPUT_BYTES
+    projection: SkyProjection = "TAN"
 
     def output_region(self) -> Region:
         width, height = self.size
@@ -67,6 +69,16 @@ class RenderSpec:
         if min(self.tile_size, self.max_working_bytes, self.max_output_bytes) < 1:
             raise ValueError("Tile size and resource budgets must be positive.")
         return crop
+
+    def output_wcs(self) -> WCS:
+        return sky_output_wcs(
+            self.center,
+            self.size,
+            self.scale_arcsec,
+            self.rotation_deg,
+            self.output_region(),
+            projection=self.projection,
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -129,11 +141,17 @@ def _set_calibration(
     sources: Sequence[PanelSource],
     declared_filter: str | None,
     assume_brightness: bool,
+    filter_overrides: Mapping[int, str] | None = None,
 ) -> None:
     descriptors = [source.descriptor for source in sources]
     declared_filter = declared_filter.strip() if declared_filter is not None else None
-    band = declared_filter or descriptors[0].filter_name
-    if not band or any((panel.filter_name or declared_filter) != band for panel in descriptors):
+    overrides = filter_overrides or {}
+    filters = [
+        overrides.get(index, panel.filter_name) or declared_filter
+        for index, panel in enumerate(descriptors)
+    ]
+    band = declared_filter or filters[0]
+    if not band or any(label != band for label in filters):
         raise ValueError("Expected a common FILTER. Use --filter to declare missing metadata.")
 
     labels = [panel.unit for panel in descriptors if panel.unit is not None]
@@ -159,11 +177,22 @@ def _set_calibration(
 
 
 def _export_header(
-    target: WCS, panels: Sequence[_Panel], declared_filter: str | None, assume_brightness: bool
+    target: WCS,
+    panels: Sequence[_Panel],
+    declared_filter: str | None,
+    assume_brightness: bool,
+    filter_overrides: Mapping[int, str],
 ) -> fits.Header:
     header = target.to_header()
-    _set_calibration(header, [panel.source for panel in panels], declared_filter, assume_brightness)
-    header.add_history(f"AstroMosaic {version('astromosaic')}: CPU ICRS TAN reprojection.")
+    _set_calibration(
+        header,
+        [panel.source for panel in panels],
+        declared_filter,
+        assume_brightness,
+        filter_overrides,
+    )
+    projection = target.wcs.ctype[0][5:]
+    header.add_history(f"AstroMosaic {version('astromosaic')}: CPU ICRS {projection} reprojection.")
     header.add_history("Bilinear valid support; normalized panel weights; linear float32.")
     for index, panel in enumerate(panels, start=1):
         fingerprint = panel.source.descriptor.fingerprint
@@ -171,6 +200,11 @@ def _export_header(
             f"Input {index}: {fingerprint.size_bytes} bytes; weight {panel.weight:g}"
         )
         header.add_history(f"Input {index}: mtime_ns {fingerprint.modified_ns}; {panel.wcs_origin}")
+        if index - 1 in filter_overrides:
+            original = panel.source.descriptor.filter_name or "(missing)"
+            header.add_history(
+                f"Input {index}: FILTER {original} assigned as {filter_overrides[index - 1]}."
+            )
         mask = panel.source.sky_mask_fingerprint
         if isinstance(mask, SourceFingerprint):
             header.add_history(
@@ -183,7 +217,7 @@ def _export_header(
         if correction is not None:
             dx, dy = correction.shift
             offset, gradient_x, gradient_y = correction.background
-            header.add_history(f"Input {index}: TAN shift ({dx:.8g}, {dy:.8g}) px")
+            header.add_history(f"Input {index}: {projection} shift ({dx:.8g}, {dy:.8g}) px")
             header.add_history(f"Input {index}: relative gain {correction.gain:.8g}")
             header.add_history(
                 f"Input {index}: background {offset:.8g}, {gradient_x:.8g}, {gradient_y:.8g}"
@@ -406,6 +440,15 @@ class _PreparedMosaic:
         )
 
 
+def _output_format(path: Path) -> str:
+    suffix = path.suffix.lower()
+    if suffix in TIFF_SUFFIXES:
+        return "TIFF"
+    if suffix == XISF_SUFFIX:
+        return "XISF"
+    return "FITS"
+
+
 @contextmanager
 def _prepare_mosaic(
     paths: Sequence[Path],
@@ -419,23 +462,25 @@ def _prepare_mosaic(
     wcs_sidecars: Mapping[int, Path] | None,
     refinement: RefinementSpec | None,
     context: JobContext,
+    filter_overrides: Mapping[int, str] | None = None,
 ) -> Iterator[_PreparedMosaic]:
     if not paths:
-        raise ValueError("Supply at least one FITS or TIFF panel.")
+        raise ValueError("Supply at least one FITS, TIFF, or XISF panel.")
     weights = [1.0] * len(paths) if weights is None else weights
     if len(weights) != len(paths) or any(not isfinite(w) or w <= 0 for w in weights):
         raise ValueError("Supply one positive finite weight per input panel.")
     sky_masks = {} if sky_masks is None else sky_masks
     wcs_sidecars = {} if wcs_sidecars is None else wcs_sidecars
+    filter_overrides = {} if filter_overrides is None else filter_overrides
     if any(index not in range(len(paths)) for index in (*sky_masks, *wcs_sidecars)):
         raise ValueError("Sky mask and WCS sidecar indices must refer to input panels.")
+    if any(index not in range(len(paths)) for index in filter_overrides):
+        raise ValueError("Filter override indices must refer to input panels.")
 
     crop = spec.output_region()
-    output = tan_output_wcs(spec.center, spec.size, spec.scale_arcsec, spec.rotation_deg, crop)
-    target = PanelGeometry(output, ICRS())
+    target = PanelGeometry(spec.output_wcs(), ICRS())
     total = crop.width * crop.height
-    is_tiff = destination is not None and destination.suffix.lower() in TIFF_SUFFIXES
-    format_name = "TIFF" if is_tiff else "FITS"
+    format_name = _output_format(destination) if destination is not None else None
     if destination is not None:
         if total * 5 > spec.max_output_bytes:
             raise ValueError(f"The {format_name} mosaic exceeds the configured output byte limit.")
@@ -455,11 +500,12 @@ def _prepare_mosaic(
                     )
                 )
                 descriptor = source.descriptor
-                provenance = (
-                    "TIFF description WCS"
-                    if descriptor.wcs_provenance == "tiff-description"
-                    else "primary WCS"
-                )
+                provenance = {
+                    "tiff-description": "TIFF description WCS",
+                    "xisf-fits-keywords": "XISF FITS keywords",
+                    None: "primary WCS",
+                    "primary-header": "primary WCS",
+                }[descriptor.wcs_provenance]
                 if index in wcs_sidecars:
                     from astromosaic.astrometry.solve import load_solution
 
@@ -477,14 +523,16 @@ def _prepare_mosaic(
             raise ValueError("Supply either all mono or all RGB panels.")
         channels = 3 if layout == "rgb" else 1
         if destination is not None:
-            if channels == 3 and not is_tiff:
-                raise ValueError("RGB mosaics require TIFF output.")
+            if channels == 3 and format_name == "FITS":
+                raise ValueError("RGB mosaics require TIFF or XISF output.")
             if total * (4 * channels + 1) > spec.max_output_bytes:
                 raise ValueError(
                     f"The {format_name} mosaic exceeds the configured output byte limit."
                 )
 
-        header = _export_header(output, panels, filter_name, assume_surface_brightness)
+        header = _export_header(
+            target.wcs, panels, filter_name, assume_surface_brightness, filter_overrides
+        )
         if refinement is not None:
             report = refine_panels(
                 [(panel.source, panel.geometry) for panel in panels],
@@ -497,14 +545,16 @@ def _prepare_mosaic(
                 replace(panel, correction=correction)
                 for panel, correction in zip(panels, report.corrections, strict=True)
             ]
-            header = _export_header(output, panels, filter_name, assume_surface_brightness)
+            header = _export_header(
+                target.wcs, panels, filter_name, assume_surface_brightness, filter_overrides
+            )
             if report.background is not None:
                 header.add_history(
                     f"Anchored relative refinement: {report.background.model} background."
                 )
         size = crop.width, crop.height
         footprint_bytes = 0
-        if _footprint_reservation(len(panels), spec.max_working_bytes):
+        if spec.projection == "TAN" and _footprint_reservation(len(panels), spec.max_working_bytes):
             for index, panel in enumerate(panels):
                 context.check_cancelled()
                 descriptor = panel.source.descriptor
@@ -530,6 +580,7 @@ def render_mosaic(
     wcs_sidecars: Mapping[int, Path] | None = None,
     refinement: RefinementSpec | None = None,
     context: JobContext = DEFAULT_JOB_CONTEXT,
+    filter_overrides: Mapping[int, str] | None = None,
 ) -> MosaicResult:
     """Reproject original linear samples and publish the finished mosaic on success."""
     with _prepare_mosaic(
@@ -543,6 +594,7 @@ def render_mosaic(
         wcs_sidecars=wcs_sidecars,
         refinement=refinement,
         context=context,
+        filter_overrides=filter_overrides,
     ) as mosaic:
         return _write_raster(mosaic.raster(), destination, context)
 
@@ -555,26 +607,33 @@ def _write_raster(mosaic: _RasterPlan, destination: Path, context: JobContext) -
     budget = _WorkingBudget(mosaic.spec.max_working_bytes)
     covered = completed = tiles = rejected = common = 0
     context.check_cancelled()
-    if destination.suffix.lower() in TIFF_SUFFIXES:
-        from astromosaic.io.tiff_export import open_tiff_mosaic
-
-        writer_context = open_tiff_mosaic(
+    format_name = _output_format(destination)
+    if format_name == "FITS":
+        if mosaic.channels != 1:
+            raise ValueError("RGB mosaics require TIFF or XISF output.")
+        writer_context = open_fits_mosaic(
             destination,
             width,
             height,
-            mosaic.channels,
             mosaic.header,
             max_bytes,
             layers=layers,
             publish_check=context.check_cancelled,
         )
     else:
-        if mosaic.channels != 1:
-            raise ValueError("RGB mosaics require TIFF output.")
-        writer_context = open_fits_mosaic(
+        if format_name == "TIFF":
+            from astromosaic.io.tiff_export import open_tiff_mosaic
+
+            open_color_mosaic = open_tiff_mosaic
+        else:
+            from astromosaic.io.xisf_export import open_xisf_mosaic
+
+            open_color_mosaic = open_xisf_mosaic
+        writer_context = open_color_mosaic(
             destination,
             width,
             height,
+            mosaic.channels,
             mosaic.header,
             max_bytes,
             layers=layers,
@@ -681,6 +740,7 @@ def preview_mosaic(
     refinement: RefinementSpec | None = None,
     context: JobContext = DEFAULT_JOB_CONTEXT,
     on_proxy: Callable[[PreviewFrame], None] | None = None,
+    filter_overrides: Mapping[int, str] | None = None,
 ) -> PreviewFrame:
     """Sample the export grid at preview raster centers without opening an output file."""
     with _prepare_mosaic(
@@ -694,5 +754,6 @@ def preview_mosaic(
         wcs_sidecars=wcs_sidecars,
         refinement=refinement,
         context=context,
+        filter_overrides=filter_overrides,
     ) as mosaic:
         return _preview_raster(mosaic.raster(), context, on_proxy)

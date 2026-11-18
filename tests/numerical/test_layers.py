@@ -9,6 +9,7 @@ import tifffile
 from astropy.io import fits
 from numpy.typing import NDArray
 from scipy.ndimage import gaussian_filter
+from xisf_reference import read_xisf_attachments
 
 from astromosaic.core import Region, Tile
 from astromosaic.core.job import JobContext, MosaicCancelled
@@ -102,13 +103,21 @@ def test_layer_exports_and_composition_roundtrip(tmp_path: Path, rgb: bool) -> N
         foreground.tile.pixels[foreground.tile.valid], expected[foreground.tile.valid]
     )
 
+    sky = preview_project_layer(project, "sky", context)
     ext = ".tiff" if rgb else ".fits"
     for layer in ("foreground", "sky"):
         path = tmp_path / (layer + ext)
         render_project_layer(project, layer, path, context)
         with open_panel(path) as source:
             assert (source.descriptor.wcs_provenance is not None) == (layer == "sky")
-    sky = preview_project_layer(project, "sky", context)
+        xisf_path = path.with_suffix(".xisf")
+        render_project_layer(project, layer, xisf_path, context)
+        (pixels, coverage), _ = read_xisf_attachments(xisf_path)
+        reference = foreground if layer == "foreground" else sky
+        np.testing.assert_array_equal(pixels, reference.tile.pixels)
+        np.testing.assert_array_equal(coverage, reference.tile.valid)
+        with open_panel(xisf_path) as source:
+            assert (source.descriptor.wcs_provenance is not None) == (layer == "sky")
 
     proposal = propose_project_composition(project, context)
     assert proposal.reference_panel == 0
@@ -158,6 +167,15 @@ def test_layer_exports_and_composition_roundtrip(tmp_path: Path, rgb: bool) -> N
     np.testing.assert_array_equal(frame.tile.valid, coverage)
     with open_panel(path) as source:
         assert source.descriptor.wcs_provenance is None
+        np.testing.assert_array_equal(source.read_tile(frame.tile.region).valid, coverage)
+    xisf_path = path.with_suffix(".xisf")
+    xisf_summary = render_project_layer(reopened, "composition", xisf_path, context)
+    (xisf_pixels, xisf_coverage, xisf_layers), _ = read_xisf_attachments(xisf_path)
+    assert xisf_summary.common_pixels == summary.common_pixels
+    np.testing.assert_array_equal(xisf_pixels, frame.tile.pixels)
+    np.testing.assert_array_equal(xisf_coverage, coverage)
+    np.testing.assert_array_equal(xisf_layers, layers)
+    with open_panel(xisf_path) as source:
         np.testing.assert_array_equal(source.read_tile(frame.tile.region).valid, coverage)
     assert [panel.source.path.read_bytes() for panel in project.panels] == original
 

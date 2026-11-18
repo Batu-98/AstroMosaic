@@ -17,6 +17,7 @@ from numpy.typing import NDArray
 
 from astromosaic.core import Region
 from astromosaic.geometry import tan_output_wcs
+from astromosaic.io import open_panel
 
 SIZE = (64, 48)
 CENTER = (359.999, 20.0)
@@ -51,9 +52,14 @@ def run_cli(executable: Path, cwd: Path, *args: str) -> dict[str, object]:
 
 
 def check_mosaic(
-    cli: Path, cwd: Path, source: Path, expected: NDArray[np.float32], target: WCS
-) -> None:
-    destination = cwd / f"{source.stem}-export{source.suffix}"
+    cli: Path,
+    cwd: Path,
+    source: Path,
+    expected: NDArray[np.float32],
+    target: WCS,
+    output_suffix: str | None = None,
+) -> Path:
+    destination = cwd / f"{source.stem}-export{output_suffix or source.suffix}"
     width, height = SIZE
     result = run_cli(
         cli,
@@ -73,6 +79,7 @@ def check_mosaic(
         "13",
     )
     check_raster(destination, expected, target, result)
+    return destination
 
 
 def check_raster(
@@ -88,6 +95,12 @@ def check_raster(
             pixels = hdus[0].read()
             coverage = hdus["COVERAGE"].read()
         reopened = WCS(fits.getheader(destination))
+    elif destination.suffix == ".xisf":
+        with open_panel(destination) as source:
+            tile = source.read_tile(Region(0, 0, width, height))
+            pixels, coverage = tile.pixels, tile.valid
+            assert source.descriptor.filter_name == "L" and source.descriptor.unit == "MJy/sr"
+            reopened = WCS(source.header)
     else:
         with tifffile.TiffFile(destination) as tiff:
             page = tiff.pages[0]
@@ -111,7 +124,13 @@ def check_raster(
 
 
 def check_project(
-    cli: Path, cwd: Path, source: Path, expected: NDArray[np.float32], target: WCS
+    cli: Path,
+    cwd: Path,
+    source: Path,
+    expected: NDArray[np.float32],
+    target: WCS,
+    *,
+    projection: str = "TAN",
 ) -> None:
     project = source.with_suffix(".astromosaic")
     output = source.with_name(f"{source.stem} mosaic{source.suffix}")
@@ -130,10 +149,13 @@ def check_project(
         *map(str, SIZE),
         "--scale",
         str(SCALE),
+        *(("--projection", projection) if projection != "TAN" else ()),
         "--json",
     )
     assert created["schema_version"] == 1 and created["status"] == "ok"
     assert project.is_file()
+    saved = json.loads(project.read_text(encoding="utf-8"))
+    assert saved["render"].get("projection", "TAN") == projection
     validated = run_cli(cli, cwd, "project", "validate", str(project), "-o", str(output), "--json")
     assert validated["schema_version"] == 1 and validated["status"] == "ok"
     assert (validated["width"], validated["height"], validated["channels"]) == (*SIZE, channels)
@@ -142,6 +164,44 @@ def check_project(
     assert exported["schema_version"] == 1 and exported["status"] == "ok"
     assert exported["layer"] == "sky"
     check_raster(output, expected, target, exported)
+
+
+def check_bands(
+    cli: Path, cwd: Path, source: Path, expected: NDArray[np.float32], target: WCS
+) -> None:
+    second = cwd / "O III panel.fits"
+    shifted = expected + np.float32(40)
+    fits.writeto(second, shifted, fits.getheader(source))
+    manifest = cwd / "Bands.astromosaic"
+    created = run_cli(
+        cli,
+        cwd,
+        "project",
+        "create",
+        str(source),
+        str(second),
+        "-o",
+        str(manifest),
+        "--panel-band",
+        "2=O III",
+        "--center",
+        *map(str, CENTER),
+        "--size",
+        *map(str, SIZE),
+        "--scale",
+        str(SCALE),
+        "--json",
+    )
+    assert created["panels"] == 2
+    listed = run_cli(cli, cwd, "project", "bands", str(manifest), "--json")
+    assert listed["bands"] == [{"band": "L", "panels": [1]}, {"band": "O III", "panels": [2]}]
+    output = cwd / "O III sky.fits"
+    selected = ("--band", "O III", "-o", str(output), "--json")
+    validated = run_cli(cli, cwd, "project", "validate", str(manifest), *selected)
+    assert validated["band"] == "O III" and validated["panels"] == 1
+    result = run_cli(cli, cwd, "project", "export", str(manifest), *selected)
+    check_raster(output, shifted, target, result)
+    assert result["band"] == "O III" and fits.getheader(output)["FILTER"] == "O III"
 
 
 def check_bundle(bundle: Path) -> None:
@@ -162,6 +222,13 @@ def check_bundle(bundle: Path) -> None:
         fits.writeto(path, field, header)
         check_mosaic(cli, cwd, path, field.astype(np.float32), target)
         check_project(cli, cwd, path, field.astype(np.float32), target)
+        check_bands(cli, cwd, path, field.astype(np.float32), target)
+
+        zea_header = header.copy()
+        zea_header["CTYPE1"], zea_header["CTYPE2"] = "RA---ZEA", "DEC--ZEA"
+        zea = cwd / "equal area.fits"
+        fits.writeto(zea, field, zea_header)
+        check_project(cli, cwd, zea, field.astype(np.float32), WCS(zea_header), projection="ZEA")
 
         rgb = (np.stack((field, 2 * field, -field), axis=-1) / 4).astype(np.float32)
         rgb[12:17, 18:21] = np.nan
@@ -186,8 +253,12 @@ def check_bundle(bundle: Path) -> None:
             check_mosaic(cli, cwd, path, samples.astype(np.float32), target)
             if codec == "deflate":
                 check_project(cli, cwd, path, rgb, target)
+                xisf = check_mosaic(cli, cwd, path, rgb, target, output_suffix=".xisf")
+                check_project(cli, cwd, xisf, rgb, target)
+                report = run_cli(cli, cwd, "solve", str(xisf))
+                assert report["stage"] == "existing-wcs"
         print(
-            "Passed frozen worker spawning, FITS/TIFF exports, and FITS and RGB TIFF project checks."
+            "Passed frozen worker spawning, FITS/TIFF/XISF exports, ZEA, and saved band selection."
         )
 
 

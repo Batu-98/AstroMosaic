@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING, TextIO
 
 from astromosaic.cli.render_options import (
     add_render_options,
+    panel_assignments,
     panel_files,
     render_options,
     with_render_reporting,
@@ -32,20 +33,29 @@ _REPORT_VERSION = 1
 def add_project_commands(parser: ArgumentParser) -> None:
     commands = parser.add_subparsers(dest="project_command", required=True)
     create = commands.add_parser("create", help="Save a new sky project.")
-    create.add_argument("panels", nargs="+", type=Path, help="Linear FITS or TIFF input panels.")
+    create.add_argument("panels", nargs="+", type=Path, help="Linear FITS, TIFF, or XISF panels.")
     create.add_argument(
         "-o", "--output", required=True, type=Path, help="A new .astromosaic project path."
     )
     add_render_options(create)
+    create.add_argument(
+        "--panel-band",
+        action="append",
+        default=[],
+        metavar="PANEL=FILTER",
+        help="Save an explicit filter label for the given one-based panel number.",
+    )
+    bands = commands.add_parser("bands", help="List the bands and sky panels in a saved project.")
+    bands.add_argument("path", type=Path, help="Saved .astromosaic project.")
     validate = commands.add_parser("validate", help="Check a saved project's sky layer.")
     validate.add_argument("path", type=Path, help="Saved .astromosaic project.")
     validate.add_argument(
-        "-o", "--output", type=Path, help="Check a proposed FITS or TIFF output path."
+        "-o", "--output", type=Path, help="Check a proposed FITS, TIFF, or XISF output path."
     )
     export = commands.add_parser("export", help="Render a saved project layer.")
     export.add_argument("path", type=Path, help="Saved .astromosaic project.")
     export.add_argument(
-        "-o", "--output", required=True, type=Path, help="A new FITS (mono) or TIFF output path."
+        "-o", "--output", required=True, type=Path, help="A new FITS (mono), TIFF, or XISF path."
     )
     export.add_argument(
         "--layer",
@@ -54,7 +64,9 @@ def add_project_commands(parser: ArgumentParser) -> None:
         help="Saved layer to render (default: sky).",
     )
     export.add_argument("--progress", action="store_true", help="Report tile progress to stderr.")
-    for command in (create, validate, export):
+    for command in (validate, export):
+        command.add_argument("--band", metavar="FILTER", help="Select one saved sky band.")
+    for command in (create, bands, validate, export):
         command.add_argument("--json", action="store_true", help="Emit a versioned JSON result.")
 
 
@@ -75,6 +87,7 @@ def _create(arguments: Namespace, context: JobContext) -> int:
         raise ValueError("Supply one positive finite weight per input panel.")
     masks = panel_files(arguments.sky_mask, len(paths))
     solutions = panel_files(arguments.wcs, len(paths))
+    bands = panel_assignments(arguments.panel_band, len(paths), "FILTER")
     panels = []
     for index, (path, weight) in enumerate(zip(paths, weights, strict=True)):
         context.check_cancelled()
@@ -84,6 +97,7 @@ def _create(arguments: Namespace, context: JobContext) -> int:
             sky_mask=FileReference.capture(masks[index]) if index in masks else None,
             wcs_sidecar=FileReference.capture(solutions[index]) if index in solutions else None,
             foreground_override="sky-only",
+            band_override=bands[index].strip() if index in bands else None,
         )
         with open_project_sky_panel(panel, spec.max_working_bytes, context) as source:
             if panel.wcs_sidecar is not None:
@@ -174,6 +188,9 @@ def _export(arguments: Namespace, result: dict[str, object], context: JobContext
     from astromosaic.storage.project import load_project, render_project_layer
 
     result.update(layer=arguments.layer, output=str(arguments.output))
+    band = arguments.band.strip() if arguments.band is not None else None
+    if band is not None:
+        result["band"] = band
     reporter = _render_progress_event if arguments.json else None
     with _export_context() if context is None else nullcontext(context) as job:
         job = with_render_reporting(job, arguments.progress, reporter)
@@ -181,12 +198,15 @@ def _export(arguments: Namespace, result: dict[str, object], context: JobContext
         project = load_project(arguments.path)
         job.check_cancelled()
         try:
-            mosaic = render_project_layer(project, arguments.layer, arguments.output, job)
+            mosaic = render_project_layer(
+                project, arguments.layer, arguments.output, job, band=band
+            )
         except RefinementRejected as error:
             result["refinement"] = asdict(error.report)
             raise
     result.update(asdict(mosaic))
-    return f"Exported {arguments.layer} layer with {mosaic.width} x {mosaic.height} pixels."
+    label = f"sky band {band!r}" if band is not None else f"{arguments.layer} layer"
+    return f"Exported {label} with {mosaic.width} x {mosaic.height} pixels."
 
 
 def run_project(arguments: Namespace, *, context: JobContext | None = None) -> int:
@@ -209,12 +229,28 @@ def run_project(arguments: Namespace, *, context: JobContext | None = None) -> i
                 count = _create(arguments, job)
                 result["panels"] = count
                 message = f"Created project with {count} panel(s)."
+            elif action == "bands":
+                from astromosaic.storage.project import load_project, project_sky_bands
+
+                job.check_cancelled()
+                bands = project_sky_bands(load_project(path), job)
+                job.check_cancelled()
+                result["bands"] = [
+                    {"band": label, "panels": [index + 1 for index in indices]}
+                    for label, indices in bands.items()
+                ]
+                message = "\n".join(
+                    f"{label} ({len(indices)} panels)" for label, indices in bands.items()
+                )
             elif action == "validate":
                 from astromosaic.storage.project import load_project, validate_project_sky
 
                 job.check_cancelled()
                 project = load_project(path)
-                sky = validate_project_sky(project, job, arguments.output)
+                band = arguments.band.strip() if arguments.band is not None else None
+                if band is not None:
+                    result["band"] = band
+                sky = validate_project_sky(project, job, arguments.output, band=band)
                 job.check_cancelled()
                 result.update(
                     layer="sky",
