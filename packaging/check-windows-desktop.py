@@ -251,6 +251,51 @@ def check_project(window: ProjectWindow, directory: Path, backend: str) -> dict[
     return covered
 
 
+def check_commands(window: ProjectWindow, directory: Path) -> dict[str, object]:
+    manifest = directory / "Mixed.astromosaic"
+    window._set_project(load_project(manifest), manifest)
+    panel = window.command_panel
+    window.command_panel_action.trigger()
+    assert window.command_panel_action.isChecked()
+    assert str(directory) in panel.directory_label.text()
+
+    def start(command: str) -> None:
+        panel.entry.setText(command)
+        panel.run_button.click()
+        assert panel.is_running and not window.start_button.isEnabled()
+
+    def result() -> dict[str, object]:
+        wait_for(window, lambda: not panel.is_running)
+        lines = panel.output.toPlainText().splitlines()
+        return dict(json.loads(next(line for line in reversed(lines) if line.startswith("{"))))
+
+    start("smoke --spawn")
+    assert result()["spawned"] is True
+
+    start('project validate "Mixed.astromosaic" --json')
+    checked = result()
+    assert checked["schema_version"] == 1 and checked["status"] == "ok"
+    assert checked["panels"] == 1 and checked["width"] == 96
+
+    cancelled = directory / "command interrupted.fits"
+    slow = 'project export "Cancel.astromosaic" -o "command interrupted.fits" --json --progress'
+    start(slow)
+    wait_for(window, lambda: panel.status.text().startswith("Rendering "))
+    assert list(directory.glob("*.part")) and not cancelled.exists()
+    panel.cancel_button.click()
+    assert result()["status"] == "cancelled" and "130" in panel.status.text()
+    assert not cancelled.exists() and not list(directory.glob("*.part"))
+
+    for layer, output in (("sky", "sky.fits"), ("composition", "composition.tiff")):
+        destination = f"command {output}"
+        start(f'project export "{manifest.name}" -o "{destination}" --layer {layer} --json')
+        exported = result()
+        assert exported["status"] == "ok" and exported["layer"] == layer
+        assert (directory / destination).read_bytes() == (directory / output).read_bytes()
+    assert panel.progress.value() == 100 and window.start_button.isEnabled()
+    return {"validation": True, "cancelled": True, "matching_layers": ["sky", "composition"]}
+
+
 def check_solver_settings(window: ProjectWindow, directory: Path) -> None:
     settings_file = directory / "settings.ini"
     missing_catalog = directory / "moved-stars.bin"
@@ -477,6 +522,7 @@ def frozen_check(backend: str, solve_fixtures: Path | None) -> None:
             if solve_fixtures is not None
             else None
         )
+        commands = check_commands(window, Path.cwd())
         print(
             json.dumps(
                 {
@@ -487,10 +533,14 @@ def frozen_check(backend: str, solve_fixtures: Path | None) -> None:
                     "cancel_and_retry": True,
                     "solver_settings": True,
                     "plate_solve": plate_solve,
+                    "command_panel": commands,
                 }
             )
         )
     finally:
+        panel = window.command_panel
+        panel.cancel()
+        wait_for(window, lambda: not panel.is_running)
         for job in (window.job, window._inspection_job):
             if job is not None:
                 job.cancel()
@@ -536,6 +586,7 @@ def check_bundle(bundle: Path, probe: Path, backend: str, solve_fixtures: Path |
         report = json.loads(result.stdout)
         assert report["backend"] == backend
         assert report["recovery"] and report["cancel_and_retry"] and report["solver_settings"]
+        assert report["command_panel"]["matching_layers"] == ["sky", "composition"]
         if solve_fixtures is not None:
             assert report["plate_solve"]["fallback"] == "gaia-dr3"
         print(result.stdout.strip())

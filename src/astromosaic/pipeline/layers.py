@@ -1,6 +1,6 @@
 """Render bounded foreground and visual composition tiles from original panels."""
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, replace
 from importlib.metadata import version
 from math import atan2, degrees, hypot
@@ -12,6 +12,12 @@ from astromosaic.core import Region, Tile
 from astromosaic.core.job import JobContext
 from astromosaic.core.masks import FOREGROUND, SKY, SourceMask
 from astromosaic.geometry import raster_pixels
+from astromosaic.geometry.footprint import (
+    MAX_FOOTPRINT_COORDINATE,
+    PixelBounds,
+    enclosing_bounds,
+    raster_bounds,
+)
 from astromosaic.geometry.image import CompositionSpec, LayerPlacement, Points
 from astromosaic.io import PanelSource
 from astromosaic.photometry import PanelCorrection
@@ -19,6 +25,7 @@ from astromosaic.pipeline.foreground import ForegroundAlignment, GroundPanel
 from astromosaic.pipeline.mosaic import (
     RenderSpec,
     _Coordinates,
+    _footprint_reservation,
     _PreparedMosaic,
     _RasterPlan,
     _RenderedTile,
@@ -54,7 +61,12 @@ class ForegroundLayer:
     def channels(self) -> int:
         return 3 if self.panels[0].source.descriptor.channel_layout == "rgb" else 1
 
-    def raster(self) -> _RasterPlan:
+    def raster(
+        self,
+        *,
+        origin: tuple[int, int] = (0, 0),
+        placement: LayerPlacement | None = None,
+    ) -> _RasterPlan:
         layout = self.panels[0].source.descriptor.channel_layout
         if any(panel.source.descriptor.channel_layout != layout for panel in self.panels):
             raise ValueError("Supply either all mono or all RGB foreground panels.")
@@ -83,9 +95,55 @@ class ForegroundLayer:
             header.add_history(
                 f"Ground match {left}-{right}: correlation {edge.correlation:.5f}, support {edge.support}."
             )
-        return _RasterPlan(
-            self.try_tile, len(self.panels), self.channels, header, self.size, self.spec
+        footprint_bytes = _footprint_reservation(len(self.panels), self.spec.max_working_bytes)
+        footprints = (
+            tuple(self._footprint(panel, placement) for panel in self.panels)
+            if footprint_bytes
+            else ()
         )
+        if not any(footprint is not None for footprint in footprints):
+            footprint_bytes = 0
+            footprints = ()
+
+        def render(
+            region: Region, scale: _Scale, budget: _WorkingBudget, context: JobContext
+        ) -> _RenderedTile | None:
+            return self.try_tile(
+                region,
+                scale,
+                budget,
+                context,
+                origin=origin,
+                placement=placement,
+                footprints=footprints,
+            )
+
+        return _RasterPlan(
+            render,
+            len(self.panels),
+            self.channels,
+            header,
+            self.size,
+            self.spec,
+            footprint_bytes=footprint_bytes,
+        )
+
+    def _footprint(
+        self, panel: ForegroundSource, placement: LayerPlacement | None
+    ) -> PixelBounds | None:
+        dx, dy = panel.transform.shift
+        canvas = self.alignment.canvas
+        if max(abs(dx), abs(dy), abs(canvas.x), abs(canvas.y)) > MAX_FOOTPRINT_COORDINATE:
+            return None
+        source = panel.source.descriptor
+        corners = raster_bounds(
+            Region(0, 0, source.width, source.height), origin=(dx - canvas.x, dy - canvas.y)
+        ).corners()
+        bounds = enclosing_bounds(corners)
+        if bounds is None or placement is None:
+            return bounds
+        with np.errstate(over="ignore", invalid="ignore"):
+            return enclosing_bounds(placement.forward(bounds.corners()))
 
     def try_tile(
         self,
@@ -96,7 +154,17 @@ class ForegroundLayer:
         *,
         origin: tuple[int, int] = (0, 0),
         placement: LayerPlacement | None = None,
+        footprints: Sequence[PixelBounds | None] = (),
     ) -> _RenderedTile | None:
+        candidates: Iterable[ForegroundSource] = self.panels
+        if footprints:
+            tile_bounds = raster_bounds(region, scale, origin)
+            candidates = (
+                panel
+                for panel, footprint in zip(self.panels, footprints, strict=True)
+                if footprint is None or footprint.intersects(tile_bounds)
+            )
+
         def make_mapper() -> Callable[[ForegroundSource], _Coordinates]:
             x, y = raster_pixels(region, scale, origin)
             if placement is not None:
@@ -111,7 +179,7 @@ class ForegroundLayer:
 
             return locate
 
-        return _try_tile(region, self.panels, make_mapper, budget, context, self.channels)
+        return _try_tile(region, candidates, make_mapper, budget, context, self.channels)
 
 
 def _history(header: fits.Header, mode: str) -> None:
@@ -203,7 +271,9 @@ def propose_composition(
 def composition_raster(
     sky: _PreparedMosaic, ground: ForegroundLayer, spec: CompositionSpec
 ) -> _RasterPlan:
-    ground_plan = ground.raster()
+    canvas, seam_width = spec.frame(sky.size, ground.size)
+    origin = (canvas.x, canvas.y)
+    ground_plan = ground.raster(origin=origin, placement=spec.placement)
     if sky.channels != ground_plan.channels:
         raise ValueError("The sky and foreground require the same channel layout for composition.")
     header = fits.Header()
@@ -213,9 +283,7 @@ def composition_raster(
         ground.filter_name,
         ground.assume_brightness,
     )
-    canvas, seam_width = spec.frame(sky.size, ground.size)
     sky_height = sky.size[1] - spec.sky_crop_bottom
-    origin = (canvas.x, canvas.y)
     _history(header, "CPU visual sky and foreground composition.")
     header["LAYERS"] = (True, "Layer contribution raster present")
     header.add_history("Layer codes 0 uncovered, 1 sky, 2 foreground, 3 both.")
@@ -261,9 +329,7 @@ def composition_raster(
             )
             if above is None:
                 return None
-            below = ground.try_tile(
-                region, scale, local, context, origin=origin, placement=spec.placement
-            )
+            below = ground_plan.render_tile(region, scale, local, context)
             if below is None:
                 return None
         finally:
@@ -282,6 +348,7 @@ def composition_raster(
         sky.spec,
         refinement=sky.refinement,
         seam_width=seam_width,
+        footprint_bytes=sky.footprint_bytes + ground_plan.footprint_bytes,
     )
 
 

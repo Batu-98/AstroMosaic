@@ -179,7 +179,7 @@ Use the existing Qt-free CLI as the local automation interface. Make commands di
 
 Use the saved `.astromosaic` manifest as the reusable job description. Provide commands to create a sky project from panel paths and render settings, check a saved project's inputs and settings before rendering, and export a selected sky, foreground, or composite layer from saved state. Project jobs use the same headless validation, renderer, resource budgets, and cancellation as desktop jobs. Require an explicit export destination, preserve source images, and publish completed outputs atomically. Provide PowerShell and Python examples that call the CLI to run projects in batch and read their results.
 
-Add a desktop terminal panel for the same AstroMosaic commands, with session history, output, progress, and cancellation. Run jobs off the UI thread. [Automation decision](docs/adr/0016-local-automation.md)
+Add a desktop terminal panel for the same AstroMosaic commands, with session history, output, progress, and cancellation. Run jobs off the UI thread. [Automation decision](docs/adr/0016-local-automation.md) · [Desktop command worker](docs/adr/0019-desktop-command-worker.md)
 
 ## 6. Processing Pipeline
 
@@ -361,7 +361,7 @@ Record selected backend, fallback reason, dtype conversions, failed coordinate c
 | 3: Desktop workflow | Six delivery stages covering TIFF interoperability, project and job management, preview and export, sky masks, foreground composition, and Windows acceptance. | Meet the [Phase 3A–3F gates](#101-phase-3-delivery-stages). |
 | 3.1: Desktop plate solving | Per-panel WCS status and optical hints, local catalog settings, and a desktop solve job | Pass the [Phase 3.1A–3.1C checks](#phase-31-desktop-plate-solving) before starting Phase 3.5. |
 | 3.5: Astronomy engine revalidation | Review Phase 2 evidence on the current engine, resolve findings, and verify the results | Pass the [Phase 3.5A–3.5C checks](#phase-35-astronomy-engine-revalidation) before starting Phase 3.6. |
-| 3.6: Plate solve reliability | ASTAP priority and automatic catalogs, common match/RMS evidence, bad-scale recovery, supported SIP/edge validation and a total solve budget | Pass the [Phase 3.6A–3.6F gates](#phase-36-plate-solve-reliability), including ASTAP-only quality evidence and Windows CLI/desktop migration, before Phase 4A. |
+| 3.6: Plate solve reliability | ASTAP priority and automatic catalogs, common match/RMS evidence, bad-scale recovery, supported SIP/edge validation and a total solve budget | Pass the [Phase 3.6A–3.6F gates](#phase-36-plate-solve-reliability), including ASTAP-only quality evidence and Windows CLI/desktop migration. |
 | 4: Automation, large mosaics, and desktop terminal | Scriptable project commands, budgeted large renders and improved blends, and a desktop command panel | Meet the [Phase 4A–4C gates](#102-phase-4-delivery-stages). |
 | 5: Extended formats and channels | Optional XISF, projections, and per-band outputs | Format, geometry, mask, unit, packaging, and channel-consistency checks pass for each added workflow. |
 
@@ -444,13 +444,13 @@ Keep source/mask-bound atomic sidecars and optional Seiza. Existing phase eviden
 
 ### 10.2 Phase 4 Delivery Stages
 
-Start 4A after [Phase 3.6F](#phase-36-plate-solve-reliability) passes. Reuse the finalized solve quality, catalog and budget diagnostics in automation instead of creating a second policy. Use the CLI from 4A for the 4B benchmarks. Build the desktop panel after the large-mosaic checks exercise progress and cancellation.
+The owner authorized starting [Phase 4A](docs/phase-4a.md) from the locally verified Phase 3.6F baseline on 2026-11-18. Track the remaining [Phase 3.6 acceptance checks](docs/phase-36-results.md#remaining-acceptance) as separate work. Reuse the solve quality, catalog and budget diagnostics in automation. Use the CLI from 4A for the 4B benchmarks. Build the desktop panel after the large-mosaic checks exercise progress and cancellation.
 
 | Stage | Deliverable | Acceptance evidence |
 | --- | --- | --- |
 | 4A | Headless project automation and scripts | On Windows 11 x64, use the installed CLI and portable console launcher to create and validate a sky project, run a batch of saved FITS and TIFF projects, and reproduce a saved mixed-project export with matching pixels, coverage, and applicable WCS. Verify that scripts can parse results and progress, detect missing inputs and occupied output paths, and cancel a render without publishing a partial export. The workflow runs without Qt. |
-| 4B | Large mosaics and improved blends | Run 12-panel 6000 x 4000 FITS and TIFF jobs, including RGB and a mixed sky and foreground case, with enforced memory limits and incremental export. Verify output-tile correctness, seamless halo boundaries, bounded queue growth, and measured quality improvement for any optional multiband blend. |
-| 4C | Desktop terminal panel | Validate a saved project and export from the panel using the same commands and results as the standalone CLI. Verify command history, progress, and cancellation with partial-output cleanup while the Windows desktop stays responsive. |
+| 4B | [Large mosaics and improved blends](docs/phase-4b.md) | Run 12-panel 6000 x 4000 FITS and TIFF jobs, including RGB and a mixed sky and foreground case, with enforced memory limits and incremental export. Verify output-tile correctness, seamless halo boundaries, bounded queue growth, and measured quality improvement for any optional multiband blend. |
+| 4C | [Desktop command panel](docs/phase-4c.md) | Validate a saved project and export from the panel using the same commands and results as the standalone CLI. Verify command history, progress, and cancellation with partial-output cleanup while the Windows desktop stays responsive. |
 
 ## 11. Validation and Acceptance Criteria
 

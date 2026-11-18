@@ -8,6 +8,7 @@ from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
+    QDockWidget,
     QFileDialog,
     QHBoxLayout,
     QLabel,
@@ -35,6 +36,7 @@ from astromosaic.storage.project import (
     load_project,
     save_project,
 )
+from astromosaic.ui.command_panel import CommandPanel
 from astromosaic.ui.mask_editor import MaskEditor
 from astromosaic.ui.mosaic_job import (
     CompositionProposalJob,
@@ -118,6 +120,15 @@ class ProjectWindow(QMainWindow):
         self.plate_solve_settings_action = tools_menu.addAction(
             "Plate Solve Settings…", self._plate_solve_settings
         )
+        self.command_panel = CommandPanel(self)
+        self.command_panel.running_changed.connect(self._command_running_changed)
+        command_dock = QDockWidget("Command Panel", self)
+        command_dock.setWidget(self.command_panel)
+        self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, command_dock)
+        command_dock.hide()
+        command_dock.visibilityChanged.connect(self._focus_command_panel)
+        self.command_panel_action = command_dock.toggleViewAction()
+        tools_menu.addAction(self.command_panel_action)
         self.revalidate_solve_action = panel_menu.addAction(
             "Revalidate Plate Solution", self._revalidate_plate_solve
         )
@@ -289,6 +300,7 @@ class ProjectWindow(QMainWindow):
         name = self.project_path.name if self.project_path else "Untitled"
         marker = "*" if self.project != self._saved else ""
         self.setWindowTitle(f"{name}{marker} — AstroMosaic")
+        self.command_panel.set_project_path(self.project_path)
         self._layer_controls()
         self.cancel_button.setEnabled(self.job is not None)
         self._start_panel_inspection()
@@ -328,17 +340,18 @@ class ProjectWindow(QMainWindow):
                 dialog.show_embedded_optics(info.embedded_optics, info.camera_model)
         job.deleteLater()
         if self._close_after_job:
-            if self.job is None:
-                self._close_after_job = False
-                QTimer.singleShot(0, self.close)
+            self._finish_close_if_ready()
             return
         self._refresh(self.panels.currentRow())
+
+    def _is_running(self) -> bool:
+        return self.job is not None or self.command_panel.is_running
 
     def _layer(self) -> Layer:
         return _LAYERS[self.layer_box.currentIndex()]
 
     def _layer_controls(self) -> None:
-        idle = self.job is None
+        idle = not self._is_running()
         layer = self._layer()
         ground = self.project.current_foreground()
         sky = bool(self.project.sky_indices())
@@ -392,7 +405,7 @@ class ProjectWindow(QMainWindow):
 
     def _selection_changed(self) -> None:
         index = self.panels.currentRow()
-        selected = index >= 0 and self.job is None
+        selected = index >= 0 and not self._is_running()
         for button in (self.relink_button, self.panel_button, self.mask_button, self.remove_button):
             button.setEnabled(selected)
         self.check_foreground.setEnabled(selected)
@@ -559,7 +572,7 @@ class ProjectWindow(QMainWindow):
 
     def _check_foreground(self) -> None:
         index = self.panels.currentRow()
-        if index >= 0 and self.job is None:
+        if index >= 0 and not self._is_running():
             self._launch_job(ForegroundJob(self.project, (index,), self), "Checking foreground…")
 
     def _edit_mask(self) -> None:
@@ -570,7 +583,7 @@ class ProjectWindow(QMainWindow):
 
     def _open_mask_editor(self, *, propose: bool) -> None:
         index = self.panels.currentRow()
-        if index >= 0 and self.job is None:
+        if index >= 0 and not self._is_running():
             self._launch_job(
                 MaskEditorJob(self.project, index, propose, self), "Preparing sky mask…"
             )
@@ -628,7 +641,7 @@ class ProjectWindow(QMainWindow):
             dialog.deleteLater()
 
     def _start_plate_solve(self, selected_panel: int | None = None) -> None:
-        if self.job is not None or not self.project.sky_indices():
+        if self._is_running() or not self.project.sky_indices():
             return
         if self.project_path is None:
             chosen = QFileDialog.getExistingDirectory(self, "Choose Folder for WCS Sidecars")
@@ -642,7 +655,7 @@ class ProjectWindow(QMainWindow):
         self._launch_job(job, "Finding sky panels that need a WCS…")
 
     def _start(self) -> None:
-        if self.job is not None or not self.project.panels:
+        if self._is_running() or not self.project.panels:
             return
         name, selected = QFileDialog.getSaveFileName(
             self,
@@ -665,7 +678,7 @@ class ProjectWindow(QMainWindow):
         self.viewport.set_frame(None)
 
     def _preview(self) -> None:
-        if self.job is not None or not self.project.panels:
+        if self._is_running() or not self.project.panels:
             return
         self._clear_preview()
         self._preview_project = self.project
@@ -693,13 +706,13 @@ class ProjectWindow(QMainWindow):
             )
 
     def _align_foreground(self) -> None:
-        if self.job is None:
+        if not self._is_running():
             self._launch_job(
                 ForegroundAlignmentJob(self.project, self), "Preparing foreground alignment…"
             )
 
     def _propose_placement(self) -> None:
-        if self.job is None:
+        if not self._is_running():
             self._launch_job(
                 CompositionProposalJob(self.project, self), "Finding a shared horizon…"
             )
@@ -725,19 +738,31 @@ class ProjectWindow(QMainWindow):
         self.job = job
         job.progress.connect(self._progress)
         job.finished.connect(self._finished)
-        self._set_running(True)
+        self._set_running()
         self.progress.setValue(0)
         self.status.setText(message)
         job.start()
 
-    def _set_running(self, running: bool) -> None:
+    @Slot(bool)
+    def _focus_command_panel(self, visible: bool) -> None:
+        if visible:
+            self.command_panel.entry.setFocus()
+
+    @Slot()
+    def _command_running_changed(self) -> None:
+        self._set_running()
+        self._finish_close_if_ready()
+
+    def _set_running(self) -> None:
+        running = self._is_running()
         for action in self._file_actions:
             action.setEnabled(not running)
         self.plate_solve_settings_action.setEnabled(not running)
         self._editor.setEnabled(not running)
         self.settings_button.setEnabled(not running)
         self._layer_controls()
-        self.cancel_button.setEnabled(running)
+        self.cancel_button.setEnabled(self.job is not None)
+        self.command_panel.set_available(self.job is None)
         self._selection_changed()
 
     @Slot(object, object)
@@ -751,7 +776,7 @@ class ProjectWindow(QMainWindow):
     def _finished(self) -> None:
         job, self.job = self.job, None
         assert job is not None
-        self._set_running(False)
+        self._set_running()
         if isinstance(job, PreviewJob):
             self._finish_preview(job)
         elif isinstance(job, ForegroundJob):
@@ -776,9 +801,7 @@ class ProjectWindow(QMainWindow):
             self.status.setText(f"Mosaic failed. {job.error or 'No result was returned.'}")
             self._refresh(self.panels.currentRow())
         job.deleteLater()
-        if self._close_after_job:
-            self._close_after_job = False
-            QTimer.singleShot(0, self.close)
+        self._finish_close_if_ready()
 
     def _finish_plate_solve(self, job: PlateSolveJob) -> None:
         panels = list(self.project.panels)
@@ -935,14 +958,18 @@ class ProjectWindow(QMainWindow):
         box.exec()
         box.deleteLater()
 
+    def _finish_close_if_ready(self) -> None:
+        if self._close_after_job and not self._is_running() and self._inspection_job is None:
+            self._close_after_job = False
+            QTimer.singleShot(0, self.close)
+
     def closeEvent(self, event: QCloseEvent) -> None:
-        if self.job is not None:
+        if self._is_running() or self._inspection_job is not None:
             self._close_after_job = True
             self._cancel()
-            event.ignore()
-        elif self._inspection_job is not None:
-            self._close_after_job = True
-            self._inspection_job.cancel()
+            self.command_panel.cancel()
+            if self._inspection_job is not None:
+                self._inspection_job.cancel()
             event.ignore()
         elif self._confirm_discard():
             event.accept()

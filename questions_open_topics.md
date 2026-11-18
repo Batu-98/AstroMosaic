@@ -24,16 +24,6 @@ This register tracks unresolved decisions, problems, and risks. It is not a work
 - **Next action / responsibility:** Use the [frozen 3.6A manifest](tests/fixtures/plate_solve_v36.json) for match/RMS, bad-hint, SIP/edge and time tests before tuning B–F, preserving Phase 3.5 envelopes. Then freeze large-mosaic, RGB photometry and mixed-scene tolerances for Phase 4. [3.5 verification results](docs/phase-35.md#phase-35c-windows-verification)
 - **Closure condition:** Freeze dataset-specific tolerances before algorithm tuning, including alignment, stellar profiles/flux, injected faint emission, and tiled/reference agreement. Link the fixture manifest and test results.
 
-### Q-004 - Resource budgets and representative workload
-
-- **Status / priority:** Investigating / P1
-- **Opened / updated:** 2026-11-15 / 2026-11-17
-- **Affected phase:** Phase 0 scheduling contracts, Phase 1 rendering, Phase 2 solvers and fitting, Phase 3 preview, Phase 3.6 solver deadlines and catalog validation, and Phase 4 large-job scaling.
-- **Impact and evidence:** The one-worker FITS renderer enforces a combined tile reservation with no queue. A two-panel 3328 × 1536 render peaked at 89.0 MiB working set and 101.5 MiB commit with one OpenBLAS thread. An unhinted Gaia solve with the deep native index peaked at 1066 MiB working set and 281 MiB commit. The desktop preview of the same two-panel workload peaked at 226.7/259.8 MiB on OpenGL and 175.9/164.0 MiB on CPU for working set and commit. [Phase 1 rendering measurements](docs/phase-1.md#working-set-and-cancellation) · [Phase 2 solver measurements](docs/phase-2.md#windows-solver-evidence) · [Phase 3C preview measurements](docs/phase-3c.md#resource-check)
-- **Current assumption:** Default to 128-pixel render tiles, an estimated 64 MiB working buffer budget, and a 2048 MiB output limit. Reserve the active preview raster in the job budget and cap its longest edge at 512 pixels. Account for the display buffers, Qt framebuffers, and driver allocation separately. [TIFF](docs/phase-3a.md#sample-and-metadata-contract) reserves compressed-segment decode buffers as well as the requested window. Budget native catalog mappings separately from science tiles. The [Phase 2 solver settings](docs/phase-2.md#offline-solvers) include a separate ASTAP staging limit.
-- **Next action / responsibility:** Measure native catalog/query memory and freeze the [Phase 3.6 total-deadline](docs/phase-36.md#7-total-deadline-cancellation-and-reporting) and cleanup defaults under Q-018. The [Phase 3F package checks](docs/phase-3f.md#windows-evidence) passed background cancellation and retry on Windows. Repeat bounded-render and cancellation checks in Phase 4 with 12 panels at 6000 × 4000 for FITS, TIFF, RGB, and mixed cases.
-- **Closure condition:** Document initial defaults and over-budget behavior; verify bounded queues, temporary allocations, cancellation, and peak usage for a named workload. Revisit defaults during the Phase 4 large-mosaic benchmark.
-
 ### Q-005 - Application licensing and distribution model
 
 - **Status / priority:** Open / P1
@@ -57,9 +47,9 @@ This register tracks unresolved decisions, problems, and risks. It is not a work
 ### Q-009 - Dual FITS and TIFF workflows and camera RAW import
 
 - **Status / priority:** Open / P1
-- **Opened / updated:** 2026-11-15 / 2026-11-16
+- **Opened / updated:** 2026-11-15 / 2026-11-18
 - **Affected phase:** Dual FITS and TIFF workflows throughout phases 1-4; optional camera RAW import after a future scope decision.
-- **Impact and evidence:** The [Phase 3A Windows fixtures](docs/phase-3a.md#windows-evidence) verified mono and RGB TIFF import and export, including samples, channel order, WCS, and coverage. The [Phase 3B desktop workflow](docs/phase-3b.md#verification) reopens a mixed FITS/TIFF project and renders it to TIFF. Camera RAW is deferred as an import-only feature.
+- **Impact and evidence:** The [Phase 3A Windows fixtures](docs/phase-3a.md#windows-evidence) verified mono and RGB TIFF import and export, including samples, channel order, WCS, and coverage. The [Phase 3B desktop workflow](docs/phase-3b.md#verification) reopens a mixed FITS/TIFF project and renders it to TIFF. [Phase 4B](docs/phase-4b.md#windows-baseline-results) independently verified all samples and coverage in full-size mono FITS, RGB TIFF and mixed exports. Camera RAW is deferred as an import-only feature.
 - **Current assumption:** Provide first-class support for both scientific FITS panels and linear TIFF panels across the pipeline. If camera RAW is requested later, use an open-source linear decoder and preserve relevant sensor and color metadata.
 - **Next action / responsibility:** Repeat the [packaged Windows exports](docs/phase-3f.md#windows-evidence) on a clean Windows installation. Define and verify channel-specific calibration before enabling RGB photometric refinement. Revisit camera models and decoder compatibility when camera RAW import is requested.
 - **Closure condition:** Validate FITS and TIFF sample integrity, metadata, memory, and reproducible import-to-mosaic workflows on Windows. If camera RAW is activated, establish separate acceptance criteria for the selected models.
@@ -67,11 +57,11 @@ This register tracks unresolved decisions, problems, and risks. It is not a work
 ### Q-010 - Foreground recognition, masks, and composition
 
 - **Status / priority:** Investigating / P1
-- **Opened / updated:** 2026-11-15 / 2026-11-16
+- **Opened / updated:** 2026-11-15 / 2026-11-18
 - **Affected phase:** Phase 2 masked sky processing, Phase 3D mask editing, Phase 3E foreground alignment and composition, Phase 3F packaged acceptance, and Phase 4 resource validation.
-- **Impact and evidence:** [Phase 3D](docs/phase-3d.md#windows-verification) verifies local suggestions, manual overrides and masks, and exclusion of foreground from sky fitting. [Phase 3E](docs/phase-3e.md#windows-verification) verifies WCS-free alignment and exports, shared-reference placement, saved edits, and seams with partial and zero common coverage. Small, rotated, and ambiguous terrain still needs manual review.
+- **Impact and evidence:** [Phase 3D](docs/phase-3d.md#windows-verification) verifies local suggestions, manual overrides and masks, and exclusion of foreground from sky fitting. [Phase 3E](docs/phase-3e.md#windows-verification) verifies WCS-free alignment and exports, shared-reference placement, saved edits, and seams with partial and zero common coverage. [Phase 4A](docs/phase-4a.md#local-windows-results) reproduced all three desktop layers from a saved mixed project in the portable CLI. Small, rotated, and ambiguous terrain still needs manual review.
 - **Current assumption:** Use the saved three-label mask for same-size, same-scale foreground translations. Use similarity placement between layers and restrict seam blending to valid common coverage.
-- **Next action / responsibility:** The [mixed-panel workflow](docs/phase-3f.md#windows-evidence) passed in the Phase 3F bundle on the development host. Use real terrestrial captures to measure how often the detector and translation model need manual correction or a broader registration model. Verify the 12-panel mixed workload in Phase 4.
+- **Next action / responsibility:** The [12-panel mixed comparison](docs/phase-4b.md#footprint-selection-results) matched the baseline under the saved limits and known fixture translations. Use real terrestrial captures to measure how often the detector and translation model need manual correction or a broader registration model.
 - **Closure condition:** Verify the Phase 2 and 3 mixed-panel gates, including separate layer exports and saved edits, then run the Phase 4 mixed workload within measured memory and worker limits.
 
 ### Q-011 - Optional generative fill for a visual seam
@@ -83,16 +73,6 @@ This register tracks unresolved decisions, problems, and risks. It is not a work
 - **Current assumption:** Evaluate fill as an opt-in local visual operation restricted to uncovered seam gaps. Keep its synthetic pixels and provenance separately identifiable.
 - **Next action / responsibility:** Revisit after the crop and overlap controls are tested and the owner wants fill for remaining gaps. Evaluate open-source software, model weights, licenses, and local resource use then.
 - **Closure condition:** If selected, verify that fill is confined to the selected gaps and its synthetic mask and provenance survive export. Scientific layer exports retain observed samples.
-
-### Q-012 - Desktop terminal scope
-
-- **Status / priority:** Open / P2
-- **Opened / updated:** 2026-11-16 / 2026-11-16
-- **Affected phase:** 4C desktop terminal panel.
-- **Impact and evidence:** The packaged CLI already runs in a Windows terminal. An in-app AstroMosaic command panel can reuse the Phase 4A interface. An embedded Windows shell would require different interaction and process handling. [Windows CLI package](docs/phase-3f.md#build) · [Phase 4 stages](astro_mosaic_python_first_architecture_en.md#102-phase-4-delivery-stages)
-- **Current assumption:** Provide an in-app AstroMosaic command panel with session history, job output, progress, and cancellation.
-- **Next action / responsibility:** Review the expected terminal workflows at the start of Phase 4C and record the selected scope.
-- **Closure condition:** Record the selected desktop terminal scope and verify its agreed workflows on Windows 11 x64.
 
 ### Q-015 - Offline solver coverage on the 40′ Orion field
 
@@ -108,7 +88,7 @@ This register tracks unresolved decisions, problems, and risks. It is not a work
 
 - **Status / priority:** Investigating / P1
 - **Opened / updated:** 2026-11-17 / 2026-11-18
-- **Affected phase:** Phase 3.6A quality/fixture freeze, 3.6D bad-scale recovery, 3.6E SIP/edge validation and 3.6F acceptance; required before Phase 4A.
+- **Affected phase:** Phase 3.6A quality/fixture freeze, 3.6D bad-scale recovery, 3.6E SIP/edge validation and 3.6F acceptance.
 - **Impact and evidence:** The [Mosaic Master comparison](docs/plate-solve-comparison.md) verified that the Seiza wrapper retains a supplied scale within 0.8–1.2 on blind retry and does not request SIP (`sip_order=0` in installed Seiza 0.48.2). Blind ASTAP retains a supplied vertical FOV. Existing geometry checks do not independently establish catalog accuracy at field edges. Q-015 separately tracks the real 40′ M42 blind coverage result.
 - **Current assumption:** The source uses the common 15-match and RMS gate, Gaia's confidence check, unrestricted Gaia 0.1–120 arcsec/pixel recovery and a spatial holdout for application SIP promotion. Real M13/M42 checks preserve the earlier supported envelopes. ASTAP-only local FOV recovery retains pointing when both hints were supplied. [Measurements](docs/phase-36-results.md)
 - **Next action / responsibility:** Broaden real sparse and dense-catalog coverage as separate datasets become available. Local source and portable results retain an explicit insufficient result for unsupported grid regions. [Windows acceptance](docs/phase-36-results.md#portable-windows-verification)
@@ -148,6 +128,17 @@ This register tracks unresolved decisions, problems, and risks. It is not a work
 - **Closure condition:** Document the convention and check its scale-change behavior against independently calculated values.
 - **Resolution:** 2026-11-15. [ADR-0002](docs/adr/0002-surface-brightness-reference.md) records the convention. The uniform-field and Gaussian scale-change fixtures passed on Windows.
 
+### Q-004 - Resource budgets and representative workload
+
+- **Status / priority:** Resolved / P1
+- **Opened / updated:** 2026-11-15 / 2026-11-18
+- **Affected phase:** Phase 0 scheduling, Phase 1 rendering, Phase 2 solvers, Phase 3 preview, Phase 3.6 deadlines, and Phase 4B large-job scaling.
+- **Impact and evidence:** The renderer has one synchronous worker and no queued tiles. The optimized full Windows runs peaked at 20.215 MiB reservation, 140.68 MiB working set and 146.06 MiB commit across the three jobs. Separate evidence covers two-panel rendering, native catalog mappings and desktop preview memory. [Phase 4B results](docs/phase-4b.md#footprint-selection-results) · [Phase 1 measurements](docs/phase-1.md#working-set-and-cancellation) · [Phase 2 solver measurements](docs/phase-2.md#windows-solver-evidence) · [Phase 3C preview measurements](docs/phase-3c.md#resource-check)
+- **Current assumption:** Default to 128-pixel render tiles, a 64 MiB working reservation and a 2048 MiB output limit. Reserve the preview raster and cap its longest edge at 512 pixels. Account for display, GPU and native catalog allocations separately. [TIFF decode reservation](docs/phase-3a.md#sample-and-metadata-contract) · [Solver staging limit](docs/phase-2.md#offline-solvers)
+- **Next action / responsibility:** Measure any future blend buffers, parallel scheduler or extended workload against the named reference.
+- **Closure condition:** Document defaults and over-budget behavior, and verify bounded queues, reservations, cancellation and measured peak usage at the Phase 4B scale.
+- **Resolution:** 2026-11-18. The three full 12-panel exports, the 6 MiB forced split, the 2048 MiB output refusal and cancellation/retry passed. The benchmark's full RGB job uses a saved 3072 MiB limit. [Phase 4B reference and comparison](docs/phase-4b.md)
+
 ### Q-007 - FITS metadata, coverage, and independent export validation
 
 - **Status / priority:** Resolved / P1
@@ -169,6 +160,17 @@ This register tracks unresolved decisions, problems, and risks. It is not a work
 - **Next action / responsibility:** Recheck the solver matrix on catalog updates and during release packaging. Track the 40′ M42 coverage result under Q-015 and release notices and data terms under Q-005.
 - **Closure condition:** Record a tested solver/version/catalog matrix and deployment/update policy, including ordered fallbacks, cancellation, missing-catalog diagnostics, exhausted-chain behavior, and unchanged-source checks.
 - **Resolution:** 2026-11-15. The backend decision and Phase 2 evidence record results, catalog provenance, and the update procedure. The 3.5C Windows rerun verified the M13 matrix, new M42 fields, solver cleanup, and the Documents XPSD format diagnostics. [ADR-0010](docs/adr/0010-seiza-gaia-backend.md) · [Phase 2 setup](docs/phase-2.md#offline-solvers) · [Phase 3.1C desktop checks](docs/phase-3b.md#desktop-plate-solving) · [Phase 3.5C solver results](docs/phase-35.md#m42-offline-astrometry-and-documents-catalogs)
+
+### Q-012 - Desktop terminal scope
+
+- **Status / priority:** Resolved / P2
+- **Opened / updated:** 2026-11-16 / 2026-11-18
+- **Affected phase:** 4C desktop command panel.
+- **Impact and evidence:** The desktop panel reuses the Phase 4A CLI arguments, report formats, render limits, and cancellation. [CLI contract](docs/phase-4a.md#result-contract) · [Worker decision](docs/adr/0019-desktop-command-worker.md)
+- **Current assumption:** Keep the panel scoped to AstroMosaic commands, with session history, output, progress, and cancellation.
+- **Next action / responsibility:** Retain the source and packaged command-panel checks for future CLI changes.
+- **Closure condition:** Record the selected desktop terminal scope and verify its agreed workflows on Windows 11 x64.
+- **Resolution:** 2026-11-18. Windows source and copied CPU/OpenGL desktop checks passed. The windowed executable and console CLI produced the same validation JSON and FITS bytes. The panel's progress, session history, cancellation, cleanup and retry passed. [Windows evidence](docs/phase-4c.md#local-windows-results)
 
 ### Q-013 - Optical metadata conventions for solve hints
 

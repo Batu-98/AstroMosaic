@@ -72,7 +72,17 @@ def check_mosaic(
         "--tile-size",
         "13",
     )
+    check_raster(destination, expected, target, result)
+
+
+def check_raster(
+    destination: Path,
+    expected: NDArray[np.float32],
+    target: WCS,
+    result: dict[str, object],
+) -> None:
     assert result["backend"] == "cpu"
+    width, height = SIZE
     if destination.suffix == ".fits":
         with fitsio.FITS(destination) as hdus:
             pixels = hdus[0].read()
@@ -100,6 +110,40 @@ def check_mosaic(
     )
 
 
+def check_project(
+    cli: Path, cwd: Path, source: Path, expected: NDArray[np.float32], target: WCS
+) -> None:
+    project = source.with_suffix(".astromosaic")
+    output = source.with_name(f"{source.stem} mosaic{source.suffix}")
+    channels = expected.shape[-1] if expected.ndim == 3 else 1
+    created = run_cli(
+        cli,
+        cwd,
+        "project",
+        "create",
+        str(source),
+        "-o",
+        str(project),
+        "--center",
+        *map(str, CENTER),
+        "--size",
+        *map(str, SIZE),
+        "--scale",
+        str(SCALE),
+        "--json",
+    )
+    assert created["schema_version"] == 1 and created["status"] == "ok"
+    assert project.is_file()
+    validated = run_cli(cli, cwd, "project", "validate", str(project), "-o", str(output), "--json")
+    assert validated["schema_version"] == 1 and validated["status"] == "ok"
+    assert (validated["width"], validated["height"], validated["channels"]) == (*SIZE, channels)
+    assert not output.exists()
+    exported = run_cli(cli, cwd, "project", "export", str(project), "-o", str(output), "--json")
+    assert exported["schema_version"] == 1 and exported["status"] == "ok"
+    assert exported["layer"] == "sky"
+    check_raster(output, expected, target, exported)
+
+
 def check_bundle(bundle: Path) -> None:
     with TemporaryDirectory(prefix="AstroMosaic package check ") as scratch:
         cwd = Path(scratch)
@@ -117,6 +161,7 @@ def check_bundle(bundle: Path) -> None:
         path = cwd / "signed source.fits"
         fits.writeto(path, field, header)
         check_mosaic(cli, cwd, path, field.astype(np.float32), target)
+        check_project(cli, cwd, path, field.astype(np.float32), target)
 
         rgb = (np.stack((field, 2 * field, -field), axis=-1) / 4).astype(np.float32)
         rgb[12:17, 18:21] = np.nan
@@ -139,8 +184,10 @@ def check_bundle(bundle: Path) -> None:
                 metadata=None,
             )
             check_mosaic(cli, cwd, path, samples.astype(np.float32), target)
+            if codec == "deflate":
+                check_project(cli, cwd, path, rgb, target)
         print(
-            "Passed frozen worker spawning, FITS, and LZW, Deflate RGB, and PackBits TIFF exports."
+            "Passed frozen worker spawning, FITS/TIFF exports, and FITS and RGB TIFF project checks."
         )
 
 

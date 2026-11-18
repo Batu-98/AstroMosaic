@@ -16,6 +16,7 @@ from astromosaic.core.masks import FOREGROUND, SKY, UNCLASSIFIED, SourceMask, bo
 from astromosaic.geometry import tan_output_wcs
 from astromosaic.geometry.image import LayerPlacement
 from astromosaic.io import open_panel
+from astromosaic.pipeline import layers as layer_rendering
 from astromosaic.pipeline.layers import _blend
 from astromosaic.pipeline.mosaic import RenderSpec, _RenderedTile
 from astromosaic.storage.project import (
@@ -182,6 +183,39 @@ def test_foreground_native_match_and_cancelled_composition(tmp_path: Path) -> No
             project, "composition", out, JobContext(cancelled.is_set, lambda *_: cancelled.set())
         )
     assert not out.exists() and not list(tmp_path.glob("*.part"))
+
+
+def test_placed_ground_selection_matches_full_composition_at_negative_origin(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project, _ = _write_scene(tmp_path, (96, 72), (35, 5))
+    context = JobContext()
+    project = align_project_foreground(project, context)
+    composition = replace(
+        propose_project_composition(project, context),
+        placement=LayerPlacement((-23.0, 18.0), 12.5, 1.04),
+        seam_y=35.0,
+        overlap_percent=24.0,
+        sky_crop_bottom=18,
+    )
+    project = replace(project, composition=composition)
+    selected = tmp_path / "selected.fits"
+    frame = preview_project_layer(project, "composition", context)
+    result = render_project_layer(project, "composition", selected, context)
+    assert frame.common_coverage is not None and frame.common_coverage.any()
+    assert result.width > project.render.size[0]
+
+    monkeypatch.setattr(layer_rendering, "_footprint_reservation", lambda *_args: 0)
+    reference = tmp_path / "reference.fits"
+    full = render_project_layer(project, "composition", reference, context)
+    assert (result.covered_pixels, result.common_pixels) == (
+        full.covered_pixels,
+        full.common_pixels,
+    )
+    with fitsio.FITS(selected) as actual, fitsio.FITS(reference) as expected:
+        np.testing.assert_array_equal(actual[0].read(), expected[0].read())
+        for mask in ("COVERAGE", "LAYERS"):
+            np.testing.assert_array_equal(actual[mask].read(), expected[mask].read())
 
 
 def test_foreground_reports_weak_and_mismatched_panels(tmp_path: Path) -> None:

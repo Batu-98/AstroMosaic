@@ -3,7 +3,7 @@
 - **Date:** 2026-11-17
 - **Status:** The 3.6A capability freeze is complete. 3.6B–3.6F passed on the local Windows host. Full acceptance still needs the real dense-catalog matrix. [3.6A evidence](phase-36a.md) · [Implementation results](phase-36-results.md)
 - **Entry condition:** Phase 3.5C passed on Windows 11 x64. Preserve its fixtures and evidence as the pre-change baseline.
-- **Exit dependency:** Complete 3.6A–3.6F before Phase 4A. The separate Phase 3F clean-machine gate remains open.
+- **Delivery:** The owner authorized [Phase 4A](phase-4a.md) to start from the locally verified 3.6F baseline. Full Phase 3.6 acceptance and the separate Phase 3F clean-machine check remain open.
 - **Authority:** The owner requested ASTAP priority, automatic ASTAP catalog selection, at least 15 matches, comparable RMS limits, bad-scale recovery, SIP/edge accuracy, and a total solve budget. [Architecture](../astro_mosaic_python_first_architecture_en.md#phase-36-plate-solve-reliability) · [ADR-0017](adr/0017-astap-first-validated-solving.md)
 
 This is the implementation contract. The prior dispatcher tried Gaia first, defaulted to D05 and accepted eight Gaia matches. The Phase 3.6 dispatcher uses ASTAP first, Automatic catalogs, common catalog validation and a shared deadline. The [reference manifest](../tests/fixtures/plate_solve_v36.json) records the initial frozen targets. The measured ASTAP-only recovery adjustment below preserves the same panel budget.
@@ -206,7 +206,7 @@ For the real M13 archive comparison, freeze the prior per-backend center/corner 
 | Projects and sidecars | Keep v1 inputs readable. Version new metadata as needed; do not silently recertify old results or invalidate all saved projects. Record effective policy, backend/catalog, SIP model, validation grade and source/mask identity for a new sidecar. Preserve manual choices and earlier files. |
 | Preview/refinement/export | Adopt a single chosen geometry and invalidate derived caches; rerun the existing held-out relative registration and photometry checks. New absolute SIP must not be fitted again inside widgets or applied twice. |
 | User workflow | Default fresh catalog selection to Automatic, show selected data and why a candidate failed, distinguish unavailable/unsolved/quality rejection/cancel/budget exhaustion. Preserve completed panels and actionable retry. |
-| Phase 4A/4C | Consume the finalized solve report/budget contract from 3.6. Avoid implementing a second solver policy in scripts or the desktop terminal. Phase 4A starts after 3.6 acceptance. |
+| Phase 4A/4C | Use the shared solve report and budget contract from 3.6 in scripts and in the desktop terminal. |
 | Phase 4B | Reuse deadline/resource reporting for scaling; keep the 12-panel FITS/TIFF workload and blend/photometry gates. Phase 3.6 does not establish those performance results. |
 | Packaging | Continue explicit external ASTAP/catalog deployment. Verify the optional native worker and clean PATH behavior on Windows. Do not silently switch to an untested installed executable/catalog after discovery. |
 

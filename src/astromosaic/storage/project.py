@@ -63,7 +63,7 @@ from astromosaic.pipeline.mosaic import (
     preview_mosaic,
     render_mosaic,
 )
-from astromosaic.pipeline.refinement import RefinementSpec
+from astromosaic.pipeline.refinement import RefinementSpec, validate_refinement_inputs
 
 _SCHEMA_VERSION = 4
 _MAX_MANIFEST_BYTES = 4 * 1024**2
@@ -390,6 +390,32 @@ def _verified_inputs(project: MosaicProject, context: JobContext) -> _PanelInput
         "wcs_sidecars": {i: p.wcs_sidecar.path for i, p in enumerate(panels) if p.wcs_sidecar},
         "refinement": project.refinement,
     }
+
+
+@dataclass(frozen=True, slots=True)
+class SkyPreflight:
+    panels: int
+    width: int
+    height: int
+    channels: int
+
+
+def validate_project_sky(
+    project: MosaicProject, context: JobContext, destination: Path | None = None
+) -> SkyPreflight:
+    """Check the saved sky inputs and render settings without fitting or writing pixels."""
+    project.validate()
+    if destination is not None and not destination.parent.is_dir():
+        raise FileNotFoundError(f"The output directory does not exist: {destination.parent}")
+    inputs = _verified_inputs(project, context)
+    inputs["refinement"] = None
+    with _prepare_mosaic(
+        spec=project.render, destination=destination, context=context, **inputs
+    ) as sky:
+        if project.refinement is not None:
+            validate_refinement_inputs([panel.source for panel in sky.panels])
+        width, height = sky.size
+        return SkyPreflight(len(sky.panels), width, height, sky.channels)
 
 
 def render_project(project: MosaicProject, destination: Path, context: JobContext) -> MosaicResult:

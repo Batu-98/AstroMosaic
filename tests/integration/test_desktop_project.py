@@ -1,11 +1,16 @@
+import json
+import subprocess
+import sys
 from collections.abc import Callable
 from pathlib import Path
 from threading import Event, get_ident
 
+import fitsio
 import numpy as np
 import pytest
 import tifffile
 from astropy.io import fits
+from astropy.wcs import WCS
 
 from astromosaic.astrometry.hints import PanelOptics
 from astromosaic.astrometry.solve import SolveOptions, solve_panel, write_solution
@@ -538,6 +543,50 @@ def test_desktop_composition_propose_edit_and_export(
         assert destination.exists(), window.status.text()
         with fits.open(destination) as result:
             assert np.any(result["LAYERS"].data == 3)
+
+        for layer in ("composition", "sky", "foreground"):
+            if layer != "composition":
+                window.layer_box.setCurrentText(layer.capitalize())
+                destination = tmp_path / f"desktop-{layer}.fits"
+                window.start_button.click()
+                wait_for_job()
+                assert destination.exists(), window.status.text()
+            cli_output = tmp_path / f"cli-{layer}.fits"
+            exported = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "astromosaic",
+                    "project",
+                    "export",
+                    str(manifest),
+                    "--layer",
+                    layer,
+                    "-o",
+                    str(cli_output),
+                    "--json",
+                ],
+                check=True,
+                capture_output=True,
+                encoding="utf-8",
+                timeout=60,
+            )
+            assert json.loads(exported.stdout)["layer"] == layer
+            with fitsio.FITS(destination) as desktop, fitsio.FITS(cli_output) as cli:
+                np.testing.assert_array_equal(cli[0].read(), desktop[0].read())
+                np.testing.assert_array_equal(cli["COVERAGE"].read(), desktop["COVERAGE"].read())
+                if layer == "composition":
+                    np.testing.assert_array_equal(cli["LAYERS"].read(), desktop["LAYERS"].read())
+            desktop_wcs, cli_wcs = (WCS(fits.getheader(path)) for path in (destination, cli_output))
+            assert cli_wcs.has_celestial == desktop_wcs.has_celestial == (layer == "sky")
+            if layer == "sky":
+                points = ([0, 40, 79], [0, 30, 59])
+                np.testing.assert_allclose(
+                    cli_wcs.pixel_to_world_values(*points),
+                    desktop_wcs.pixel_to_world_values(*points),
+                    atol=1e-9,
+                    rtol=0,
+                )
     finally:
         for job in (window.job, window._inspection_job):
             if job is not None:

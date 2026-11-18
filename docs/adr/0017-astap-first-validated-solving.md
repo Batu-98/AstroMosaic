@@ -22,4 +22,4 @@ The measured ASTAP-only fallback retains a supplied pointing for FOV-auto recove
 
 ## Consequences
 
-The new order changes the selected backend when both are available. Compare per-backend numerical evidence against the scientific gates. Older projects remain readable and retain their original solution provenance. Phase 4A waits for Phase 3.6 acceptance. Earlier Phase 2 and 3.5 results remain historical reference points.
+The new order changes the selected backend when both are available. Compare per-backend numerical evidence against the scientific gates. Older projects remain readable and retain their original solution provenance. The owner authorized [Phase 4A](../phase-4a.md) to start from the locally verified Phase 3.6F baseline, with full Phase 3.6 acceptance pending. Earlier Phase 2 and 3.5 results remain historical reference points.

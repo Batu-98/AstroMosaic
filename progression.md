@@ -5,13 +5,13 @@ Use this file for concise development history and handoff state. Detailed techni
 ## Current State
 
 - **Last updated:** 2026-11-18
-- **Active baseline:** Python-first architecture revision 3.10, including [Phase 3.6 plate solve reliability](astro_mosaic_python_first_architecture_en.md#phase-36-plate-solve-reliability) before [Phase 4A–4C automation and scaling](astro_mosaic_python_first_architecture_en.md#102-phase-4-delivery-stages). The [detailed 3.6 plan](docs/phase-36.md) and [ADR-0017](docs/adr/0017-astap-first-validated-solving.md) define planned ASTAP priority and solver quality/budgets. See [ADR-0003](docs/adr/0003-windows-first-platform-scope.md) for Windows scope, [ADR-0006](docs/adr/0006-dual-fits-and-tiff-workflow.md) for formats, and [ADR-0007](docs/adr/0007-sky-and-foreground-mosaics.md) for mixed panels.
-- **Current stage:** Phase 3.6B–3.6F is implemented and verified on the local Windows host. Real dense ASTAP catalogs and the narrow blind M42 case remain open, so full phase acceptance is pending. The separate clean-machine check also remains open. Linux and macOS support is deferred.
-- **Available artifacts:** [Phase 3.6 implementation and Windows evidence](docs/phase-36-results.md), [3.6A capabilities](docs/phase-36a.md), [frozen reference manifest](tests/fixtures/plate_solve_v36.json), [Phase 3.5C Windows results](docs/phase-35.md#phase-35c-windows-verification), and [M31 20% overlap export](docs/phase-35.md#m31-two-panel-merge-with-20-overlap). The updated portable build is in ignored `.tooling/phase36-windows/dist/`.
-- **Implementation / verification:** All 139 native Windows source tests passed, including OpenGL and both owner TIFFs. The portable CLI and desktop CPU/OpenGL checks passed. Both wide TIFFs qualified for SIP-3 with held-out and independent D05 edge evidence, preserved hashes, and independently reopened RGB exports. Ruff, format, mypy and lock checks passed.
-- **Version control:** Phase 3.1C is published as `5c4bb68` on `origin/main`. Phase 3.5A–3.5C, the comparison and the Phase 3.6 changes are in the working tree. [AstroMosaic GitHub repository](https://github.com/Batu-98/AstroMosaic)
-- **Next action:** Verify real dense ASTAP installations and the 40′ M42 blind limitation when compatible local catalogs are available. Perform the separate clean-machine launcher/export verification on that Windows installation. Phase 4A follows the 3.6 acceptance decision.
-- **Open dependencies:** Q-003 tracks the frozen criteria, Q-015 the 40′ M42 coverage, Q-016 extended quality coverage, and Q-017 the real dense ASTAP catalog matrix. Q-004, Q-005, Q-009, and Q-010 track resource, distribution, format, and mixed-panel gates. Q-008 tracks deferred platforms, Q-011 deferred visual fill, and Q-012 desktop terminal scope. Q-018 and Q-019 record the completed local deadlines and owner TIFF checks.
+- **Active baseline:** Python-first architecture revision 3.10 covers [Phase 3.6 plate solve reliability](astro_mosaic_python_first_architecture_en.md#phase-36-plate-solve-reliability) and [Phase 4A–4C automation and scaling](astro_mosaic_python_first_architecture_en.md#102-phase-4-delivery-stages). [ADR-0017](docs/adr/0017-astap-first-validated-solving.md) records ASTAP priority, quality and budgets. See [ADR-0003](docs/adr/0003-windows-first-platform-scope.md) for Windows scope, [ADR-0006](docs/adr/0006-dual-fits-and-tiff-workflow.md) for formats, and [ADR-0007](docs/adr/0007-sky-and-foreground-mosaics.md) for mixed panels.
+- **Current stage:** Phase 4 meets its required local Windows gates. [Phase 4C](docs/phase-4c.md) adds the shared CLI command panel. [Phase 4B](docs/phase-4b.md) verifies large-mosaic scaling, and [Phase 4A](docs/phase-4a.md) verifies headless automation. Full 3.6 acceptance tracks real dense ASTAP catalogs and the narrow blind M42 case. The separate clean-machine check remains open. Linux and macOS support is deferred.
+- **Available artifacts:** [Phase 4C panel workflow](docs/phase-4c.md#desktop-workflow), [Phase 4B selection measurements](docs/phase-4b.md#footprint-selection-results), [Phase 4A automation](docs/phase-4a.md), [Phase 3.6 implementation evidence](docs/phase-36-results.md), and [frozen reference manifest](tests/fixtures/plate_solve_v36.json). The updated desktop and portable console bundles are in ignored `.tooling/phase4c-windows/dist/`.
+- **Implementation / verification:** All 155 native Windows tests passed with OpenGL on the second display. The windowed panel and portable console matched validation and FITS results. Copied desktop CPU/OpenGL and Qt-free console checks, Ruff, format, mypy and lock checks passed.
+- **Version control:** Phase 4A–4C form the verified Windows baseline following the Phase 3.5–3.6 commit `ebb0095`. [AstroMosaic GitHub repository](https://github.com/Batu-98/AstroMosaic)
+- **Next action:** Start Phase 5 by selecting the first extended format, projection or per-band workflow and defining its fixture and export acceptance criteria. Track the real dense ASTAP matrix, the narrow M42 blind case and clean-machine launcher/export verification separately.
+- **Open dependencies:** Q-003 tracks the frozen criteria, Q-015 the 40′ M42 coverage, Q-016 extended quality coverage, and Q-017 the real dense ASTAP catalog matrix. Q-005, Q-009, and Q-010 track distribution, formats and mixed-panel work. Q-008 tracks deferred platforms and Q-011 deferred visual fill. Q-004, Q-012, Q-018 and Q-019 record the verified resource, command panel, deadline and owner TIFF checks.
 
 ## Phase Overview
 
@@ -41,9 +41,9 @@ The table is a status summary, not a replacement for the full exit gates in Sect
 | 3.6D - Quality and scale recovery | Local checks passed | Match/RMS limits, Gaia confidence, false-match controls, ASTAP-only FOV recovery and Gaia recovery from wrong pointing and both scale factors. The narrow blind M42 limit is recorded. |
 | 3.6E - SIP and full-field diagnostics | Local checks passed | Synthetic truth, TAN/SIP selection, map and support diagnostics, both real TIFFs and independent reopened export. |
 | 3.6F - Integration and acceptance | Local checks passed | Qt-free portable CLI, desktop CPU/OpenGL, settings and v1/v2 migration, cancellation/retry, preview and independent exports. Full external acceptance remains open. |
-| 4A - Headless project automation | Not started | Windows CLI project creation, validation and export, machine-readable results, and scripted batch and cancellation checks. |
-| 4B - Large mosaics and improved blends | Not started | Budgeted rendering of 12 FITS and TIFF panels at 6000 × 4000, including a mixed scene, incremental export, tile/halo correctness, and measured improvement for any optional multiband blend. |
-| 4C - Desktop terminal panel | Not started | Shared AstroMosaic commands, live progress, history, and cancellation verified in a responsive desktop panel. |
+| 4A - Headless project automation | Complete | Creation, sky preflight, saved-layer export, desktop parity and scripted FITS/TIFF batch, progress, failure and cancellation checks passed on Windows. |
+| 4B - Large mosaics and improved blends | Complete | Full FITS, RGB TIFF and mixed Windows runs matched the reference after conservative candidate selection. Resource, halo, cancellation and output-limit checks passed. Optional multiband evaluation is deferred. |
+| 4C - Desktop command panel | Complete | Standalone CLI parity, live progress, history, cancellation, and window-close cleanup verified on Windows. |
 | 5 - Extended formats and channels | Not started | Format/channel/projection contracts and packaging checks for each added workflow. |
 
 ## Journal Rules
@@ -488,6 +488,67 @@ The table is a status summary, not a replacement for the full exit gates in Sect
 - **Verified:** Added a targeted regression. The native suite passed all 139 tests. The rebuilt CLI reported timeouts with empty stderr and withheld sidecars at both 2.5- and 6-second attempt limits. The independent compressed TIFF and FITS checks and rebuilt desktop CPU/OpenGL runs passed again.
 - **Verified:** Documentation review covered 36 Markdown files, 380 local links and anchors, 19 unique topic IDs and the frozen fixture manifest.
 - **Next:** Retain the verified local package and the open real-catalog/clean-machine gates.
+
+### 2026-11-18 - Phases 3.5–3.6 - Published the local Windows baseline
+
+- **Changed:** Pushed the existing Phase 3.5 verification, solver comparison and Phase 3.6 implementation to `origin/main` as `ebb0095`.
+- **Verified:** Reran all 139 native Windows source tests with OpenGL. Ruff, format, mypy, lock and staged patch checks passed. The remote branch advertises the published commit.
+- **Related:** Q-015 through Q-017 and the separate clean-machine check still track the outstanding acceptance work.
+- **Next:** Started Phase 4A from the verified local baseline at the owner's direction.
+
+### 2026-11-18 - Phase 4A - Added sky project creation and preflight
+
+- **Changed:** Added `project create` and `project validate` with version 1 JSON results and diagnostics. Creation uses the shared project writer. Validation uses the existing sky render preparation with metadata checks and an optional output path.
+- **Verified:** All 143 native Windows source tests passed, including OpenGL on the second monitor. Installed and copied Qt-free CLI checks passed. The portable checker also reopened independent FITS and compressed TIFF exports. Ruff, format, mypy and lock checks passed.
+- **Related:** [Phase 4A workflow and acceptance](docs/phase-4a.md) and [ADR-0016](docs/adr/0016-local-automation.md) record the CLI contract and its use in the later automation stages.
+- **Next:** Add saved-layer export with progress and cancellation, then verify mixed-project parity and scripted batches.
+
+### 2026-11-18 - Phase 4A - Verified saved-layer CLI export
+
+- **Changed:** Added `project export` for the saved sky, foreground and composition layers through the shared project renderer. The CLI reports bounded tile progress and handles console interrupts through the job context. FITS and TIFF check cancellation at atomic publication.
+- **Verified:** All 147 native Windows source tests passed, including OpenGL on the second monitor. Installed and copied portable CLI checks passed. An active Windows console break returned exit code 130 and removed scratch files in the Python module and portable launcher. Both retried at the same destination.
+- **Verified:** The portable CLI and desktop produced identical pixels, coverage and contribution masks from the saved mixed FITS/TIFF project, with matching sky WCS. The copied bundle also passed independent FITS and RGB TIFF project exports.
+- **Next:** Add PowerShell and Python batch examples and run the scripted success, failure and cancellation checks for Phase 4A acceptance.
+
+### 2026-11-18 - Phase 4A - Completed Windows batch acceptance
+
+- **Changed:** Added Python and PowerShell 7 examples using the same JSON job list and CLI output contract. The PowerShell example handles Windows console breaks while the active CLI completes its cancellation cleanup.
+- **Verified:** Both examples passed against the installed CLI and a copied Qt-free portable CLI. All four cases reproduced independent FITS and TIFF results, continued past missing inputs and occupied targets, preserved completed exports during interruption, and retried at the same destination.
+- **Verified:** All 147 native Windows source tests passed, including OpenGL on the second monitor. Ruff, format, mypy, PowerShell syntax and lock checks passed.
+- **Next:** Start Phase 4B resource and large-mosaic checks through the verified CLI. The separate Phase 3.6 and clean-machine checks remain open.
+
+### 2026-11-18 - Phase 4B - Verified the full-size Windows render baseline
+
+- **Changed:** Added the [full-size generator, runner and verifier](tools/phase4b_benchmark.py) for twelve 6000 × 4000 mono FITS, RGB TIFF and mixed sources per case. Recorded the layout, limits and acceptance checks in [Phase 4B](docs/phase-4b.md).
+- **Verified:** All three full outputs passed independent sample, coverage and applicable WCS checks. Peak reservations stayed from 17.125 to 20.211 MiB. The 6 MiB halo crop matched the full RGB result, the 2 GiB output cap rejected the oversized RGB job, and console cancellation cleaned up before a full FITS retry. All 147 native Windows tests and static checks passed.
+- **Verified:** The FITS crop profile recorded twelve coordinate mappings and four source reads per tile. Mapping consumed 6.888 of 10.137 seconds of the profiled render.
+- **Next:** Use conservative tile candidate bounds and compare the results and timings against these fixtures before changing the blending path.
+
+### 2026-11-18 - Phase 4B - Completed conservative tile candidate selection
+
+- **Changed:** Added output-plane footprints for ordinary TAN and placed foreground panels, with the full path for uncertain projections. The WCS check examines serialized projection cards to catch TPV normalization. The working reservation includes the cached bounds. [ADR-0018](docs/adr/0018-conservative-panel-footprints.md)
+- **Verified:** The final portable CLI produced byte-identical FITS, RGB TIFF and mixed exports with 68.0–74.0% shorter elapsed times. The matching crop used 448 mappings instead of 1,344. Tight halo, output-limit rejection, cancellation and retry passed.
+- **Verified:** All 154 native Windows tests, copied CLI checks and the four installed/portable batch runs passed. Q-004 records the verified resource contract.
+- **Next:** Start the Phase 4C desktop command panel with the shared CLI report and cancellation contracts.
+
+### 2026-11-18 - Phase 4C - Connected the desktop panel to the shared CLI
+
+- **Changed:** Added the command panel and a spawned worker using the existing CLI parser, result formats, render callbacks, and cancellation context. Recorded the working-folder and session-history behavior. [Phase 4C](docs/phase-4c.md) · [ADR-0019](docs/adr/0019-desktop-command-worker.md)
+- **Verified:** All seven focused desktop and project CLI tests passed. The panel's validation and exported FITS matched standalone CLI results. A cancelled export and an export interrupted by window close removed their temporary files. The test also covered Windows pipe closure after command exit.
+- **Next:** Run the full native suite and the copied Windows desktop and CLI checks.
+
+### 2026-11-18 - Phase 4C - Completed Windows command panel acceptance
+
+- **Changed:** Extended the copied Windows desktop checker with validation, nested worker spawning, live cancellation, and sky and composition export comparisons.
+- **Verified:** All 155 native Windows tests passed with OpenGL on the second display. The windowed application and portable console produced identical validation JSON and FITS bytes. The copied desktop CPU/OpenGL checks and Qt-free portable console check passed, along with Ruff, format, mypy, and the lock check. [Windows results](docs/phase-4c.md#local-windows-results)
+- **Related:** Closed Q-012. The clean-machine distribution check remains open.
+- **Next:** Define the first Phase 5 extended workflow and freeze its acceptance fixture.
+
+### 2026-11-18 - Phase 4 - Verified the publication baseline
+
+- **Changed:** Collected the Phase 4A–4C implementation, packaging checks, examples, and evidence in one baseline commit.
+- **Verified:** Reran all 155 Windows tests with native OpenGL on the second display. Ruff lint and format, mypy, and the Poetry lock check passed. Reviewed the changed paths for repository scope.
+- **Next:** Publish the baseline on `main`, then define the first extended format workflow for Phase 5.
 
 ## Entry Template
 

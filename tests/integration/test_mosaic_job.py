@@ -1,3 +1,4 @@
+import os
 from dataclasses import replace
 from pathlib import Path
 from threading import Event
@@ -36,6 +37,31 @@ def test_cancel_releases_handles_and_allows_retry(tmp_path: Path) -> None:
 
     renamed = source.rename(tmp_path / "Gök alanı.fits")
     assert render_mosaic([renamed], destination, SPEC).covered_pixels == 62
+
+
+@pytest.mark.parametrize("suffix", [".fits", ".tiff"])
+def test_cancel_during_flush_prevents_raster_publication(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, suffix: str
+) -> None:
+    source = tmp_path / "source.fits"
+    write_smoke_panel(source)
+    destination = tmp_path / f"mosaic{suffix}"
+    cancelled = Event()
+    fsync = os.fsync
+
+    def flush_and_cancel(fd: int) -> None:
+        fsync(fd)
+        cancelled.set()
+
+    with (
+        monkeypatch.context() as patch,
+        pytest.raises(MosaicCancelled),
+    ):
+        patch.setattr(os, "fsync", flush_and_cancel)
+        render_mosaic([source], destination, SPEC, context=JobContext(cancelled.is_set))
+    assert cancelled.is_set()
+    assert not destination.exists() and not list(tmp_path.glob("*.part"))
+    assert render_mosaic([source], destination, SPEC).covered_pixels == 62
 
 
 def test_destination_race_and_input_alias_do_not_clobber(tmp_path: Path) -> None:

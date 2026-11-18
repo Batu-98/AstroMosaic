@@ -1,6 +1,6 @@
 """Write an atomic TIFF mosaic with embedded WCS and coverage."""
 
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
 from shutil import disk_usage
@@ -24,6 +24,7 @@ def open_tiff_mosaic(
     max_output_bytes: int,
     *,
     layers: bool = False,
+    publish_check: Callable[[], None] | None = None,
 ) -> Iterator[RasterMosaicWriter]:
     path = path.absolute()
     if path.suffix.lower() not in TIFF_SUFFIXES:
@@ -48,7 +49,7 @@ def open_tiff_mosaic(
     rgb = channels == 3
     shape = (height, width, 3) if rgb else (height, width)
     bigtiff = raster_bytes + len(description) >= 2**32 - 4096
-    with atomic_binary_file(path) as stream:
+    with atomic_binary_file(path, publish_check=publish_check) as stream:
         # The writer reserves the rasters on disk and returns their byte offsets.
         with TiffWriter(stream, byteorder="<", bigtiff=bigtiff) as tiff:
             science = tiff.write(

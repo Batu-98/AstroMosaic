@@ -1,5 +1,7 @@
 """Headless command-line interface."""
 
+from __future__ import annotations
+
 import argparse
 import json
 import os
@@ -8,23 +10,21 @@ from collections.abc import Mapping
 from dataclasses import asdict, replace
 from importlib.metadata import version
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+from astromosaic.cli.project import add_project_commands, run_project
+from astromosaic.cli.render_options import (
+    add_render_options,
+    panel_files,
+    render_options,
+    with_render_reporting,
+)
+
+if TYPE_CHECKING:
+    from astromosaic.core.job import JobContext
 
 
-def _panel_files(values: list[str], count: int) -> dict[int, Path]:
-    paths: dict[int, Path] = {}
-    for value in values:
-        index, _, path = value.partition("=")
-        if not (index.isascii() and index.isdecimal() and path):
-            raise ValueError("Expected PANEL=PATH with a one-based panel number.")
-        number = int(index) - 1
-        if not 0 <= number < count or number in paths:
-            raise ValueError("Each PANEL=PATH must identify a distinct input panel.")
-        paths[number] = Path(path)
-    return paths
-
-
-def _run_solve(arguments: argparse.Namespace) -> tuple[dict[str, object], int]:
-    os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
+def _run_solve(arguments: argparse.Namespace, job: JobContext) -> tuple[dict[str, object], int]:
     from astromosaic.astrometry.solve import (
         SolveOptions,
         SolveResult,
@@ -34,7 +34,6 @@ def _run_solve(arguments: argparse.Namespace) -> tuple[dict[str, object], int]:
     )
     from astromosaic.astrometry.solve_budget import SolveBudgetExceeded
     from astromosaic.core import SourceFingerprint
-    from astromosaic.core.job import DEFAULT_JOB_CONTEXT
     from astromosaic.io import open_panel
 
     options = SolveOptions(
@@ -54,7 +53,7 @@ def _run_solve(arguments: argparse.Namespace) -> tuple[dict[str, object], int]:
         max_scratch_bytes=arguments.scratch_mib * 1024**2,
     )
     budget = panel_budget(options)
-    context = budget.context(DEFAULT_JOB_CONTEXT)
+    context = budget.context(job)
     solution = SolveResult(None, None, ())
     existing = None
     source_path, mask_path = arguments.path, arguments.sky_mask
@@ -89,8 +88,8 @@ def _run_solve(arguments: argparse.Namespace) -> tuple[dict[str, object], int]:
                 max_tile_bytes=options.max_working_bytes,
                 sky_mask=arguments.sky_mask,
             )
-        context.check_cancelled()
         with opened as panel:
+            context.check_cancelled()
             solution = solve_panel(
                 panel, options, context, budget=budget, existing_sidecar=existing
             )
@@ -120,57 +119,15 @@ def _run_solve(arguments: argparse.Namespace) -> tuple[dict[str, object], int]:
     return report, int(solution.geometry is None)
 
 
-def _run_mosaic(arguments: argparse.Namespace) -> tuple[dict[str, object], int]:
-    # The synchronous renderer needs no BLAS pool. Configure the CLI before native imports.
-    os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
+def _run_mosaic(
+    arguments: argparse.Namespace, context: JobContext
+) -> tuple[dict[str, object], int]:
+    from astromosaic.pipeline.mosaic import render_mosaic
+    from astromosaic.pipeline.refinement import RefinementRejected
 
-    from astromosaic.core import Region
-    from astromosaic.pipeline.mosaic import (
-        DEFAULT_OUTPUT_BYTES,
-        DEFAULT_TILE_SIZE,
-        DEFAULT_WORKING_BYTES,
-        MIB,
-        JobContext,
-        RenderSpec,
-        render_mosaic,
-    )
-    from astromosaic.pipeline.refinement import RefinementRejected, RefinementSpec
-
-    last_interval = -1
-
-    def report(done: int, total: int) -> None:
-        nonlocal last_interval
-        interval = (20 * done) // total
-        if interval != last_interval:
-            print(f"Rendering: {done}/{total} pixels ({(100 * done) // total}%)", file=sys.stderr)
-            last_interval = interval
-
-    spec = RenderSpec(
-        center=tuple(arguments.center),
-        size=tuple(arguments.size),
-        scale_arcsec=arguments.scale,
-        rotation_deg=arguments.rotation,
-        crop=Region(*arguments.crop) if arguments.crop else None,
-        tile_size=DEFAULT_TILE_SIZE if arguments.tile_size is None else arguments.tile_size,
-        max_working_bytes=(
-            DEFAULT_WORKING_BYTES if arguments.memory_mib is None else arguments.memory_mib * MIB
-        ),
-        max_output_bytes=(
-            DEFAULT_OUTPUT_BYTES
-            if arguments.output_limit_mib is None
-            else arguments.output_limit_mib * MIB
-        ),
-    )
-    refinement = None
-    if arguments.refine:
-        refinement = RefinementSpec(
-            max_shift_px=6.0 if arguments.match_radius is None else arguments.match_radius,
-            background=arguments.background or "offset",
-        )
-        if arguments.progress:
-            print("Measuring sky stars and fitting overlaps.", file=sys.stderr)
-    elif arguments.match_radius is not None or arguments.background is not None:
-        raise ValueError("Use --refine with --match-radius or --background.")
+    spec, refinement = render_options(arguments)
+    if refinement is not None and arguments.progress:
+        print("Measuring sky stars and fitting overlaps.", file=sys.stderr)
     try:
         result = render_mosaic(
             arguments.panels,
@@ -179,10 +136,10 @@ def _run_mosaic(arguments: argparse.Namespace) -> tuple[dict[str, object], int]:
             weights=arguments.weights,
             filter_name=arguments.filter,
             assume_surface_brightness=arguments.assume_surface_brightness,
-            sky_masks=_panel_files(arguments.sky_mask, len(arguments.panels)),
-            wcs_sidecars=_panel_files(arguments.wcs, len(arguments.panels)),
+            sky_masks=panel_files(arguments.sky_mask, len(arguments.panels)),
+            wcs_sidecars=panel_files(arguments.wcs, len(arguments.panels)),
             refinement=refinement,
-            context=JobContext(on_progress=report if arguments.progress else None),
+            context=with_render_reporting(context, arguments.progress),
         )
     except RefinementRejected as error:
         return {"status": error.report.status, "refinement": asdict(error.report)}, 1
@@ -193,7 +150,7 @@ def _run_mosaic(arguments: argparse.Namespace) -> tuple[dict[str, object], int]:
     return payload, 0
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: list[str] | None = None, *, context: JobContext | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="astromosaic", description="Work with linear FITS and TIFF panels."
     )
@@ -256,107 +213,43 @@ def main(argv: list[str] | None = None) -> int:
     mosaic.add_argument(
         "-o", "--output", required=True, type=Path, help="A new FITS (mono) or TIFF output path."
     )
-    mosaic.add_argument(
-        "--center",
-        required=True,
-        type=float,
-        nargs=2,
-        metavar=("RA", "DEC"),
-        help="ICRS tangent point in degrees.",
-    )
-    mosaic.add_argument(
-        "--scale",
-        required=True,
-        type=float,
-        metavar="ARCSEC",
-        help="Output pixel scale in arcseconds per pixel.",
-    )
-    mosaic.add_argument(
-        "--size",
-        required=True,
-        type=int,
-        nargs=2,
-        metavar=("WIDTH", "HEIGHT"),
-        help="Uncropped output dimensions in pixels.",
-    )
-    mosaic.add_argument(
-        "--rotation",
-        type=float,
-        default=0,
-        metavar="DEGREES",
-        help="Rotation of the positive x axis from west toward north.",
-    )
-    mosaic.add_argument(
-        "--crop",
-        type=int,
-        nargs=4,
-        metavar=("X", "Y", "WIDTH", "HEIGHT"),
-        help="Optional zero-based crop within the output grid.",
-    )
-    mosaic.add_argument("--weights", type=float, nargs="+", help="Positive weights in panel order.")
-    mosaic.add_argument("--filter", help="Common filter for inputs with missing FILTER metadata.")
-    mosaic.add_argument(
-        "--wcs",
-        action="append",
-        default=[],
-        metavar="PANEL=PATH",
-        help="Use a saved WCS sidecar for the given one-based input number.",
-    )
-    mosaic.add_argument(
-        "--sky-mask",
-        action="append",
-        default=[],
-        metavar="PANEL=PATH",
-        help="Use a binary FITS sky mask for the given one-based input number.",
-    )
-    mosaic.add_argument(
-        "--refine",
-        action="store_true",
-        help="Fit relative stellar shifts and gains for mono inputs.",
-    )
-    mosaic.add_argument(
-        "--match-radius",
-        type=float,
-        metavar="PIXELS",
-        help="Relative star matching radius in output pixels (6 with --refine).",
-    )
-    mosaic.add_argument(
-        "--background",
-        choices=("none", "offset", "plane"),
-        help="Relative background model (offset with --refine).",
-    )
-    mosaic.add_argument(
-        "--assume-surface-brightness",
-        action="store_true",
-        help="Declare a common surface-brightness scale for ambiguous BUNIT values.",
-    )
-    mosaic.add_argument("--tile-size", type=int, metavar="PIXELS", help="Maximum tile side (128).")
-    mosaic.add_argument(
-        "--memory-mib", type=int, metavar="MIB", help="Estimated working buffer budget (64 MiB)."
-    )
-    mosaic.add_argument(
-        "--output-limit-mib", type=int, metavar="MIB", help="Maximum output file size (2048 MiB)."
-    )
+    add_render_options(mosaic)
     mosaic.add_argument("--progress", action="store_true", help="Report tile progress to stderr.")
+    add_project_commands(
+        commands.add_parser(
+            "project", help="Create, validate or export saved AstroMosaic projects."
+        )
+    )
     arguments = parser.parse_args(argv)
 
+    # Set the BLAS default before importing native modules for command execution.
+    os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
+    if arguments.command == "project":
+        return run_project(arguments, context=context)
+
+    from astromosaic.core.job import DEFAULT_JOB_CONTEXT, MosaicCancelled
+
+    job = context or DEFAULT_JOB_CONTEXT
     result: Mapping[str, object]
     status = 0
     try:
+        job.check_cancelled()
         if arguments.command == "inspect":
             from astromosaic.io import open_panel
 
             with open_panel(arguments.path) as panel:
                 result = asdict(panel.descriptor)
+            job.check_cancelled()
         elif arguments.command == "mosaic":
-            result, status = _run_mosaic(arguments)
+            result, status = _run_mosaic(arguments, job)
         elif arguments.command == "solve":
-            result, status = _run_solve(arguments)
+            result, status = _run_solve(arguments, job)
         else:
             from astromosaic.pipeline.smoke import run_smoke
 
             result = run_smoke(spawn=arguments.spawn)
-    except KeyboardInterrupt:
+            job.check_cancelled()
+    except (KeyboardInterrupt, MosaicCancelled):
         print("astromosaic: Job interrupted.", file=sys.stderr)
         return 130
     except (OSError, RuntimeError, ValueError) as error:

@@ -1,6 +1,6 @@
 """Write a tiled science image and binary coverage into an atomic FITS export."""
 
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
 from shutil import disk_usage
@@ -35,6 +35,7 @@ def open_fits_mosaic(
     max_output_bytes: int,
     *,
     layers: bool = False,
+    publish_check: Callable[[], None] | None = None,
 ) -> Iterator[RasterMosaicWriter]:
     """Publish only after all tiles are written and flushed, without replacing an existing file."""
     path = path.absolute()
@@ -62,7 +63,7 @@ def open_fits_mosaic(
     if total_size > disk_usage(path.parent).free:
         raise OSError("There is insufficient disk space for the FITS mosaic.")
 
-    with atomic_binary_file(path) as stream:
+    with atomic_binary_file(path, publish_check=publish_check) as stream:
         stream.truncate(total_size)
         stream.write(pixels_header)
         primary_end = len(pixels_header) + 4 * pixel_count

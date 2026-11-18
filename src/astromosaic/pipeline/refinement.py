@@ -51,6 +51,13 @@ class RefinementRejected(ValueError):
         )
 
 
+def validate_refinement_inputs(sources: Sequence[PanelSource]) -> None:
+    if any(source.descriptor.channel_layout != "mono" for source in sources):
+        raise ValueError("Relative refinement currently requires mono panels.")
+    if len(sources) < 2:
+        raise ValueError("Relative refinement requires at least two panels.")
+
+
 def refine_panels(
     panels: Sequence[tuple[PanelSource, PanelGeometry]],
     target: PanelGeometry,
@@ -58,10 +65,7 @@ def refine_panels(
     budget: int,
     context: JobContext,
 ) -> RefinementReport:
-    if any(source.descriptor.channel_layout != "mono" for source, _ in panels):
-        raise ValueError("Relative refinement currently requires mono panels.")
-    if len(panels) < 2:
-        raise ValueError("Relative refinement requires at least two panels.")
+    validate_refinement_inputs([source for source, _ in panels])
     exclusions = []
     star_counts = []
     fields = []

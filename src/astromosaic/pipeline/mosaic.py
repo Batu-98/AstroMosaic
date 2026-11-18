@@ -1,6 +1,6 @@
 """Render an ICRS TAN mosaic with a bounded, synchronous tile loop."""
 
-from collections.abc import Callable, Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass, replace
 from importlib.metadata import version
@@ -26,6 +26,7 @@ from astromosaic.geometry import (
     read_panel_geometry,
     tan_output_wcs,
 )
+from astromosaic.geometry.footprint import PixelBounds, raster_bounds, tan_footprint
 from astromosaic.io import TIFF_SUFFIXES, PanelSource, SkyMask, open_panel
 from astromosaic.io.fits_export import open_fits_mosaic
 from astromosaic.photometry import PanelCorrection
@@ -39,6 +40,7 @@ DEFAULT_TILE_SIZE = 128
 # Include live WCS/frame and inverse-iteration arrays, blend buffers, and endian conversion.
 _OUTPUT_BYTES_PER_PIXEL = 1024
 _TILE_FIXED_BYTES = 64 * 1024
+_FOOTPRINT_BYTES_PER_PANEL = 256
 _PROXY_EDGE = 160
 _PREVIEW_EDGE = 512
 
@@ -113,6 +115,13 @@ class _Panel:
     weight: float
     wcs_origin: str = "primary WCS"
     correction: PanelCorrection | None = None
+    footprint: PixelBounds | None = None
+
+
+def _footprint_reservation(panels: int, working_bytes: int) -> int:
+    reserved = panels * _FOOTPRINT_BYTES_PER_PANEL
+    # Preserve the sampling budget on small jobs. Footprint selection is optional.
+    return reserved if panels > 1 and reserved <= working_bytes // 32 else 0
 
 
 def _set_calibration(
@@ -204,7 +213,7 @@ class _WorkingBudget:
 
 def _try_tile[P: _RasterPanel](
     region: Region,
-    panels: Sequence[P],
+    panels: Iterable[P],
     make_mapper: Callable[[], Callable[[P], _Coordinates]],
     budget: _WorkingBudget,
     context: JobContext,
@@ -216,12 +225,14 @@ def _try_tile[P: _RasterPanel](
         return None
 
     rejected = 0
-    map_panel = make_mapper()
+    map_panel = None
     numerator = np.zeros((count, channels), dtype=np.float64)
     denominator = np.zeros(count, dtype=np.float64)
     weight_scale = np.zeros(count, dtype=np.float64)
     for panel in panels:
         context.check_cancelled()
+        if map_panel is None:
+            map_panel = make_mapper()
         correction = panel.correction
         px, py, usable = map_panel(panel)
         rejected += count - int(np.count_nonzero(usable))
@@ -307,16 +318,23 @@ class _RasterPlan:
     output_wcs: WCS | None = None
     refinement: RefinementReport | None = None
     seam_width: float | None = None
+    footprint_bytes: int = 0
 
     def tiles(
         self, width: int, height: int, budget: _WorkingBudget, context: JobContext
     ) -> Iterator[_RenderedTile]:
+        if not budget.reserve(self.footprint_bytes):
+            raise ValueError("The working byte budget cannot fit the panel footprints.")
+        tile_budget = _WorkingBudget(budget.limit - self.footprint_bytes)
         scale = (self.size[0] / width, self.size[1] / height)
         step = self.spec.tile_size
-        for y in range(0, height, step):
-            for x in range(0, width, step):
-                region = Region(x, y, min(step, width - x), min(step, height - y))
-                yield from _fit_tile(region, self.render_tile, budget, context, scale)
+        try:
+            for y in range(0, height, step):
+                for x in range(0, width, step):
+                    region = Region(x, y, min(step, width - x), min(step, height - y))
+                    yield from _fit_tile(region, self.render_tile, tile_budget, context, scale)
+        finally:
+            budget.reserve(self.footprint_bytes + tile_budget.peak)
 
 
 @dataclass(frozen=True, slots=True)
@@ -328,6 +346,7 @@ class _PreparedMosaic:
     size: tuple[int, int]
     spec: RenderSpec
     refinement: RefinementReport | None
+    footprint_bytes: int
 
     def try_tile(
         self,
@@ -339,6 +358,20 @@ class _PreparedMosaic:
         origin: tuple[int, int] = (0, 0),
         sky_height: int | None = None,
     ) -> _RenderedTile | None:
+        candidates: Iterable[_Panel] = self.panels
+        if self.footprint_bytes or sky_height is not None:
+            tile_bounds = raster_bounds(region, scale, origin)
+            if sky_height is not None and not tile_bounds.intersects(
+                raster_bounds(Region(0, 0, self.size[0], sky_height))
+            ):
+                candidates = ()
+            elif self.footprint_bytes:
+                candidates = (
+                    panel
+                    for panel in self.panels
+                    if panel.footprint is None or panel.footprint.intersects(tile_bounds)
+                )
+
         def make_mapper() -> Callable[[_Panel], _Coordinates]:
             x, y = raster_pixels(region, scale, origin)
             sky = TileSky.from_pixels(self.target, x, y)
@@ -357,7 +390,7 @@ class _PreparedMosaic:
 
             return locate
 
-        return _try_tile(region, self.panels, make_mapper, budget, context, self.channels)
+        return _try_tile(region, candidates, make_mapper, budget, context, self.channels)
 
     def raster(self) -> _RasterPlan:
         return _RasterPlan(
@@ -369,6 +402,7 @@ class _PreparedMosaic:
             self.spec,
             self.target.wcs,
             self.refinement,
+            footprint_bytes=self.footprint_bytes,
         )
 
 
@@ -420,10 +454,10 @@ def _prepare_mosaic(
                         sky_mask=sky_masks.get(index),
                     )
                 )
-                panel = source.descriptor
+                descriptor = source.descriptor
                 provenance = (
                     "TIFF description WCS"
-                    if panel.wcs_provenance == "tiff-description"
+                    if descriptor.wcs_provenance == "tiff-description"
                     else "primary WCS"
                 )
                 if index in wcs_sidecars:
@@ -431,7 +465,9 @@ def _prepare_mosaic(
 
                     geometry, provenance = load_solution(wcs_sidecars[index], source)
                 else:
-                    geometry = read_panel_geometry(source.header, panel.width, panel.height)
+                    geometry = read_panel_geometry(
+                        source.header, descriptor.width, descriptor.height
+                    )
             except ValueError as error:
                 raise ValueError(f"Input panel {index + 1}: {error}") from error
             panels.append(_Panel(source, geometry, weight, provenance))
@@ -466,9 +502,20 @@ def _prepare_mosaic(
                 header.add_history(
                     f"Anchored relative refinement: {report.background.model} background."
                 )
-        yield _PreparedMosaic(
-            target, panels, channels, header, (crop.width, crop.height), spec, report
-        )
+        size = crop.width, crop.height
+        footprint_bytes = 0
+        if _footprint_reservation(len(panels), spec.max_working_bytes):
+            for index, panel in enumerate(panels):
+                context.check_cancelled()
+                descriptor = panel.source.descriptor
+                shift = panel.correction.shift if panel.correction else (0.0, 0.0)
+                footprint = tan_footprint(
+                    panel.geometry, target, (descriptor.width, descriptor.height), size, shift
+                )
+                if footprint is not None:
+                    footprint_bytes += _FOOTPRINT_BYTES_PER_PANEL
+                    panels[index] = replace(panel, footprint=footprint)
+        yield _PreparedMosaic(target, panels, channels, header, size, spec, report, footprint_bytes)
 
 
 def render_mosaic(
@@ -512,13 +559,26 @@ def _write_raster(mosaic: _RasterPlan, destination: Path, context: JobContext) -
         from astromosaic.io.tiff_export import open_tiff_mosaic
 
         writer_context = open_tiff_mosaic(
-            destination, width, height, mosaic.channels, mosaic.header, max_bytes, layers=layers
+            destination,
+            width,
+            height,
+            mosaic.channels,
+            mosaic.header,
+            max_bytes,
+            layers=layers,
+            publish_check=context.check_cancelled,
         )
     else:
         if mosaic.channels != 1:
             raise ValueError("RGB mosaics require TIFF output.")
         writer_context = open_fits_mosaic(
-            destination, width, height, mosaic.header, max_bytes, layers=layers
+            destination,
+            width,
+            height,
+            mosaic.header,
+            max_bytes,
+            layers=layers,
+            publish_check=context.check_cancelled,
         )
     with writer_context as writer:
         for rendered in mosaic.tiles(width, height, budget, context):
