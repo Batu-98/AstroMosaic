@@ -13,6 +13,10 @@ try {
         }
     }
     $Python = (Resolve-Path -LiteralPath $Python).Path
+    & $Python -c "import PyInstaller, seiza; from imagecodecs import _imcd; from PySide6 import QtCore"
+    if ($LASTEXITCODE -ne 0) {
+        throw 'Sync the locked main/build environment with the desktop and gaia extras.'
+    }
     $distPath = Join-Path $projectRoot 'dist/windows'
     $workPath = Join-Path $projectRoot 'build/windows'
     if ($DesktopCheck) { $distPath = Join-Path $workPath 'checks' }
@@ -33,7 +37,7 @@ try {
     $common = @(
         '-m', 'PyInstaller', '--onedir', '--clean', '--noconfirm', '--noupx',
         '--distpath', $distPath, '--workpath', $workPath, '--specpath', $workPath,
-        '--copy-metadata', 'astromosaic',
+        '--copy-metadata', 'astromosaic', '--copy-metadata', 'seiza',
         '--hidden-import', 'imagecodecs._imcd',
         '--hidden-import', 'imagecodecs._deflate',
         '--hidden-import', 'imagecodecs._shared',
@@ -46,7 +50,7 @@ try {
     }
     & $Python @common --windowed --name AstroMosaic src/astromosaic/ui/__main__.py
     if ($LASTEXITCODE -ne 0) { throw 'The desktop bundle failed to build.' }
-    & $Python @common --console --name astromosaic-cli --copy-metadata seiza `
+    & $Python @common --console --name astromosaic-cli `
         --exclude-module PySide6 --exclude-module shiboken6 src/astromosaic/__main__.py
     if ($LASTEXITCODE -ne 0) { throw 'The CLI bundle failed to build.' }
     foreach ($bundle in @('AstroMosaic', 'astromosaic-cli')) {

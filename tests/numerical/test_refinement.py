@@ -1,10 +1,12 @@
 import json
+from contextlib import ExitStack
 from pathlib import Path
 
 import fitsio
 import numpy as np
 import pytest
 from astropy.io import fits
+from astropy.wcs import WCS
 from numpy.typing import NDArray
 from phase2_reference import (
     ARCSEC,
@@ -19,10 +21,21 @@ from phase2_reference import (
 )
 
 from astromosaic.astrometry.registration import ProjectedField, register
+from astromosaic.astrometry.solve import load_solution
+from astromosaic.astrometry.stars import measure_stars
 from astromosaic.cli import main
+from astromosaic.core import Region
 from astromosaic.core.job import JobContext
 from astromosaic.core.masks import FOREGROUND, SKY, SourceMask
-from astromosaic.pipeline.mosaic import RenderSpec, preview_mosaic, render_mosaic
+from astromosaic.geometry import read_panel_geometry, tan_output_wcs
+from astromosaic.io import open_panel
+from astromosaic.photometry.background import BackgroundPanel, fit_background
+from astromosaic.pipeline.mosaic import (
+    DEFAULT_WORKING_BYTES,
+    RenderSpec,
+    preview_mosaic,
+    render_mosaic,
+)
 from astromosaic.pipeline.refinement import RefinementSpec
 from astromosaic.storage.project import (
     FileReference,
@@ -150,6 +163,129 @@ def test_constant_background_prefers_offset_to_plane(tmp_path: Path) -> None:
             prepared.append((hdus[0].read(), hdus["COVERAGE"].read()))
     np.testing.assert_array_equal(prepared[0][0], prepared[1][0])
     np.testing.assert_array_equal(prepared[0][1], prepared[1][1])
+
+
+def test_narrow_overlap_prefers_offset_to_plane(tmp_path: Path) -> None:
+    width, height = 176, 144
+    size = (348, height)
+    header = tan_output_wcs(CENTER, size, ARCSEC, 0, Region(0, 0, *size)).to_header()
+    target = read_panel_geometry(header, *size)
+    normalized_x = 2 * np.arange(width) / (width - 1) - 1
+    left = np.full((height, width), 10, dtype=np.float32)
+    right = np.tile(10 - (3 + normalized_x), (height, 1)).astype(np.float32)
+
+    with ExitStack() as stack:
+        panels = []
+        for x_origin, pixels in ((0, left), (172, right)):
+            path = tmp_path / f"strip-{x_origin}.fits"
+            panel_header = header.copy()
+            panel_header["CRPIX1"] -= x_origin
+            fits.writeto(path, pixels, panel_header)
+            source = stack.enter_context(open_panel(path))
+            panels.append(
+                BackgroundPanel(
+                    source=source,
+                    geometry=read_panel_geometry(source.header, width, height),
+                    bounds=(x_origin - 0.5, -0.5, x_origin + width - 0.5, height - 0.5),
+                    exclusions=np.empty((0, 3), dtype=np.float64),
+                    shift=(0.0, 0.0),
+                    gain=1.0,
+                )
+            )
+        coefficients, report = fit_background(
+            panels, ((0, 1),), target, "plane", DEFAULT_WORKING_BYTES, JobContext()
+        )
+
+    assert report.model == "offset"
+    assert 0 < report.held_out < report.samples
+    np.testing.assert_array_equal(coefficients[0], 0.0)
+    np.testing.assert_array_equal(coefficients[1, 1:], 0.0)
+    # The common strip spans the first four columns of the right panel.
+    assert coefficients[1, 0] == pytest.approx(2 + 3 / (width - 1), abs=0.05, rel=0)
+    assert report.uncorrected_median is not None and report.corrected_median is not None
+    assert report.corrected_median <= 0.95 * report.uncorrected_median
+
+
+def test_saturated_stars_are_excluded_from_flux_and_masked_for_background(tmp_path: Path) -> None:
+    shape = (144, 160)
+    y, x = np.indices(shape, dtype=np.float64)
+    pixels = np.random.default_rng(4819).normal(5.0, 0.03, shape)
+    saturated = ((40, 50), (110, 100))
+    unsaturated = ((110, 50), (40, 100))
+    for positions, amplitude in ((saturated, 180), (unsaturated, 80)):
+        for sx, sy in positions:
+            pixels += amplitude * np.exp(-((x - sx) ** 2 + (y - sy) ** 2) / (2 * 1.6**2))
+    path = tmp_path / "saturated.fits"
+    fits.writeto(path, pixels.astype(np.float32), fits.Header({"SATURATE": 120}))
+    with open_panel(path) as panel:
+        field = measure_stars(panel, DEFAULT_WORKING_BYTES, JobContext())
+
+    measured = np.array([(star.x, star.y) for star in field.stars]).reshape(-1, 2)
+    for position in unsaturated:
+        assert np.any(np.linalg.norm(measured - position, axis=1) <= 1), position
+    for position in saturated:
+        assert not np.any(np.linalg.norm(measured - position, axis=1) <= 1), position
+        assert np.any(np.linalg.norm(field.exclusions[:, :2] - position, axis=1) <= 1), position
+
+
+def _assert_matching_wcs(first: WCS, second: WCS, width: int, height: int) -> None:
+    x = [(width - 1) / 2, 0, 0, width - 1, width - 1]
+    y = [(height - 1) / 2, 0, height - 1, 0, height - 1]
+    sky = first.pixel_to_world(x, y)
+    assert np.all(sky.separation(second.pixel_to_world(x, y)).deg <= 1e-9)
+
+
+def test_refined_cli_reuses_masked_wcs_sidecar(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    fixture = write_panels(tmp_path)
+    middle = fixture.paths[1]
+    originals = {path: path.read_bytes() for path in (*fixture.paths, fixture.mask)}
+    sidecar = tmp_path / "middle.wcs.json"
+    assert main(["solve", str(middle), "--sky-mask", str(fixture.mask), "-o", str(sidecar)]) == 0
+    assert json.loads(capsys.readouterr().out)["stage"] == "existing-wcs"
+    with open_panel(middle, sky_mask=fixture.mask) as source:
+        geometry, _ = load_solution(sidecar, source)
+        _assert_matching_wcs(
+            WCS(source.header), geometry.wcs, source.descriptor.width, source.descriptor.height
+        )
+
+    arguments = [
+        "mosaic",
+        *map(str, fixture.paths),
+        "--sky-mask",
+        f"2={fixture.mask}",
+        "--center",
+        *map(str, CENTER),
+        "--size",
+        *map(str, SIZE),
+        "--scale",
+        str(ARCSEC),
+        "--refine",
+        "--background",
+        "plane",
+        "--tile-size",
+        "37",
+    ]
+    embedded = tmp_path / "embedded.fits"
+    reused = tmp_path / "reused.fits"
+    assert main([*arguments, "-o", str(embedded)]) == 0
+    assert json.loads(capsys.readouterr().out)["refinement"]["status"] == "ready"
+    assert main([*arguments, "--wcs", f"2={sidecar}", "-o", str(reused)]) == 0
+    assert json.loads(capsys.readouterr().out)["refinement"]["status"] == "ready"
+
+    with fitsio.FITS(embedded) as expected, fitsio.FITS(reused) as actual:
+        pixels = actual[0].read()
+        coverage = actual["COVERAGE"].read()
+        np.testing.assert_array_equal(coverage, expected["COVERAGE"].read())
+        np.testing.assert_array_equal(coverage, np.isfinite(pixels))
+        np.testing.assert_allclose(pixels, expected[0].read(), rtol=0, atol=2e-6, equal_nan=True)
+        assert coverage[133, 180] == 0 and coverage[60, 180] == 1
+
+    header = fits.getheader(reused)
+    assert "existing-wcs WCS sidecar" in str(header["HISTORY"])
+    _assert_matching_wcs(WCS(fits.getheader(embedded)), WCS(header), *SIZE)
+    assert {path: path.read_bytes() for path in originals} == originals
 
 
 @pytest.mark.parametrize("status", ["weak", "disconnected"])

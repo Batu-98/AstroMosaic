@@ -11,6 +11,7 @@ import pytest
 from astropy.io import fits
 
 from astromosaic.astrometry import solve
+from astromosaic.astrometry.astap_probe import AstapCandidate
 from astromosaic.astrometry.solve import SolveOptions, solve_panel
 from astromosaic.astrometry.stars import measure_stars
 from astromosaic.cli import main
@@ -18,7 +19,7 @@ from astromosaic.core import Region
 from astromosaic.core.job import JobContext, MosaicCancelled
 from astromosaic.core.masks import FOREGROUND, SKY, SourceMask
 from astromosaic.geometry import tan_output_wcs
-from astromosaic.io import PanelSource, open_panel
+from astromosaic.io import open_panel
 from astromosaic.io.fits import open_fits_panel
 from astromosaic.pipeline.mosaic import RenderSpec
 from astromosaic.pipeline.smoke import write_smoke_panel
@@ -47,7 +48,10 @@ def test_valid_wcs_reuse_stops_before_catalogs_or_pixel_reads(tmp_path: Path) ->
 
 
 def test_solver_fallback_stages_masked_input_and_renderer_reuses_sidecar(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    stub_solve_evidence: None,
 ) -> None:
     reference = tmp_path / "reference.fits"
     write_smoke_panel(reference)
@@ -59,6 +63,7 @@ def test_solver_fallback_stages_masked_input_and_renderer_reuses_sidecar(
     fits.writeto(mask, (pixels == 2).astype(np.uint8))
     original = source.read_bytes()
     order = []
+    (tmp_path / "gaia.bin").touch()
 
     def gaia_failure(*args: object) -> None:
         order.append("gaia")
@@ -71,7 +76,7 @@ def test_solver_fallback_stages_masked_input_and_renderer_reuses_sidecar(
         *,
         position: tuple[float, float] | None,
         **kwargs: object,
-    ) -> tuple[fits.Header, str]:
+    ) -> AstapCandidate:
         name = "hinted" if position else "blind"
         order.append(name)
         staged = tmp_path / f"staged-{name}.fits"
@@ -81,9 +86,10 @@ def test_solver_fallback_stages_masked_input_and_renderer_reuses_sidecar(
             assert "CRVAL1" not in hdus[0].read_header()
         if position is not None:
             raise subprocess.TimeoutExpired("ASTAP", 1)
-        return solved, "test"
+        assert kwargs["field_height_deg"] == 0
+        return AstapCandidate(solved, "CLI-test", "d05")
 
-    monkeypatch.setattr(solve, "_solve_gaia", gaia_failure)
+    monkeypatch.setattr(solve, "search_gaia", gaia_failure)
     monkeypatch.setattr(solve, "solve_astap", fake_astap)
     sidecar = tmp_path / "panel.wcs.json"
     assert (
@@ -112,13 +118,13 @@ def test_solver_fallback_stages_masked_input_and_renderer_reuses_sidecar(
     )
     report = json.loads(capsys.readouterr().out)
     assert report["stage"] == "astap-blind"
+    assert report["attempts"][-1]["catalog"] == "d05"
     assert [item["outcome"] for item in report["attempts"]] == [
-        "failed",
         "failed",
         "timeout",
         "solved",
     ]
-    assert order == ["gaia", "hinted", "blind"]
+    assert order == ["hinted", "blind"]
 
     destination = tmp_path / "rendered.fits"
     arguments = [
@@ -157,20 +163,23 @@ def test_exhausted_chain_reports_skips_and_writes_no_solution(
     output = tmp_path / "missing.json"
     assert main(["solve", str(source), "-o", str(output)]) == 1
     details = json.loads(capsys.readouterr().out)
-    assert details["status"] == "unsolved"
+    assert details["status"] == "unavailable"
     assert details["stage"] is None
     assert [item["stage"] for item in details["attempts"]] == [
         "existing-wcs",
-        "gaia-dr3",
         "astap-hinted",
         "astap-blind",
+        "gaia-dr3",
     ]
-    assert details["attempts"][2]["detail"] == "No usable pointing hint."
+    assert details["attempts"][1]["detail"] == "No usable pointing or scale hint."
     assert not output.exists()
 
 
 def test_project_solve_uses_edited_mask_and_rejects_a_stale_wcs(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    stub_solve_evidence: None,
 ) -> None:
     width, height = size = (160, 176)
     center = (359.999, 20.0)
@@ -201,21 +210,16 @@ def test_project_solve_uses_edited_mask_and_rejects_a_stale_wcs(
         unmasked = measure_stars(raw, 64 * 1024**2, JobContext())
         assert np.any(unmasked.exclusions[:, 1] > 100)
 
-    def gaia_uses_sky(source: PanelSource, options: SolveOptions, *args: object) -> None:
-        masked = measure_stars(source, options.max_working_bytes, JobContext())
-        assert not masked.stars and not masked.exclusions.size
-        raise ValueError("No sky stars in the fixture.")
-
     def astap_uses_sky(
         _exe: Path, _db: Path, stage: Callable[[Path], None], **kwargs: object
-    ) -> tuple[fits.Header, str]:
+    ) -> AstapCandidate:
         staged = tmp_path / "staged-project.fits"
         stage(staged)
         with fitsio.FITS(staged) as hdus:
             np.testing.assert_array_equal(hdus[0].read(), 2.0)
-        return tan_output_wcs(center, size, 7.2, 0, Region(0, 0, width, height)).to_header(), "test"
+        header = tan_output_wcs(center, size, 7.2, 0, Region(0, 0, width, height)).to_header()
+        return AstapCandidate(header, "CLI-test", "d05")
 
-    monkeypatch.setattr(solve, "_solve_gaia", gaia_uses_sky)
     monkeypatch.setattr(solve, "solve_astap", astap_uses_sky)
     panel = replace(panel, source_mask=mask)
     save_project(manifest, replace(project, panels=(panel,)), replace_existing=True)
@@ -241,6 +245,8 @@ def test_project_solve_uses_edited_mask_and_rejects_a_stale_wcs(
     preview = preview_project(reopened, JobContext())
     assert preview.tile.valid[40, 80] and not preview.tile.valid[100, 80]
     assert np.nanmax(preview.tile.pixels) == 2
+    assert main(args[:-2]) == 0
+    assert json.loads(capsys.readouterr().out)["quality"]["grade"] == "geometry-only"
 
     labels[75, 80] = FOREGROUND
     assert SourceMask(size, labels.tobytes()).sky_fingerprint == mask.sky_fingerprint
@@ -252,29 +258,33 @@ def test_project_solve_uses_edited_mask_and_rejects_a_stale_wcs(
 
 
 def test_cancellation_during_gaia_stops_fallback(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    stub_solve_evidence: None,
 ) -> None:
     source = tmp_path / "unresolved.fits"
     fits.writeto(source, np.ones((5, 5), dtype=np.float32))
     cancellation = Event()
+    catalog, index = tmp_path / "gaia.bin", tmp_path / "blind.idx"
+    catalog.touch()
+    index.touch()
+    calls = []
 
     def cancel_in_gaia(*args: object) -> None:
+        calls.append("hinted")
         cancellation.set()
         raise RuntimeError("Native solver cancelled.")
 
-    def unexpected_astap(*args: object, **kwargs: object) -> None:
-        pytest.fail("Cancellation started another solver attempt.")
-
-    monkeypatch.setattr(solve, "_solve_gaia", cancel_in_gaia)
-    monkeypatch.setattr(solve, "solve_astap", unexpected_astap)
+    monkeypatch.setattr(solve, "search_gaia", cancel_in_gaia)
     with open_fits_panel(source) as panel, pytest.raises(MosaicCancelled):
         solve_panel(
             panel,
             SolveOptions(
-                gaia_catalog=tmp_path / "gaia.bin",
-                astap=tmp_path / "astap.exe",
-                astap_catalog=tmp_path,
+                gaia_catalog=catalog,
+                gaia_index=index,
                 position=(0, 0),
+                scale_arcsec=1,
             ),
             JobContext(is_cancelled=cancellation.is_set),
         )
+    assert calls == ["hinted"]

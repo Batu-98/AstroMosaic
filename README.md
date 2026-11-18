@@ -11,7 +11,7 @@ A Windows-first desktop application in development for assembling linear astrono
 | [AGENTS.md](AGENTS.md) | Mandatory working rules for development agents. |
 | [progression.md](progression.md) | Current phase, concise work history, verification, and next action. |
 | [questions_open_topics.md](questions_open_topics.md) | Open decisions, problems, risks, and their resolutions. |
-| [Python-first architecture](astro_mosaic_python_first_architecture_en.md) | Active technical plan, revision 3.9, including [Phase 3.1 desktop plate solving](astro_mosaic_python_first_architecture_en.md#phase-31-desktop-plate-solving), [Phase 3.5 engine revalidation](astro_mosaic_python_first_architecture_en.md#phase-35-astronomy-engine-revalidation), and [Phase 4 automation and large mosaics](astro_mosaic_python_first_architecture_en.md#102-phase-4-delivery-stages). |
+| [Python-first architecture](astro_mosaic_python_first_architecture_en.md) | Active technical plan, revision 3.10, including desktop plate solving, engine revalidation, [Phase 3.6 plate solve reliability](astro_mosaic_python_first_architecture_en.md#phase-36-plate-solve-reliability), and [Phase 4 automation and large mosaics](astro_mosaic_python_first_architecture_en.md#102-phase-4-delivery-stages). |
 | [Phase 0 evidence](docs/phase-0.md) | Platform matrix, fixture tolerances, probe results, and packaging procedure. |
 | [Phase 1 FITS reference](docs/phase-1.md) | CLI contract, fixtures, export checks, and measured resource use. |
 | [Phase 2 astronomy reference](docs/phase-2.md) | Offline catalog setup, WCS sidecars, masks, refinement, and acceptance evidence. |
@@ -21,6 +21,9 @@ A Windows-first desktop application in development for assembling linear astrono
 | [Phase 3D sky masks](docs/phase-3d.md) | Foreground tags, editable masks, and sky-only processing. |
 | [Phase 3E foreground and composition](docs/phase-3e.md) | Independent layers, shared horizon placement, seam controls, and layer exports. |
 | [Phase 3F Windows package](docs/phase-3f.md) | Reproducible package build, background acceptance checks, and clean-machine follow-up. |
+| [Phase 3.6 plan](docs/phase-36.md) | ASTAP priority, automatic catalogs, match/RMS evidence, scale recovery, SIP/edge validation and total solve budgets. |
+| [Phase 3.6 results](docs/phase-36-results.md) | Source and Windows verification, including the two private TIFFs, supported catalog modes and remaining gates. |
+| [Phase 3.6A evidence](docs/phase-36a.md) | Native capabilities, frozen contracts, TIFF EXIF/XMP import and the reference experiments. |
 | [ADR-0001](docs/adr/0001-python-first-baseline.md) | Records which architecture is active and which decisions remain unverified. |
 
 All project Markdown, source comments, identifiers, logs, and default application text are written in English.
@@ -35,7 +38,7 @@ The headless reference processes calibrated, integrated, unstretched panels with
 
 The user workflow provides first-class support for both FITS and linear TIFF panels, with a target benchmark of 12 panels at 6000 × 4000 pixels across both formats and optional camera RAW import deferred. AstroMosaic will be open source and use open-source components. [Dual format decision](docs/adr/0006-dual-fits-and-tiff-workflow.md) · [Product scope decision](docs/adr/0004-open-source-image-workflow.md)
 
-The offline solve order is validated existing WCS, local Gaia DR3, hinted ASTAP, then blind ASTAP. The `gaia` extra adds Seiza. Catalogs and the external ASTAP executable are installed separately. [Offline setup](docs/phase-2.md#offline-solvers)
+The offline solver reuses validated WCS, then tries local ASTAP before Gaia. New solutions require at least 15 catalog matches and comparable RMS, with supported TAN/SIP selection and one default 120-second panel deadline. The `gaia` extra adds Seiza. Catalogs and the external ASTAP CLI are installed separately. [Offline setup](docs/phase-2.md#offline-solvers) · [Phase 3.6 results](docs/phase-36-results.md)
 
 Mixed FITS and TIFF panels can contribute selected sky pixels to plate solving, refinement, and mosaics. The next desktop stage adds independent foreground stitching and layer placement, seam, overlap, and crop controls. [Mixed-panel decision](docs/adr/0007-sky-and-foreground-mosaics.md)
 
@@ -77,7 +80,9 @@ Add panels, set the mosaic grid, and save the project. Use the layer selector wi
 
 For a mixed panel, choose **Panel → Propose Sky Mask** and review the overlay, or draw the mask with **Edit Sky Mask**. Use **Panel Settings** to override the foreground tag. [Mixed-panel workflow](docs/phase-3d.md#desktop-workflow)
 
-Use **Tools → Plate Solve Settings** to choose and check local Gaia DR3 and ASTAP paths. Select **Plate Solve** to resolve sky panels that need a WCS, then save the project to keep the resulting references. [Desktop plate solving](docs/phase-3b.md#desktop-plate-solving)
+Use **Tools → Plate Solve Settings** to choose and check the local ASTAP CLI and Gaia paths. Fresh ASTAP settings use **Automatic**. Set the per-panel, per-attempt and optional batch limits there. Select **Plate Solve** and save the project to retain the results. **Panel → Plate Solve Details** shows predicted distortion and measured regional errors. **Panel → Revalidate Plate Solution** requests a fresh catalog fit. [Desktop plate solving](docs/phase-3b.md#desktop-plate-solving)
+
+Panel import reads supported TIFF EXIF/XMP focal length, camera model and nominal pitch from focal-plane resolution. **Panel Settings** shows the embedded hints and preserves manual overrides. Print DPI and 35 mm equivalent focal length do not determine sensor pitch/physical focal length. [Supported conventions and owner TIFF checks](docs/phase-36a.md#tiff-metadata-at-panel-import)
 
 ## Develop and Verify
 

@@ -62,7 +62,11 @@ def test_checks_astap_installation_when_gaia_is_unavailable(
     executable = tmp_path / "astap_cli.exe"
     executable.touch()
     tile = tmp_path / "d50_0101.1476"
-    tile.write_bytes(b"Fixture".ljust(109) + b"\x05" + b"\xff\xff\xff\x01\x40" + b"\x00" * 5)
+    contents = b"GAIA DR3".ljust(109) + b"\x05" + b"\xff\xff\xff\x01\x40" + b"\x00" * 5
+    tile.write_bytes(contents)
+    other_tile = tmp_path / "d50_3601.1476"
+    other_tile.write_bytes(contents)
+    monkeypatch.setattr(astap_probe, "TILE_SUFFIXES", ("0101.1476", "3601.1476"))
     calls: list[Path] = []
 
     def run_help(command: list[str], scratch: Path, timeout: float, context: JobContext) -> str:
@@ -82,7 +86,7 @@ def test_checks_astap_installation_when_gaia_is_unavailable(
     )
     gaia, astap = check_solver_paths(options)
     assert "Gaia DR3 support is unavailable" in gaia
-    assert "CLI-2026.11.01 responds and a D50 catalog tile opens" in astap
+    assert "CLI-2026.11.01 responds. Complete catalogs: D50." in astap
     assert len(calls) == 1 and not calls[0].exists()
 
     mistaken_database = replace(options, astap_database="d20")
@@ -91,6 +95,11 @@ def test_checks_astap_installation_when_gaia_is_unavailable(
         "catalog folder is missing"
         in check_solver_paths(replace(options, astap_catalog=tmp_path / "moved"))[1]
     )
+    other_tile.rename(tmp_path / "moved.1476")
+    assert "Missing tile d50_3601.1476" in check_solver_paths(options)[1]
+    other_tile.write_bytes(contents[:-1])
+    assert "invalid .1476 layout" in check_solver_paths(options)[1]
+    other_tile.write_bytes(contents)
     tile.write_bytes(b"format invalid")
     assert "invalid .1476 layout" in check_solver_paths(options)[1]
     executable.rename(tmp_path / "moved.exe")
@@ -111,8 +120,9 @@ def test_reports_wrong_or_unresponsive_astap_program(
     executable = tmp_path / "other.exe"
     executable.touch()
     (tmp_path / "d05_0101.1476").write_bytes(
-        b"Fixture".ljust(109) + b"\x05" + b"\xff" * 3 + b"\x01\x40" + b"\x00" * 5
+        b"GAIA DR3".ljust(109) + b"\x05" + b"\xff" * 3 + b"\x01\x40" + b"\x00" * 5
     )
+    monkeypatch.setattr(astap_probe, "TILE_SUFFIXES", ("0101.1476",))
 
     def run_help(command: list[str], scratch: Path, timeout: float, context: JobContext) -> str:
         if output is None:

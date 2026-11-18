@@ -9,6 +9,7 @@ import sys
 from collections.abc import Callable
 from dataclasses import replace
 from hashlib import file_digest
+from multiprocessing import freeze_support
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from threading import Event
@@ -315,7 +316,7 @@ def check_plate_solve(window: ProjectWindow, directory: Path, fixtures: Path) ->
     for path in (gaia_input, astap_input, retry_input):
         header = metadata.copy()
         header["RA"], header["DEC"] = (60.0, 0.0) if path == retry_input else center
-        header["PIXSCALE"] = scale
+        header["PIXSCALE"] = scale * 2 if path == retry_input else scale
         fits.writeto(path, pixels, header)
 
     def digest(path: Path) -> bytes:
@@ -355,7 +356,7 @@ def check_plate_solve(window: ProjectWindow, directory: Path, fixtures: Path) ->
     def solve_and_wait() -> None:
         window.plate_solve_button.click()
         assert window.job is not None
-        wait_for(window, lambda: window.job is None, 40_000)
+        wait_for(window, lambda: window.job is None, 65_000)
 
     settings_file = directory / "solver-settings.ini"
     with patch.object(
@@ -368,6 +369,7 @@ def check_plate_solve(window: ProjectWindow, directory: Path, fixtures: Path) ->
         )
         solve_and_wait()
         assert result(3)["stage"] == "gaia-dr3"
+        assert result(3)["version"] == 2
         assert window.project.panels[0].wcs_sidecar is None
         assert window.project.panels[1].wcs_sidecar == reused
         assert window.project.panels[2].wcs_sidecar is None
@@ -389,6 +391,8 @@ def check_plate_solve(window: ProjectWindow, directory: Path, fixtures: Path) ->
         def pause_second(
             process: subprocess.Popen[str], timeout: float, context: JobContext
         ) -> str:
+            if "-f" not in process.args:
+                return original_wait(process, timeout, context)
             processes.append(process)
             if len(processes) == 2:
                 paused.set()
@@ -419,13 +423,21 @@ def check_plate_solve(window: ProjectWindow, directory: Path, fixtures: Path) ->
         assert len(processes) == 2 and all(process.poll() is not None for process in processes)
         assert not list(directory.glob("astromosaic-astap-*"))
 
-        plate_solve_settings._save_plate_solve_settings(options)
+        plate_solve_settings._save_plate_solve_settings(
+            replace(
+                options,
+                astap_catalog=directory / "missing-catalog",
+                gaia_catalog=fixtures / "phase2-gaia/stars-deep-gaia17.bin",
+                gaia_index=fixtures / "phase2-gaia/blind-gaia16.idx",
+            )
+        )
         solve_and_wait()
         fallback = result(5)
-        assert fallback["stage"] == "astap-blind", window.panels.item(5).toolTip()
+        assert fallback["stage"] == "gaia-dr3", window.panels.item(5).toolTip()
         attempts = fallback["attempts"]
         assert isinstance(attempts, list)
-        assert (attempts[1]["stage"], attempts[1]["outcome"]) == ("gaia-dr3", "failed")
+        assert (attempts[1]["stage"], attempts[1]["outcome"]) == ("astap-hinted", "skipped")
+        assert attempts[-1]["method"] == "blind" and attempts[-1]["effective_position_deg"] is None
         assert window.project.panels[4].wcs_sidecar == first_astap
         assert len(list(directory.rglob("panel-*.wcs.json"))) == 3
 
@@ -441,10 +453,10 @@ def check_plate_solve(window: ProjectWindow, directory: Path, fixtures: Path) ->
     wait_for(window, lambda: window.job is None)
     with fits.open(exported) as hdus:
         assert np.any(hdus[1].data > 0)
-        assert any("astap-blind WCS sidecar" in entry for entry in hdus[0].header["HISTORY"])
+        assert any("astap-hinted WCS sidecar" in entry for entry in hdus[0].header["HISTORY"])
     assert all(digest(path) == expected for path, expected in originals.items())
     assert not list(directory.rglob("*.part"))
-    return {"gaia": "gaia-dr3", "astap": "astap-hinted", "fallback": "astap-blind"}
+    return {"gaia": "gaia-dr3", "astap": "astap-hinted", "fallback": "gaia-dr3"}
 
 
 def frozen_check(backend: str, solve_fixtures: Path | None) -> None:
@@ -525,11 +537,12 @@ def check_bundle(bundle: Path, probe: Path, backend: str, solve_fixtures: Path |
         assert report["backend"] == backend
         assert report["recovery"] and report["cancel_and_retry"] and report["solver_settings"]
         if solve_fixtures is not None:
-            assert report["plate_solve"]["fallback"] == "astap-blind"
+            assert report["plate_solve"]["fallback"] == "gaia-dr3"
         print(result.stdout.strip())
 
 
 if __name__ == "__main__":
+    freeze_support()
     parser = argparse.ArgumentParser(description=__doc__)
     frozen = getattr(sys, "frozen", False)
     parser.add_argument("--backend", choices=("CPU", "OpenGL"), default="CPU")

@@ -1,3 +1,4 @@
+import json
 from dataclasses import replace
 from pathlib import Path
 
@@ -7,6 +8,8 @@ import tifffile
 from astropy.io import fits
 
 from astromosaic.astrometry import solve
+from astromosaic.astrometry.astap_probe import AstapCandidate
+from astromosaic.astrometry.gaia_solve import GaiaCandidate
 from astromosaic.astrometry.hints import PanelOptics
 from astromosaic.astrometry.solve import SolveOptions, solve_panel, write_solution
 from astromosaic.cli import main
@@ -54,6 +57,12 @@ def test_panel_wcs_status_and_optics(tmp_path: Path, suffix: str) -> None:
     sidecar = tmp_path / "solved.wcs.json"
     with open_panel(image) as opened:
         write_solution(sidecar, opened, solve_panel(opened, SolveOptions()))
+    # Exercise a legacy geometry-only sidecar in both format workflows.
+    if suffix == ".fits":
+        legacy = json.loads(sidecar.read_text("utf-8"))
+        legacy["version"] = 1
+        del legacy["quality"]
+        sidecar.write_text(json.dumps(legacy), "utf-8")
     attached = replace(panel, wcs_sidecar=FileReference.capture(sidecar))
     assert inspect_project_panel(attached, context).wcs_status == "Sidecar"
     edited = replace(attached, source_mask=SourceMask((16, 12), bytes([SKY]) * pixels.size))
@@ -90,21 +99,31 @@ def test_missing_metadata_and_invalid_wcs_are_distinct(tmp_path: Path) -> None:
 
 
 def test_cli_solve_uses_project_optics_and_scale_precedence(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    stub_solve_evidence: None,
 ) -> None:
     image = tmp_path / "panel.fits"
     reference = tmp_path / "reference.fits"
     write_smoke_panel(reference)
     solved = fits.getheader(reference)
     header = fits.Header(
-        {"FOCALLEN": 400, "XPIXSZ": 3.75, "YPIXSZ": 3.75, "XBINNING": 2, "YBINNING": 2}
+        {
+            "FOCALLEN": 400,
+            "XPIXSZ": 3.75,
+            "YPIXSZ": 3.75,
+            "XBINNING": 2,
+            "YBINNING": 2,
+            "RA": 359.999,
+            "DEC": 20.0,
+        }
     )
     heights: list[object] = []
 
-    def fake_astap(*args: object, **kwargs: object) -> tuple[fits.Header, str]:
-        assert kwargs["position"] is None
+    def fake_astap(*args: object, **kwargs: object) -> AstapCandidate:
+        assert kwargs["position"] == (359.999, 20.0)
         heights.append(kwargs["field_height_deg"])
-        return solved, "test ASTAP"
+        return AstapCandidate(solved, "CLI-test", "d05")
 
     monkeypatch.setattr(solve, "solve_astap", fake_astap)
     manifest = tmp_path / "test.astromosaic"
@@ -132,7 +151,9 @@ def test_cli_solve_uses_project_optics_and_scale_precedence(
 
 
 def test_gaia_uses_a_scalar_hint_for_equal_axis_scales(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    stub_solve_evidence: None,
 ) -> None:
     image = tmp_path / "panel.fits"
     reference = tmp_path / "reference.fits"
@@ -143,19 +164,24 @@ def test_gaia_uses_a_scalar_hint_for_equal_axis_scales(
     seen: list[float | None] = []
 
     def fake_gaia(
-        source: object,
-        options: SolveOptions,
         catalog: Path,
+        index: Path | None,
+        size: tuple[int, int],
+        coordinates: list[tuple[float, float, float]],
         position: tuple[float, float] | None,
         scale: float | None,
+        seconds: float,
         context: JobContext,
-    ) -> tuple[fits.Header, solve.SolverAttempt]:
-        assert position == (359.999, 20)
+    ) -> GaiaCandidate:
+        assert position == ((359.999, 20) if scale is not None else None)
         seen.append(scale)
-        return solved, solve.SolverAttempt("gaia-dr3", "solved", "test Gaia")
+        return GaiaCandidate(solved.tostring(sep="\n", padding=False), "test", "test", 20, 0.2, 0)
 
-    monkeypatch.setattr(solve, "_solve_gaia", fake_gaia)
-    options = SolveOptions(gaia_catalog=tmp_path / "gaia.bin")
+    monkeypatch.setattr(solve, "search_gaia", fake_gaia)
+    catalog, index = tmp_path / "gaia.bin", tmp_path / "index.idx"
+    catalog.touch()
+    index.touch()
+    options = SolveOptions(gaia_catalog=catalog, gaia_index=index)
     with open_panel(image) as panel:
         assert solve_panel(panel, options).stage == "gaia-dr3"
         assert (

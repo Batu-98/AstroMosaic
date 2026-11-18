@@ -4,8 +4,8 @@
 
 # AstroMosaic v1: Python-First Architecture and Implementation Plan
 
-- **Revision:** 3.9
-- **Date:** November 16, 2026
+- **Revision:** 3.10
+- **Date:** November 17, 2026
 - **Status:** Proposed implementation baseline following local source inspection
 - **Initial target:** Windows 11 x64
 - **Deferred platform support:** Linux and macOS may be added later. See [ADR-0003](docs/adr/0003-windows-first-platform-scope.md).
@@ -96,7 +96,7 @@ Initial FITS reference exclusions include individual-exposure calibration and st
 | FITS and WCS | Astropy | `fitsio` for selected FITS I/O bottlenecks while retaining Astropy WCS | Validate scaling, endianness, HDUs, partial reads, and resource ownership. A replacement must pass the same data-contract tests. |
 | Source detection and aperture photometry | SEP | Photutils | SEP covers core array-based source measurements. Use Photutils if a required measurement/model or validation case warrants it. [E3] |
 | Reprojection baseline | `reproject` through a small adapter | A custom output-tile mapper using Astropy WCS and compiled sampling primitives | Start with an established reference. Build specialized sampling only for missing controls or measured bottlenecks. `reproject_exact` refers to a particular area-overlap algorithm; do not confuse it with the reference repository's function named `remap_exact`. [E4] |
-| Offline plate solving | Validated existing WCS, then local Gaia DR3, hinted ASTAP, and blind ASTAP | Report the panel as unsolved if the local chain fails | Verify Gaia backend and index licensing and deployment. Use the headless ASTAP adapter with a local catalog. [E5] |
+| Offline plate solving | Validated existing WCS, then local ASTAP with hinted/FOV recovery, then local Gaia DR3 with hinted/scale-free recovery | Report why the qualified local chain could not publish a WCS | Phase 3.6 implements ASTAP priority, automatic catalog selection, at least 15 matches, bounded low-order SIP validation and a total solve deadline. [Implementation evidence](docs/phase-36-results.md) [E5] |
 | Preview renderer | QOpenGLWidget with a small shader pipeline and Python-managed resources | CPU tiled raster preview with a low-resolution reprojected proxy | Preserve responsive projection/framing as a GPU milestone. CPU fallback is functional but may update projection changes at lower resolution or frequency. [E7] |
 | Additional OpenGL bindings | Qt-provided OpenGL wrappers where sufficient | PyOpenGL for missing calls after an integration test | Minimize packages and verify context ownership; do not add multiple rendering frameworks speculatively. |
 | Final-image compute | CPU kernels through NumPy/SciPy/reproject | Optional accelerated backend after profiling | A GPU is never required for valid export. Choose a compute backend only after device coverage and precision tests; no default CUDA/Torch/ONNX dependency. |
@@ -207,14 +207,22 @@ The CPU fallback supports pan/zoom efficiently on cached imagery. Reframing into
 
 ### 6.3 WCS Reuse, Solving, and Registration
 
-Try the following local steps in order and stop at the first validated solution.
+The planned Phase 3.6 policy tries the following local steps in order and stops at the first solution that passes the applicable quality and geometry checks. The existing Phase 2/3.5 implementation and evidence remain Gaia-first until this revision is implemented and verified.
 
-1. Validate and reuse existing celestial WCS.
-2. Solve against a local Gaia DR3 catalog with an open-source backend. Use local index-based search when the backend requires it for a field without reliable pointing.
-3. Run ASTAP with approximate position and available scale or field-of-view hints. Skip this step when usable pointing hints are absent.
-4. Run blind ASTAP with the local catalog.
+1. Validate and reuse the effective celestial WCS, including a source/mask-bound project sidecar when selected. Distinguish geometry-only legacy reuse from measured catalog validation; provide an explicit revalidation path.
+2. Run the installed local ASTAP executable with usable pointing and vertical field-of-view hints. Use Automatic catalog selection or a preserved manual override. Skip this attempt when pointing is absent.
+3. Run bounded blind ASTAP recovery with the untrusted pointing and FOV removed. Reconsider the automatic catalog selection when the FOV assumption changes. Do not repeat an identical blind attempt.
+4. Solve against the local Gaia DR3 catalog through Seiza, using pointing and scale when usable and an indexed scale-free blind recovery when available. Discard a failed scale constraint rather than retaining its narrow search interval. Keep the supported broad scale interval explicit.
 
-Astrometry.net is outside the chain in both its web and local forms. If the chain is exhausted, report the sky region as unsolved. Respect cancellation before any further attempt. Use headless solver adapters with timeouts, stage diagnostics, catalog versions, and separately stored solved WCS. Preserve original source images. In mixed panels, apply the effective sky mask to star extraction and any staged solver input. Foreground registration runs independently. See [ADR-0005](docs/adr/0005-offline-solver-chain.md).
+[Phase 3.6A](docs/phase-36a.md) froze the planned broad recovery interval at 0.1–120 arcsec/pixel after the owner camera TIFFs demonstrated scales outside the earlier 0.1–20 wrapper range. Its native Auto/SIP and local validation probes are complete; dispatch and enforcement remain subsequent work. The frozen fixture/policy definitions are in the [reference manifest](tests/fixtures/plate_solve_v36.json).
+
+Astrometry.net is outside the chain in both its web and local forms. If the chain is exhausted, report the sky region as unsolved. Respect cancellation and one monotonic panel deadline covering preparation, all attempts, validation and publication. Preserve per-attempt caps within that total and support an optional multi-panel job budget. Use headless adapters with ordered diagnostics, actual catalog identities and separately stored solved WCS. Preserve original source images. In mixed panels, apply the effective sky mask to star extraction and staged solver input. Foreground registration runs independently. [Original offline decision](docs/adr/0005-offline-solver-chain.md) · [Phase 3.6 priority decision](docs/adr/0017-astap-first-validated-solving.md)
+
+New qualified ASTAP and Gaia results require at least 15 distinct accepted image/catalog matches, finite quality metrics and valid geometry. The proposed RMS ceiling is `max(3 arcsec, 2 * s)`, where `s` is the smaller local X/Y source-pixel scale at the solved center. Retain Gaia's false-match probability ceiling of 0.001. Freeze residual definitions, thresholds and a genuine ASTAP-only quality-evidence path in Phase 3.6A; detected stars or a success status are not equivalent to verified matches. Keep the previous real-field regression envelopes. Existing geometrically valid WCS without those metrics remains explicitly geometry-only rather than being silently recertified.
+
+Evaluate TAN and supported SIP degree 2/3 only with sufficient star count and spatial coverage. Promote distortion terms with independent spatial validation and true held-out evidence where fitting is under application control; label native in-fit statistics accurately. Check supported field edges, parity, inverse stability and preview/export consistency. The [Phase 3.6 detailed plan](docs/phase-36.md) defines sample floors, candidate numerical targets, total-budget defaults, capability checks and stage acceptance.
+
+Quantify the full source field with bounded spatial diagnostics: global linear skew/scale/rotation, nonlinear displacement relative to a defined TAN reference, local scale/shear, and measured regional star residuals. Start from a 9 × 9 model-sampling grid and record regional support. Keep model predictions separate from observed errors; regions without adequate stars or outside the sky mask cannot be reported as having measured zero distortion or verified accuracy. The detailed Phase 3.6 plan specifies the map, support labels and acceptance cases.
 
 Extract stars with local noise/background estimates, reject saturation and blends, and estimate centroids with an explicit method. HFD is a profile diagnostic, not itself a centroid estimator.
 
@@ -352,7 +360,8 @@ Record selected backend, fallback reason, dtype conversions, failed coordinate c
 | 2: Robust astronomy engine | Offline Gaia/ASTAP chain, masked sky processing, overlap graph, robust global registration, stellar scale, offset/plane corrections | Verify WCS reuse, fallback order, cancellation, and exhausted-chain diagnostics. Pass held-out alignment and injected-signal gates, including a mixed fixture with supplied masks, and report weak or disconnected cases. |
 | 3: Desktop workflow | Six delivery stages covering TIFF interoperability, project and job management, preview and export, sky masks, foreground composition, and Windows acceptance. | Meet the [Phase 3A–3F gates](#101-phase-3-delivery-stages). |
 | 3.1: Desktop plate solving | Per-panel WCS status and optical hints, local catalog settings, and a desktop solve job | Pass the [Phase 3.1A–3.1C checks](#phase-31-desktop-plate-solving) before starting Phase 3.5. |
-| 3.5: Astronomy engine revalidation | Review Phase 2 evidence on the current engine, resolve findings, and verify the results | Pass the [Phase 3.5A–3.5C checks](#phase-35-astronomy-engine-revalidation) before starting Phase 4. |
+| 3.5: Astronomy engine revalidation | Review Phase 2 evidence on the current engine, resolve findings, and verify the results | Pass the [Phase 3.5A–3.5C checks](#phase-35-astronomy-engine-revalidation) before starting Phase 3.6. |
+| 3.6: Plate solve reliability | ASTAP priority and automatic catalogs, common match/RMS evidence, bad-scale recovery, supported SIP/edge validation and a total solve budget | Pass the [Phase 3.6A–3.6F gates](#phase-36-plate-solve-reliability), including ASTAP-only quality evidence and Windows CLI/desktop migration, before Phase 4A. |
 | 4: Automation, large mosaics, and desktop terminal | Scriptable project commands, budgeted large renders and improved blends, and a desktop command panel | Meet the [Phase 4A–4C gates](#102-phase-4-delivery-stages). |
 | 5: Extended formats and channels | Optional XISF, projections, and per-band outputs | Format, geometry, mask, unit, packaging, and channel-consistency checks pass for each added workflow. |
 
@@ -400,17 +409,42 @@ Start 3.5A after Phase 3.1 passes. Use the [original Phase 2 acceptance criteria
 
 Review the supported mono workflow from solving through export. Cover WCS reuse and ordered offline Gaia/ASTAP fallback, sidecar validity, timeout and cancellation cleanup, and source immutability. Check sky masking with supplied masks and saved project edits, held-out alignment, relative stellar gain and profiles, offset and plane selection, faint emission recovery, and weak or disconnected overlaps.
 
+Track how solver, mask, and refinement findings affect preview and export. Fix regression criteria for narrow overlaps, saturated stars, and masked WCS reuse before revising the engine. Keep an explicit real-field crop recipe for repeatable solver and refinement checks. [Phase 3.5A review](docs/phase-35.md)
+
 | Stage | Deliverable | Acceptance evidence |
 | --- | --- | --- |
 | 3.5A | Review | Map each Phase 2 criterion to current code, fixtures, and results. Rerun the original baseline on Windows 11 x64. Record coverage gaps and failing cases with reproduction steps. Select representative cases for any gaps and freeze their acceptance thresholds before revising the engine. |
 | 3.5B | Revision | Resolve findings that affect acceptance. Add focused regression checks for corrected behavior and missing evidence. Record before-and-after results for corrections and track any follow-up outside this gate in the topic register. |
 | 3.5C | Verification | Rerun the full Phase 2 baseline and added regressions on Windows 11 x64 against the frozen criteria. Exercise offline solving, sidecar reuse, and a representative masked refinement and export through the Qt-free Windows CLI bundle. Reopen a FITS export independently and verify pixels, WCS, and coverage. Record the tested revision, fixture and catalog versions, measured results, and pass or fail for each gate. |
 
+The owner requested new real fields for 3.5C. Verify M42 local astrometry against the original archive WCS and exercise the Documents Gaia catalog format. Reconstruct a separate M31 reference from two panels with 20% overlap relative to each panel's width, then compare science pixels, coverage, and WCS through CLI and desktop export. [Phase 3.5C evidence](docs/phase-35.md#phase-35c-windows-verification)
+
 Close Phase 3.5 when the recorded evidence meets every Phase 2 acceptance criterion and all findings that affect acceptance are resolved.
+
+### Phase 3.6 Plate Solve Reliability
+
+Phase 3.6A completed its capability/reference freeze on 2026-11-18, including the owner TIFFs and automatic EXIF/XMP optical import. The solver policy and desktop/CLI integration are implemented. Track the measured Windows acceptance and remaining external gates in the [implementation results](docs/phase-36-results.md). [Capability evidence](docs/phase-36a.md) · [Frozen contracts](tests/fixtures/plate_solve_v36.json)
+
+Start 3.6A after Phase 3.5C. The owner requested this phase after the [Mosaic Master comparison](docs/plate-solve-comparison.md). The [detailed plan](docs/phase-36.md) defines the implementation scope, candidate numerical thresholds, catalog options, fixtures, migration and downstream impact. [ADR-0017](docs/adr/0017-astap-first-validated-solving.md) records the ASTAP-first direction; this is not an implementation-completion claim.
+
+Required outcomes are: reuse effective WCS, prioritize local ASTAP before Gaia, automatically select a usable installed ASTAP catalog while preserving manual choices, require at least 15 evidenced matches for new qualified results, recover from incorrect scale hints, validate supported low-order SIP at field edges, and enforce one preparation-to-publication time budget. Frozen 3.6A defaults include a 120-second panel budget and the RMS ceiling in Section 6.3; the reference manifest records the values for B–F implementation and acceptance. Keep native residuals, independent catalog verification and genuinely held-out errors distinct.
+
+| Stage | Scope | Acceptance evidence |
+| --- | --- | --- |
+| 3.6A | Freeze capabilities, contracts and fixtures | Record the exact ASTAP CLI's automatic catalog and SIP behavior, a reproducible ASTAP-only match/RMS path, supported catalogs/domains, frozen numerical and time thresholds, fixture identities and compatibility policy. Do not infer matched stars from detection counts. |
+| 3.6B | ASTAP priority and catalog automation | Verify existing-WCS reuse, ASTAP-before-Gaia dispatch, Automatic/manual catalog selection, actual resolved catalog identity, each backend alone, missing/corrupt data, and unchanged original images. Prefer verified ASTAP native selection; resolve explicitly when native behavior is opaque or unsupported. |
+| 3.6C | Total deadline and cleanup | Include source work, catalog opening, staging, all attempts, validation and publication in one monotonic panel deadline; support a job-wide cap. Verify boundary timing, late success rejection, cancellation, worker/process cleanup and retention of completed panels. Preserve legacy per-attempt timeout meaning. |
+| 3.6D | Match/RMS qualification and bad-scale recovery | Apply the common 15-match/quality gate to ASTAP and Gaia while retaining Gaia probability checks. Verify just-below/on/above thresholds, false matches and recovery from wrong position and 0.5×/2× scale without a stale FOV constraint, within the total budget. |
+| 3.6E | Supported SIP and full-field geometry/error maps | Compare TAN with supported SIP-2/3 using the frozen spatial sample and validation policy. Verify linear skew, nonlinear displacement and regional measured-error/support maps, synthetic truth and real catalog errors, sparse/clustered rejection, corner/grid inverse stability, parity/RA wrap, stale-SIP removal and shared preview/export geometry. |
+| 3.6F | Desktop/CLI migration and Windows acceptance | Verify Automatic settings and budget persistence, explicit revalidation, old projects/sidecars, quality/timing reports, cancellation/retry, and independent reopened exports. Run the current suite and appropriate source/portable CPU/OpenGL workflows with recorded solver/catalog versions. |
+
+Do not treat native ASTAP success alone as the new match/RMS gate. Its present adapter does not supply those metrics; native matched-pair evidence or bounded local catalog validation is required, including ASTAP-only installations. This capability is an explicit 3.6A scope dependency. The implementation uses the real command-line solver and does not require GUI automation or unrequested downloads.
+
+Keep source/mask-bound atomic sidecars and optional Seiza. Existing phase evidence remains historical; old WCS with unavailable match metrics stays readable with an honest evidence grade. Update order-sensitive tests and diagnostic formats deliberately. Phase 4A/4C consume the resulting shared solve/report contract, and Phase 4B retains its separate 12-panel resource and image-quality gates. The clean-machine check remains separate. Close Phase 3.6 only after all mandatory gates pass and unsupported cases are documented. [Q-015–Q-018](questions_open_topics.md)
 
 ### 10.2 Phase 4 Delivery Stages
 
-Start 4A after [Phase 3.5C](#phase-35-astronomy-engine-revalidation) passes. Use the CLI from 4A for the 4B benchmarks. Build the desktop panel after the large-mosaic checks exercise progress and cancellation.
+Start 4A after [Phase 3.6F](#phase-36-plate-solve-reliability) passes. Reuse the finalized solve quality, catalog and budget diagnostics in automation instead of creating a second policy. Use the CLI from 4A for the 4B benchmarks. Build the desktop panel after the large-mosaic checks exercise progress and cancellation.
 
 | Stage | Deliverable | Acceptance evidence |
 | --- | --- | --- |
@@ -439,6 +473,8 @@ Freeze dataset-specific numerical tolerances before tuning. Candidate starting t
 Performance targets must name hardware, data dimensions, filters/channels, panel count, and cold/warm cache state. Do not import benchmark numbers from source comments as promises for AstroMosaic.
 
 ## 12. Immediate Implementation Backlog
+
+The bootstrap list below records the original implementation sequence. The current next task is [Phase 3.6A](docs/phase-36.md#36a--freeze-contracts-capabilities-and-reference-evidence); [progression.md](progression.md) records completed work and the active handoff.
 
 1. Create the minimal Python package and a UI-independent CLI entry point.
 2. Lock candidate dependencies and test compiled imports on Windows 11 x64.

@@ -148,6 +148,9 @@ class PanelSettings(_SettingsDialog):
         self.include_sky.setChecked(panel.include_sky)
         self.form.addRow(self.include_sky)
         self.focal_length = self._optical_field("Focal length (mm)", panel.optics.focal_length_mm)
+        self.camera_model = QLabel("Not available")
+        self.camera_model.setTextFormat(Qt.TextFormat.PlainText)
+        self.form.addRow("Camera (metadata)", self.camera_model)
         self.pixel_size_x = self._optical_field(
             "Effective X pixel size (µm)", panel.optics.pixel_size_x_um
         )
@@ -165,7 +168,8 @@ class PanelSettings(_SettingsDialog):
         field.setToolTip("Enter an override for this panel. Clear it to use embedded metadata.")
         return field
 
-    def show_embedded_optics(self, optics: PanelOptics) -> None:
+    def show_embedded_optics(self, optics: PanelOptics, camera_model: str | None = None) -> None:
+        self.camera_model.setText(camera_model or "Not available")
         self.focal_length.setPlaceholderText(_embedded_hint(optics.focal_length_mm))
         self.pixel_size_x.setPlaceholderText(_embedded_hint(optics.pixel_size_x_um))
         self.pixel_size_y.setPlaceholderText(_embedded_hint(optics.pixel_size_y_um))

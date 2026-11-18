@@ -4,14 +4,14 @@ Use this file for concise development history and handoff state. Detailed techni
 
 ## Current State
 
-- **Last updated:** 2026-11-17
-- **Active baseline:** Python-first architecture revision 3.9, with [Phase 3.1 desktop plate solving](astro_mosaic_python_first_architecture_en.md#phase-31-desktop-plate-solving), [Phase 3.5 engine revalidation](astro_mosaic_python_first_architecture_en.md#phase-35-astronomy-engine-revalidation), and [Phase 4A–4C automation and scaling](astro_mosaic_python_first_architecture_en.md#102-phase-4-delivery-stages). See [ADR-0003](docs/adr/0003-windows-first-platform-scope.md) for Windows scope, [ADR-0006](docs/adr/0006-dual-fits-and-tiff-workflow.md) for formats, and [ADR-0007](docs/adr/0007-sky-and-foreground-mosaics.md) for mixed panels.
-- **Current stage:** Phase 3.1 passed on Windows 11 x64. The Phase 3F clean-machine check remains open. Linux and macOS support is deferred.
-- **Available artifacts:** [Desktop plate solving](docs/phase-3b.md#desktop-plate-solving), [local solver settings](docs/phase-3b.md#local-plate-solve-settings), and [portable Windows desktop and CLI bundles](docs/phase-3f.md).
-- **Implementation / verification:** All 85 native Windows tests passed on the session's only active display. Rebuilt CPU and OpenGL desktop checks passed with real Gaia DR3, ASTAP, fallback, cancellation, retry, project reopen, preview and export. The Qt-free CLI bundle passed its worker and export checks. Ruff, mypy, Poetry lock validation, and documentation links passed.
-- **Version control:** Phase 3.1B and the phase drafting rule are published as `31839b2` on `origin/main`. Phase 3.1C is in the local working tree. [AstroMosaic GitHub repository](https://github.com/Batu-98/AstroMosaic)
-- **Next action:** Start Phase 3.5A by mapping Phase 2 acceptance criteria to the current evidence and rerunning the baseline. Perform the portable launcher and export check when a clean Windows 11 x64 installation is available.
-- **Open dependencies:** Q-003 through Q-005, Q-009, and Q-010 track later numerical, resource, distribution, format, and mixed-panel gates. Q-008 tracks deferred platforms, Q-011 tracks deferred visual fill, and Q-012 tracks desktop terminal scope. Q-006, Q-007, and Q-013 are resolved for the Windows solver, FITS export, and optical hint references.
+- **Last updated:** 2026-11-18
+- **Active baseline:** Python-first architecture revision 3.10, including [Phase 3.6 plate solve reliability](astro_mosaic_python_first_architecture_en.md#phase-36-plate-solve-reliability) before [Phase 4A–4C automation and scaling](astro_mosaic_python_first_architecture_en.md#102-phase-4-delivery-stages). The [detailed 3.6 plan](docs/phase-36.md) and [ADR-0017](docs/adr/0017-astap-first-validated-solving.md) define planned ASTAP priority and solver quality/budgets. See [ADR-0003](docs/adr/0003-windows-first-platform-scope.md) for Windows scope, [ADR-0006](docs/adr/0006-dual-fits-and-tiff-workflow.md) for formats, and [ADR-0007](docs/adr/0007-sky-and-foreground-mosaics.md) for mixed panels.
+- **Current stage:** Phase 3.6B–3.6F is implemented and verified on the local Windows host. Real dense ASTAP catalogs and the narrow blind M42 case remain open, so full phase acceptance is pending. The separate clean-machine check also remains open. Linux and macOS support is deferred.
+- **Available artifacts:** [Phase 3.6 implementation and Windows evidence](docs/phase-36-results.md), [3.6A capabilities](docs/phase-36a.md), [frozen reference manifest](tests/fixtures/plate_solve_v36.json), [Phase 3.5C Windows results](docs/phase-35.md#phase-35c-windows-verification), and [M31 20% overlap export](docs/phase-35.md#m31-two-panel-merge-with-20-overlap). The updated portable build is in ignored `.tooling/phase36-windows/dist/`.
+- **Implementation / verification:** All 139 native Windows source tests passed, including OpenGL and both owner TIFFs. The portable CLI and desktop CPU/OpenGL checks passed. Both wide TIFFs qualified for SIP-3 with held-out and independent D05 edge evidence, preserved hashes, and independently reopened RGB exports. Ruff, format, mypy and lock checks passed.
+- **Version control:** Phase 3.1C is published as `5c4bb68` on `origin/main`. Phase 3.5A–3.5C, the comparison and the Phase 3.6 changes are in the working tree. [AstroMosaic GitHub repository](https://github.com/Batu-98/AstroMosaic)
+- **Next action:** Verify real dense ASTAP installations and the 40′ M42 blind limitation when compatible local catalogs are available. Perform the separate clean-machine launcher/export verification on that Windows installation. Phase 4A follows the 3.6 acceptance decision.
+- **Open dependencies:** Q-003 tracks the frozen criteria, Q-015 the 40′ M42 coverage, Q-016 extended quality coverage, and Q-017 the real dense ASTAP catalog matrix. Q-004, Q-005, Q-009, and Q-010 track resource, distribution, format, and mixed-panel gates. Q-008 tracks deferred platforms, Q-011 deferred visual fill, and Q-012 desktop terminal scope. Q-018 and Q-019 record the completed local deadlines and owner TIFF checks.
 
 ## Phase Overview
 
@@ -32,9 +32,15 @@ The table is a status summary, not a replacement for the full exit gates in Sect
 | 3.1A - Panel WCS and optical metadata | Complete | Per-panel WCS status, embedded and edited optical hints, scale derivation, and older project compatibility verified on Windows. |
 | 3.1B - Local plate solve settings | Complete | Gaia DR3 and ASTAP paths and database choice restored across restarts. Source and packaged Windows checks verified actionable diagnostics. |
 | 3.1C - Desktop plate solve job | Complete | Packaged Windows CPU and OpenGL checks verified eligible panels, Gaia and ASTAP fallback, WCS sidecars, cancellation and retry, and project reopen and export. |
-| 3.5A - Phase 2 review | Not started | Criteria mapped to current evidence, baseline rerun, and gaps and added thresholds recorded. |
-| 3.5B - Revision | Not started | Acceptance findings resolved with focused regression evidence. |
-| 3.5C - Verification | Not started | Numerical and packaged CLI results meet the Phase 2 criteria before Phase 4 starts. |
+| 3.5A - Phase 2 review | Complete | Phase 2 criteria mapped and rerun on Windows, with added cases, reproduction steps, and regression thresholds recorded. |
+| 3.5B - Revision | Complete | Focused tests protect the frozen narrow-overlap, saturation, and masked WCS reuse cases on Windows. |
+| 3.5C - Verification | Complete | Windows source, portable CLI, and desktop results cover the frozen criteria, M42 plate solves, and the M31 20% overlap merge. |
+| 3.6A - Capabilities and contract freeze | Complete | Native D05 Auto/SIP/manual-fallback evidence, bounded ASTAP-only quality query, owner TIFF/EXIF checks, and frozen fixture/numerical/budget/schema contracts recorded. |
+| 3.6B - ASTAP priority and catalogs | Local checks passed | Real Auto/D05, pinning and fallback, complete/incomplete catalog fixtures, Unicode paths, source protection and the real ASTAP-only quality path. Real dense-catalog combinations remain open. |
+| 3.6C - Total solve deadlines | Local checks passed | Shared deadline, late rejection, source prep exhaustion, native worker and ASTAP cancellation/cleanup, and preserved partial results checked. |
+| 3.6D - Quality and scale recovery | Local checks passed | Match/RMS limits, Gaia confidence, false-match controls, ASTAP-only FOV recovery and Gaia recovery from wrong pointing and both scale factors. The narrow blind M42 limit is recorded. |
+| 3.6E - SIP and full-field diagnostics | Local checks passed | Synthetic truth, TAN/SIP selection, map and support diagnostics, both real TIFFs and independent reopened export. |
+| 3.6F - Integration and acceptance | Local checks passed | Qt-free portable CLI, desktop CPU/OpenGL, settings and v1/v2 migration, cancellation/retry, preview and independent exports. Full external acceptance remains open. |
 | 4A - Headless project automation | Not started | Windows CLI project creation, validation and export, machine-readable results, and scripted batch and cancellation checks. |
 | 4B - Large mosaics and improved blends | Not started | Budgeted rendering of 12 FITS and TIFF panels at 6000 × 4000, including a mixed scene, incremental export, tile/halo correctness, and measured improvement for any optional multiband blend. |
 | 4C - Desktop terminal panel | Not started | Shared AstroMosaic commands, live progress, history, and cancellation verified in a responsive desktop panel. |
@@ -379,6 +385,109 @@ The table is a status summary, not a replacement for the full exit gates in Sect
 - **Verified:** All 85 native Windows tests passed. The session exposed one active display. Both desktop bundles passed the real Gaia DR3 and ASTAP D05 cases, including fallback, ASTAP process and staging cleanup, retry, project reopen and export, and unchanged source hashes. The packaged CLI, Ruff, mypy, lock validation, and local links passed.
 - **Related:** [Desktop workflow and evidence](docs/phase-3b.md#desktop-plate-solving) and Q-006.
 - **Next:** Start Phase 3.5A with the Phase 2 evidence map and baseline rerun.
+
+### 2026-11-17 - Repository update - Published Phase 3.1C
+
+- **Changed:** Published the desktop plate solve job, project handoff, and packaged Windows checks as `5c4bb68`.
+- **Verified:** The staged patch passed the whitespace check and the remote main ref resolved to `5c4bb68`.
+- **Next:** Review and rerun the Phase 2 baseline in Phase 3.5A.
+
+### 2026-11-17 - Phase 3.5A - Completed Phase 2 baseline review
+
+- **Changed:** Mapped every Phase 2 criterion to the current implementation and results. Recorded fixture recipes and thresholds for narrow sky support, saturation, masked WCS reuse, and real M13 crops.
+- **Verified:** The 85 Windows tests, the offline solver matrix, and both packaged desktop modes passed. The held-out synthetic P95 was 0.000558 px. CFITSIO verified masked export coverage and geometry. The exploratory embedded-to-sidecar comparison found a maximum one-ULP brightness difference within the fixture tolerance. Ruff, mypy, and lock validation passed.
+- **Related:** [Phase 3.5A evidence](docs/phase-35.md), Q-003, Q-006, and Q-014.
+- **Next:** Add the focused regression tests in 3.5B and use the exact M13 crop recipe during 3.5C.
+
+### 2026-11-17 - Phase 3.5B - Completed focused regression coverage
+
+- **Changed:** Added deterministic tests for background plane rejection in narrow overlaps, saturated-star handling, and masked WCS reuse through the CLI.
+- **Verified:** All 88 native Windows tests passed. Each new test detected a deliberately bypassed check in memory. The masked FITS retained its expected science samples, coverage, WCS, and sidecar provenance. Ruff, mypy, and lock validation passed.
+- **Related:** [Phase 3.5B regression results](docs/phase-35.md#phase-35b-regression-results), Q-003, and Q-014.
+- **Next:** Run 3.5C with the frozen synthetic and real fixtures through the source and portable Windows CLI.
+
+### 2026-11-17 - Phase 3.5C - Completed Windows astronomy engine verification
+
+- **Changed:** Recorded the frozen regression rerun, new M42 offline astrometry and Documents catalog format checks, and the saved M31 project and FITS mosaic with 20% panel overlap.
+- **Verified:** All 88 tests and the packaged CLI and OpenGL checks passed. CFITSIO confirmed the masked reference and exact M31 reconstruction. M42 solved with hints on the 40′ field and blind on the 55′ field. A regional conversion of the Documents XPSD catalog yielded a separate validated M42 FITS with 115 Gaia matches. The narrower blind failure is recorded in Q-015. Ruff, mypy, and lock validation passed.
+- **Related:** [Phase 3.5C evidence](docs/phase-35.md#phase-35c-windows-verification), Q-003, Q-006, Q-014, and Q-015.
+- **Next:** Start Phase 4A. Repeat the separate 3F clean-machine check when a clean Windows host is available.
+
+### 2026-11-17 - Local setup - Saved Gaia paths and verified portable ASTAP
+
+- **Changed:** Saved the verified Seiza deep Gaia DR3 catalog and matching blind index in the current Windows user's Plate Solve settings.
+- **Verified:** A fresh settings dialog loaded both paths and Seiza opened both files. Five settings tests passed. The portable ASTAP CLI 2026.11.01 and D05 catalog solved the M13 reference through the packaged CLI.
+- **Related:** Q-006. The ASTAP check used explicit CLI paths. The desktop ASTAP fields are currently empty.
+- **Next:** Start Phase 4A from the verified 3.5C baseline.
+
+### 2026-11-17 - Local setup - Saved ASTAP paths
+
+- **Changed:** Saved the verified portable ASTAP executable, local catalog folder, and D05 database in the current Windows user's Plate Solve settings.
+- **Verified:** A separate process opened a fresh settings dialog with both the ASTAP and Gaia paths. Both backend path checks passed.
+- **Related:** Q-006.
+- **Next:** Start Phase 4A from the verified 3.5C baseline.
+
+### 2026-11-17 - Research - Compared Mosaic Master and AstroMosaic plate solving
+
+- **Changed:** Added a [source-based comparison](docs/plate-solve-comparison.md) separating Mosaic Master's Gaia/web panel route, SetiSuite's general four-pass solver, finished-canvas Gaia solving, and AstroMosaic's offline chain. Preserved existing working-tree changes and application code.
+- **Verified:** Eleven existing AstroMosaic solver/setup/desktop tests passed. Isolated actual SetiSuite methods confirmed fallback routing, approximate quad-seed acceptance, fixed-parity TAN reconstruction, and the existing stale-SIP writer regression. A mocked Seiza probe confirmed confidence rejection and retained blind scale bounds; installed 0.48.2 signatures confirmed default SIP order zero. Full SetiSuite integration and comparative real-image timing were not run.
+- **Related:** Q-016 records wrong-scale recovery and distortion validation; Q-015 retains the existing M42 coverage issue. ADR-0005 and ADR-0010 remain unchanged.
+- **Next:** Use the report to scope a controlled solver benchmark; Phase 4A remains the active development next step.
+
+### 2026-11-17 - Phase 3.6 - Planned ASTAP priority and reliable solving
+
+- **Changed:** Revised the active architecture to 3.10 and added the [detailed 3.6A–3.6F plan](docs/phase-36.md) before Phase 4A. Defined ASTAP-first solving, Automatic/manual local catalogs, 15-match evidence, proposed RMS and total-budget values, bad-scale recovery, supported SIP/edge gates, migration and downstream impacts. ADR-0017 records the priority change; application code and earlier evidence remain unchanged.
+- **Verified:** Reviewed the current adapters/settings/CLI, Phase 3.5 evidence and official ASTAP sources. A hidden help-only call confirmed installed CLI-2026.11.01 options; native auto selection, match/RMS extraction and SIP solving remain 3.6A checks. Content review, all 330 local file/directory links and anchors across 34 repository Markdown files, new-file whitespace/fences, unique topic IDs and `git diff --check` passed. No application tests were needed for this planning-only change.
+- **Related:** Updated Q-003/Q-004/Q-015/Q-016 and added Q-017 for ASTAP automation/quality evidence and Q-018 for deadlines/migration. Existing user working-tree changes were preserved.
+- **Next:** Start 3.6A capability probes and fixture/threshold freeze; do not claim implementation or 3.6 acceptance from the plan.
+
+### 2026-11-17 - Phase 3.6 - Clarified full-field skew and distortion diagnostics
+
+- **Changed:** Expanded 3.6E to quantify center/interior/edge geometry with a bounded model grid and regional measured-error/support views. Separated global linear skew, nonlinear WCS displacement, local scale/shear and actual star residuals. Unsupported/model-only regions cannot be presented as measured zero distortion.
+- **Verified:** Reviewed the requirement against the existing SIP, source/mask identity, shared geometry and total-budget contracts. All 330 local links/anchors across 34 Markdown files, affected code fences and `git diff --check` passed; application code and tests are unchanged.
+- **Related:** Q-016 now includes the full-field diagnostic and support requirement. The current phase remains planned, with implementation starting at 3.6A.
+- **Next:** Freeze grid/reference definitions, regional sample support and synthetic skew/distortion truth cases in 3.6A.
+
+### 2026-11-17 - Phase 3.6A - Started capability probes and owner TIFF validation
+
+- **Changed:** Added reproducible local native probes and an original bounded ASTAP D-series cone decoder. Added TIFF EXIF/XMP optical hints to panel inspection, with camera display, unit/precedence checks and preserved manual overrides. Included the owner's ignored `20.TIF`/`21.TIF` as optional local regression inputs.
+- **Verified:** Baseline tests passed 87 cases with the native OpenGL case skipped. Twenty-seven focused catalog/metadata/owner/inspection tests passed, and Ruff/mypy passed before subsequent probe refinements. ASTAP CLI-2026.11.01 solved M13 with omitted/explicit Auto and produced SIP-3 with `-sip`. Independent D05 checking found 168 TAN matches at 0.629 arcsec RMS; native SIP was slightly worse at 0.683 arcsec. After EXIF scale extraction, local Gaia solved both owner TIFFs with 890/894 matches in about 5–6 seconds. Original image hashes were unchanged.
+- **Related:** Q-016/Q-017/Q-018 remain active. The owner TIFFs expose wide-field support and regional validation costs, tracked under Q-019. No new backend order or complete Phase 3.6 quality policy is claimed yet.
+- **Next:** Finish capability evidence, spatial validation and frozen reference thresholds, then proceed to 3.6B. Keep expensive wide-field validation inside the eventual total deadline.
+
+### 2026-11-18 - Phase 3.6A - Completed capability/reference freeze and TIFF metadata import
+
+- **Changed:** Recorded [3.6A evidence](docs/phase-36a.md) and the [frozen manifest](tests/fixtures/plate_solve_v36.json). Added original bounded local catalog querying, native/reproducible probes and TIFF EXIF/XMP optics/camera loading with preserved overrides. Frozen broad Gaia recovery is now 0.1–120 arcsec/pixel to include the owner wide-field images; production dispatch/quality/SIP/deadline integration is still pending.
+- **Verified:** All 117 source tests passed on native Windows, including OpenGL; dialogs/windows used the second monitor. Ruff, format, mypy and lock checks passed. Actual ASTAP Auto/SIP, missing manual-catalog fallback, independent M13 associations, owner TIFF staging/metadata and broad native Gaia/SIP experiments were recorded. All original image hashes were unchanged; all three Seiza files matched bundle SHA-256/size. Final documentation checks are recorded after the handoff review.
+- **Related:** Q-016–Q-019 remain implementation/acceptance topics. Independent owner SIP checking improved RMS from about 50 to 13 arcsec, but fine-grid cells without enough stars remain unvalidated. W08 is absent; no catalog was installed implicitly. Earlier user changes and evidence were preserved.
+- **Next:** Start 3.6B. Keep the experimental native fits distinct from final model acceptance, and retain the full Phase 3.6F portable/desktop gates.
+
+### 2026-11-18 - Phase 3.6B - ASTAP first and catalog selection in source
+
+- **Changed:** Existing WCS still wins. New candidates try the configured ASTAP CLI before Gaia. Fresh settings use Automatic and explicit D-series choices remain pinned. The adapter inventories complete tile sets and records actual native database identity.
+- **Verified:** Twelve focused tests passed. The pinned CLI solved M13 with native Auto/D05. A real catalog path with spaces and a character outside the Windows code page required an ASCII scratch alias, then solved with the same CLI and data. Catalog files were read through links.
+- **Next:** Apply one deadline around preparation, the native backends and publication. The 15-match gate and the supported SIP decision follow in 3.6D/E.
+
+### 2026-11-18 - Phases 3.6C–3.6E - Integrated deadline, quality gate and spatial validation
+
+- **Changed:** Source and desktop entry points share one deadline per panel. Gaia native search and validation run in bounded Windows spawn workers. Published sidecars use the version 2 quality report and retain version 1 reading.
+- **Changed:** Production acceptance checks unique local catalog associations and comparable RMS, removes rejected position/scale hints during recovery, and compares TAN and SIP with a shared spatial holdout. The new panel details view separates model displacement from measured errors.
+- **Verified:** Twenty-six focused numerical, workflow and deadline tests passed. Real M13 ASTAP-only and Gaia-only runs accepted TAN. Both owner TIFFs recovered SIP-3 from incorrect 0.5× scale and pointing in the initial source run, with held-out edge P95 below 0.9 px.
+- **Next:** Complete native desktop and portable checks, repeat the frozen archive comparisons, and record unsupported catalogs and any remaining numerical or deployment gates.
+
+### 2026-11-18 - Phase 3.6F - Portable Windows and owner-image checks passed
+
+- **Changed:** Built the updated local portable package from the locked Windows environment. Added a TIFF codec prerequisite check after the first build failed LZW verification.
+- **Verified:** All 138 source tests passed. The portable CLI passed independent FITS and compressed TIFF checks. Desktop CPU and OpenGL passed the plate-solve, cancellation/retry, save/reopen and export checks. A measured live ASTAP cancellation reaped its process and cleared scratch in about 0.025 seconds.
+- **Verified:** Both owner files recovered SIP-3 in the portable CLI under 45 seconds. Held-out outer P95 was 0.837 and 0.874 px. Independent D05 outer P95 was 0.895 and 0.985 px. Original hashes were unchanged and both RGB exports reopened.
+- **Next:** Keep [the Windows evidence](docs/phase-36-results.md) with the package. Real dense ASTAP combinations, the narrow M42 blind limit and the separate clean-machine run remain visible.
+
+### 2026-11-18 - Phase 3.6F - Clean native timeout reporting
+
+- **Changed:** A supplemental blind M42 deadline test found a child result colliding with the closed parent pipe. The worker now treats that closure as expected during timeout or cancellation.
+- **Verified:** Added a targeted regression. The native suite passed all 139 tests. The rebuilt CLI reported timeouts with empty stderr and withheld sidecars at both 2.5- and 6-second attempt limits. The independent compressed TIFF and FITS checks and rebuilt desktop CPU/OpenGL runs passed again.
+- **Verified:** Documentation review covered 36 Markdown files, 380 local links and anchors, 19 unique topic IDs and the frozen fixture manifest.
+- **Next:** Retain the verified local package and the open real-catalog/clean-machine gates.
 
 ## Entry Template
 

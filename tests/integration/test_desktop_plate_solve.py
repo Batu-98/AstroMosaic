@@ -9,19 +9,23 @@ import pytest
 from astropy.io import fits
 
 from astromosaic.astrometry import solve
+from astromosaic.astrometry.astap_probe import AstapCandidate
+from astromosaic.astrometry.gaia_solve import GaiaCandidate
 from astromosaic.astrometry.hints import PanelOptics
 from astromosaic.astrometry.solve import SolveOptions, SolverAttempt, SolveResult, write_solution
 from astromosaic.core import Region
 from astromosaic.core.job import JobContext
 from astromosaic.core.masks import FOREGROUND, SKY, SourceMask
 from astromosaic.geometry import read_panel_geometry, tan_output_wcs
-from astromosaic.io import PanelSource, open_panel
+from astromosaic.io import open_panel
 from astromosaic.pipeline.mosaic import RenderSpec
 from astromosaic.storage.project import FileReference, MosaicProject, ProjectPanel, load_project
 
 
 def test_desktop_plate_solve_skips_reusable_wcs_and_retries_unsolved_panels(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    stub_solve_evidence: None,
 ) -> None:
     pytest.importorskip("PySide6")
     from PySide6.QtCore import QEventLoop, QTimer
@@ -63,9 +67,15 @@ def test_desktop_plate_solve_skips_reusable_wcs_and_retries_unsolved_panels(
     project = MosaicProject(tuple(panels), RenderSpec(center, size, 2.0))
 
     gaia_catalog = tmp_path / "gaia.bin"
+    gaia_index = tmp_path / "gaia.idx"
+    gaia_catalog.touch()
+    gaia_index.touch()
     astap_executable = tmp_path / "astap_cli.exe"
     options = SolveOptions(
-        gaia_catalog=gaia_catalog, astap=astap_executable, astap_catalog=tmp_path
+        gaia_catalog=gaia_catalog,
+        gaia_index=gaia_index,
+        astap=astap_executable,
+        astap_catalog=tmp_path,
     )
     monkeypatch.setattr(project_window, "load_plate_solve_settings", lambda: options)
 
@@ -74,23 +84,33 @@ def test_desktop_plate_solve_skips_reusable_wcs_and_retries_unsolved_panels(
     retry = Event()
     calls: list[tuple[int, str]] = []
 
-    def gaia(
-        source: PanelSource,
-        active_options: SolveOptions,
-        catalog: Path,
-        position: tuple[float, float] | None,
-        scale: float | None,
-        context: JobContext,
-    ) -> tuple[fits.Header, SolverAttempt]:
-        assert get_ident() != main_thread and catalog == gaia_catalog
-        assert position == center
+    def coordinates(run: solve._PanelSolve) -> list[tuple[float, float, float]]:
+        source = run.source
         index = int(source.header["PANELID"])
-        calls.append((index, "gaia"))
         if index == 3:
-            assert active_options.optics == panels[3].optics and scale is not None
+            assert run.options.optics == panels[3].optics
             assert source.sky_mask_fingerprint == mask.sky_fingerprint
             assert not source.read_tile(Region(0, 15, 1, 1)).valid[0, 0]
-            return header, SolverAttempt("gaia-dr3", "solved", "Hinted match")
+        return [(float(index), 0.0, 10.0)] * 20
+
+    def gaia(
+        catalog: Path,
+        _index: Path | None,
+        _size: tuple[int, int],
+        measured: list[tuple[float, float, float]],
+        position: tuple[float, float] | None,
+        scale: float | None,
+        _seconds: float,
+        context: JobContext,
+    ) -> GaiaCandidate:
+        assert get_ident() != main_thread and catalog == gaia_catalog
+        index = int(measured[0][0])
+        calls.append((index, "gaia"))
+        if index == 3:
+            assert position == center and scale is not None
+            return GaiaCandidate(
+                header.tostring(sep="\n", padding=False), "test", "test", 20, 0.2, 0
+            )
         if index == 5 and not retry.is_set():
             waiting.set()
             while not retry.wait(0.01):
@@ -105,16 +125,17 @@ def test_desktop_plate_solve_skips_reusable_wcs_and_retries_unsolved_panels(
         *,
         position: tuple[float, float] | None,
         **kwargs: object,
-    ) -> tuple[fits.Header, str]:
+    ) -> AstapCandidate:
         assert executable == astap_executable and catalog == tmp_path
         assert callable(stage)
         calls.append((-1, "astap"))
         if not retry.is_set():
             raise ValueError("ASTAP found no match.")
         assert position == center
-        return header, "test ASTAP"
+        return AstapCandidate(header, "CLI-test", "d05")
 
-    monkeypatch.setattr(solve, "_solve_gaia", gaia)
+    monkeypatch.setattr(solve._PanelSolve, "coordinates", coordinates)
+    monkeypatch.setattr(solve, "search_gaia", gaia)
     monkeypatch.setattr(solve, "solve_astap", astap)
     sidecars = tmp_path / "solutions"
     sidecars.mkdir()
@@ -169,7 +190,7 @@ def test_desktop_plate_solve_skips_reusable_wcs_and_retries_unsolved_panels(
         assert window.project.panels[3].wcs_sidecar == load_project(manifest).panels[3].wcs_sidecar
         assert window.project.panels[1].wcs_sidecar == panels[1].wcs_sidecar
         assert "Solved with ASTAP hinted" in window.panels.item(5).text()
-        assert [index for index, backend in calls if backend == "gaia"] == [3, 4, 5, 4, 5]
+        assert [index for index, backend in calls if backend == "gaia"] == [3, 4, 5]
         assert len(list((tmp_path / "night.astromosaic.wcs").glob("*.wcs.json"))) == 2
         assert old_sidecar.read_text(encoding="utf-8") == "{}"
 

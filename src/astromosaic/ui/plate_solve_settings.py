@@ -4,9 +4,11 @@ from pathlib import Path
 
 from PySide6.QtCore import QSettings, Qt, Slot
 from PySide6.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QDialog,
     QDialogButtonBox,
+    QDoubleSpinBox,
     QFileDialog,
     QFormLayout,
     QGroupBox,
@@ -18,8 +20,10 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from astromosaic.astrometry.astap_probe import ASTAP_DATABASES
+from astromosaic.astrometry.astap_probe import ASTAP_DATABASE_CHOICES
+from astromosaic.astrometry.hints import positive_number
 from astromosaic.astrometry.solve import SolveOptions
+from astromosaic.astrometry.solve_budget import DEFAULT_PANEL_SECONDS
 from astromosaic.astrometry.solver_setup import check_solver_paths
 from astromosaic.core.job import JobContext
 from astromosaic.ui.mosaic_job import BackgroundJob
@@ -51,7 +55,11 @@ def load_plate_solve_settings() -> SolveOptions:
         gaia_index=_path(saved.get("gaia_index")),
         astap=_path(saved.get("astap")),
         astap_catalog=_path(saved.get("astap_catalog")),
-        astap_database=database if database in ASTAP_DATABASES else ASTAP_DATABASES[0],
+        astap_database=database if database in ASTAP_DATABASE_CHOICES else "auto",
+        timeout_seconds=positive_number(saved.get("timeout_seconds")) or 60,
+        total_seconds=positive_number(saved.get("total_seconds")) or DEFAULT_PANEL_SECONDS,
+        job_seconds=positive_number(saved.get("job_seconds")),
+        strict_edges=saved.get("strict_edges") is True,
     )
 
 
@@ -65,6 +73,10 @@ def _save_plate_solve_settings(options: SolveOptions) -> None:
             "astap": str(options.astap or ""),
             "astap_catalog": str(options.astap_catalog or ""),
             "astap_database": options.astap_database,
+            "timeout_seconds": options.timeout_seconds,
+            "total_seconds": options.total_seconds,
+            "job_seconds": options.job_seconds,
+            "strict_edges": options.strict_edges,
         },
     )
     settings.sync()
@@ -85,7 +97,7 @@ class PlateSolveSettings(QDialog):
     def __init__(self, parent: QWidget) -> None:
         super().__init__(parent)
         self.setWindowTitle("Plate Solve Settings")
-        self.resize(640, 300)
+        self.resize(640, 420)
         self._job: _SolverPathCheck | None = None
         self._dismiss_pending = False
 
@@ -110,14 +122,31 @@ class PlateSolveSettings(QDialog):
         )
 
         astap = QGroupBox("ASTAP")
-        fields.addWidget(astap)
+        fields.insertWidget(0, astap)
         astap_form = QFormLayout(astap)
         self.astap = self._path_row(astap_form, "CLI executable", options.astap, "Programs (*.exe)")
         self.astap_catalog = self._path_row(astap_form, "Catalog folder", options.astap_catalog)
         self.astap_database = QComboBox()
-        self.astap_database.addItems([name.upper() for name in ASTAP_DATABASES])
-        self.astap_database.setCurrentIndex(ASTAP_DATABASES.index(options.astap_database))
+        self.astap_database.addItems(
+            ["Automatic", *(name.upper() for name in ASTAP_DATABASE_CHOICES[1:])]
+        )
+        self.astap_database.setCurrentIndex(ASTAP_DATABASE_CHOICES.index(options.astap_database))
         astap_form.addRow("Database", self.astap_database)
+
+        solve_limits = QGroupBox("Solve Limits")
+        fields.addWidget(solve_limits)
+        limits = QFormLayout(solve_limits)
+        self.total_seconds = self._seconds(options.total_seconds)
+        self.total_seconds.setToolTip("Includes preparation, searching, validation and saving.")
+        limits.addRow("Per panel", self.total_seconds)
+        self.timeout_seconds = self._seconds(options.timeout_seconds)
+        self.timeout_seconds.setToolTip("Upper limit for one native search. Stage caps also apply.")
+        limits.addRow("Per attempt", self.timeout_seconds)
+        self.job_seconds = self._seconds(options.job_seconds or 0, optional=True)
+        limits.addRow("Entire batch", self.job_seconds)
+        self.strict_edges = QCheckBox("Require held-out field-edge validation")
+        self.strict_edges.setChecked(options.strict_edges)
+        limits.addRow(self.strict_edges)
 
         self.message = QLabel(_CHECK_HINT)
         self.message.setTextFormat(Qt.TextFormat.PlainText)
@@ -136,6 +165,18 @@ class PlateSolveSettings(QDialog):
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
+
+    @staticmethod
+    def _seconds(value: float, *, optional: bool = False) -> QDoubleSpinBox:
+        field = QDoubleSpinBox()
+        field.setDecimals(1)
+        field.setRange(0 if optional else 0.1, 999999.0)
+        field.setSingleStep(5)
+        field.setSuffix(" s")
+        if optional:
+            field.setSpecialValueText("No limit")
+        field.setValue(value)
+        return field
 
     def _path_row(
         self, form: QFormLayout, label: str, path: Path | None, file_filter: str | None = None
@@ -168,7 +209,11 @@ class PlateSolveSettings(QDialog):
             gaia_index=_path(self.gaia_index.text()),
             astap=_path(self.astap.text()),
             astap_catalog=_path(self.astap_catalog.text()),
-            astap_database=ASTAP_DATABASES[self.astap_database.currentIndex()],
+            astap_database=ASTAP_DATABASE_CHOICES[self.astap_database.currentIndex()],
+            timeout_seconds=self.timeout_seconds.value(),
+            total_seconds=self.total_seconds.value(),
+            job_seconds=self.job_seconds.value() or None,
+            strict_edges=self.strict_edges.isChecked(),
         )
 
     @Slot()
@@ -202,7 +247,7 @@ class PlateSolveSettings(QDialog):
             self.message.setText(job.error or "The path check did not complete.")
         else:
             gaia, astap = job.result
-            self.message.setText(f"Gaia DR3\n{gaia}\n\nASTAP\n{astap}")
+            self.message.setText(f"ASTAP\n{astap}\n\nGaia DR3\n{gaia}")
 
     def accept(self) -> None:
         if self._job is not None:

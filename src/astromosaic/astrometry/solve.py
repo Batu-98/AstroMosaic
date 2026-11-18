@@ -2,19 +2,31 @@
 
 import json
 import subprocess
-from dataclasses import asdict, dataclass
-from importlib.metadata import version
-from math import isfinite
+from dataclasses import asdict, dataclass, replace
+from math import atan, degrees, isfinite, radians
 from pathlib import Path
 from shutil import disk_usage
-from time import monotonic
-from typing import Literal
+from typing import Any, Literal
 
 import numpy as np
 from astropy.io import fits
 
-from astromosaic.astrometry.astap_probe import solve_astap
+from astromosaic.astrometry.astap_catalog import CatalogStar, query_astap_cone
+from astromosaic.astrometry.astap_probe import (
+    AstapCandidate,
+    AstapSetup,
+    check_astap_setup,
+    solve_astap,
+)
+from astromosaic.astrometry.distortion import validate_models
+from astromosaic.astrometry.gaia_solve import GAIA_BROAD_SCALES, search_gaia, validate_gaia
 from astromosaic.astrometry.hints import PanelOptics, positive_number, read_optics
+from astromosaic.astrometry.solve_budget import (
+    DEFAULT_PANEL_SECONDS,
+    SolveBudget,
+    SolveBudgetExceeded,
+)
+from astromosaic.astrometry.solve_validation import MIN_MATCHES, QualityRejected, associate
 from astromosaic.astrometry.stars import astrometry_pixels, measure_stars
 from astromosaic.core import Region, SourceFingerprint
 from astromosaic.core.job import DEFAULT_JOB_CONTEXT, JobContext, MosaicCancelled
@@ -23,7 +35,7 @@ from astromosaic.io import PanelSource
 from astromosaic.io.atomic import atomic_binary_file
 
 Stage = Literal["existing-wcs", "gaia-dr3", "astap-hinted", "astap-blind"]
-_STAGES: tuple[Stage, ...] = ("existing-wcs", "gaia-dr3", "astap-hinted", "astap-blind")
+_STAGES: tuple[Stage, ...] = ("existing-wcs", "astap-hinted", "astap-blind", "gaia-dr3")
 
 
 @dataclass(frozen=True, slots=True)
@@ -32,24 +44,40 @@ class SolveOptions:
     gaia_index: Path | None = None
     astap: Path | None = None
     astap_catalog: Path | None = None
-    astap_database: str = "d05"
+    astap_database: str = "auto"
     position: tuple[float, float] | None = None
     scale_arcsec: float | None = None
     timeout_seconds: float = 60
     max_working_bytes: int = 64 * 1024**2
     max_scratch_bytes: int = 1024**3
     optics: PanelOptics = PanelOptics()
+    total_seconds: float = DEFAULT_PANEL_SECONDS
+    job_seconds: float | None = None
+    revalidate: bool = False
+    strict_edges: bool = False
 
 
 @dataclass(frozen=True, slots=True)
 class SolverAttempt:
     stage: Stage
-    outcome: Literal["solved", "failed", "skipped", "timeout"]
+    outcome: Literal["solved", "failed", "skipped", "timeout", "rejected", "budget-exhausted"]
     detail: str
     backend_version: str | None = None
     catalog: str | None = None
     matched_stars: int | None = None
     rms_arcsec: float | None = None
+    catalog_selection: str | None = None
+    method: str | None = None
+    effective_position_deg: tuple[float, float] | None = None
+    effective_scale_arcsec_px: float | None = None
+    effective_fov_deg: float | None = None
+    effective_scale_interval_arcsec_px: tuple[float, float] | None = None
+    preparation_seconds: float = 0.0
+    search_seconds: float = 0.0
+    validation_seconds: float = 0.0
+    remaining_at_search_seconds: float | None = None
+    search_limit_seconds: float | None = None
+    rejection_evidence: dict[str, object] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -57,12 +85,22 @@ class SolveResult:
     geometry: PanelGeometry | None
     stage: Stage | None
     attempts: tuple[SolverAttempt, ...]
+    outcome: str = "unsolved"
+    budget: dict[str, object] | None = None
+    original_hints: dict[str, object] | None = None
+    quality: dict[str, object] | None = None
+    reason: str | None = None
 
     def report(self) -> dict[str, object]:
         return {
-            "status": "solved" if self.geometry is not None else "unsolved",
+            "policy": "3.6",
+            "status": "solved" if self.geometry is not None else self.outcome,
             "stage": self.stage,
             "attempts": [asdict(attempt) for attempt in self.attempts],
+            "budget": self.budget,
+            "original_hints": self.original_hints,
+            "quality": self.quality,
+            "reason": self.reason,
         }
 
 
@@ -132,174 +170,398 @@ def _stage_astap_input(
         stream.close()
 
 
-def _solve_gaia(
-    source: PanelSource,
-    options: SolveOptions,
-    catalog_path: Path,
-    position: tuple[float, float] | None,
-    scale: float | None,
+def _validate_astap(
+    candidate: AstapCandidate,
+    directory: Path,
+    size: tuple[int, int],
+    coordinates: list[tuple[float, float, float]],
+    strict_edges: bool,
     context: JobContext,
-) -> tuple[fits.Header, SolverAttempt]:
-    try:
-        import seiza
-    except ImportError as error:
-        raise ValueError("Install the gaia extra to use the local Seiza backend.") from error
+) -> tuple[fits.Header, dict[str, object]]:
+    seed = read_panel_geometry(candidate.header, *size)
+    epoch: float | None = None
+    byte_limit = 64 * 1024**2
+    tiles: set[str] = set()
 
-    if not catalog_path.is_file():
-        raise ValueError("Provide an explicit local Gaia DR3 catalog file.")
-    hinted = position is not None and scale is not None
-    if not hinted and options.gaia_index is None:
-        raise ValueError("Gaia DR3 needs pointing and scale hints or a local blind index.")
-    stars = measure_stars(source, options.max_working_bytes, context).stars
-    if len(stars) < 8:
-        raise ValueError("Too few isolated sky stars for a Gaia DR3 solution.")
-    coordinates = [(star.x, star.y, star.flux) for star in stars]
-    catalog = seiza.StarCatalog.open(catalog_path)
-    width, height = source.descriptor.width, source.descriptor.height
-    deadline = monotonic() + options.timeout_seconds
-    context.check_cancelled()
-    solution = None
-    method = "hinted"
-    index_identity = ""
-
-    def confident(candidate: seiza.Solution) -> bool:
-        return (
-            candidate.matched_stars >= 8
-            and 0 <= candidate.false_match_probability <= 1e-3
-            and 0 <= candidate.rms_arcsec <= 2 * candidate.scale_arcsec_px
-        )
-
-    if position is not None and scale is not None:
+    def query(center: tuple[float, float], radius: float, limit: int) -> tuple[CatalogStar, ...]:
+        nonlocal epoch, byte_limit
         try:
-            solution = seiza.solve(
-                coordinates,
-                catalog,
-                width,
-                height,
-                ra=position[0],
-                dec=position[1],
-                scale_arcsec_px=scale,
-                time_limit=options.timeout_seconds,
-                cancel=context.is_cancelled,
+            cone = query_astap_cone(
+                directory,
+                candidate.database,
+                center,
+                radius,
+                max_stars=100_000,
+                max_read_bytes=byte_limit,
+                context=context,
             )
-        except seiza.SolveError:
-            context.check_cancelled()
-            if options.gaia_index is None:
-                raise
-    if solution is not None and not confident(solution) and options.gaia_index is not None:
-        solution = None
-    if solution is None:
-        context.check_cancelled()
-        index_path = options.gaia_index
-        if index_path is None or not index_path.is_file():
-            raise ValueError("Provide the matching local Gaia blind index file.")
-        remaining = deadline - monotonic()
-        if remaining <= 0:
-            raise TimeoutError("The Gaia DR3 solve deadline elapsed.")
-        index = seiza.BlindIndex.open(index_path)
-        lower, upper = (scale * 0.8, scale * 1.2) if scale is not None else (0.1, 20.0)
-        solution = seiza.solve_blind(
-            coordinates,
-            catalog,
-            index,
-            width,
-            height,
-            min_scale_arcsec_px=lower,
-            max_scale_arcsec_px=upper,
-            time_limit=remaining,
-            cancel=context.is_cancelled,
-        )
-        method = "blind"
-        index_identity = f"; index {_catalog_identity(index_path)}"
-    context.check_cancelled()
-    if not confident(solution):
-        raise ValueError("Gaia DR3 match confidence was below the acceptance threshold.")
-    return fits.Header(solution.fits_header_cards()), SolverAttempt(
-        "gaia-dr3",
-        "solved",
-        method,
-        version("seiza"),
-        _catalog_identity(catalog_path) + index_identity,
-        solution.matched_stars,
-        solution.rms_arcsec,
+        except (OSError, ValueError) as error:
+            raise QualityRejected(
+                f"Could not verify ASTAP against its local catalog. {error}"
+            ) from error
+        if epoch is not None and epoch != cone.epoch_year:
+            raise QualityRejected("The ASTAP validation regions have inconsistent catalog epochs.")
+        tiles.update(cone.tiles)
+        epoch = cone.epoch_year
+        byte_limit -= cone.read_bytes
+        return cone.stars
+
+    xy = np.asarray(coordinates, dtype=np.float64)[:, :2]
+    pairs = associate(seed, size, xy, query, context)
+    geometry, quality = validate_models(seed, size, pairs, context, strict_edges=strict_edges)
+    quality.update(
+        {
+            "catalog_epoch_year": epoch,
+            "catalog_tiles": len(tiles),
+            "catalog_read_bytes": 64 * 1024**2 - byte_limit,
+            "native_seed_sip_order": int(seed.wcs.sip.a_order) if seed.wcs.sip is not None else 0,
+        }
     )
+    return geometry.wcs.to_header(relax=True), quality
 
 
-def _catalog_identity(path: Path) -> str:
-    stat = path.stat()
-    return f"{path.name} ({stat.st_size} bytes, mtime_ns {stat.st_mtime_ns})"
+def panel_budget(options: SolveOptions, parent: SolveBudget | None = None) -> SolveBudget:
+    if parent is None and options.job_seconds is not None:
+        parent = SolveBudget.begin(options.job_seconds, scope="job")
+    return SolveBudget.begin(options.total_seconds, parent=parent)
+
+
+class _PanelSolve:
+    def __init__(
+        self,
+        source: PanelSource,
+        options: SolveOptions,
+        budget: SolveBudget,
+        context: JobContext,
+    ) -> None:
+        self.source, self.options, self.budget = source, options, budget
+        self.context = budget.context(context)
+        self.size = source.descriptor.width, source.descriptor.height
+        self.astap_setup: AstapSetup | None = None
+        self.astap_problem: str | None = None
+        self.gaia_available = False
+        self._coordinates: list[tuple[float, float, float]] | None = None
+
+    def coordinates(self) -> list[tuple[float, float, float]]:
+        self.context.check_cancelled()
+        if self._coordinates is None:
+            field = measure_stars(self.source, self.options.max_working_bytes, self.context)
+            self._coordinates = [(s.x, s.y, s.flux) for s in field.stars]
+        if len(self._coordinates) < MIN_MATCHES:
+            raise QualityRejected(f"Fewer than {MIN_MATCHES} isolated sky stars were measured.")
+        return self._coordinates
+
+    def astap_ready(self) -> AstapSetup | None:
+        options = self.options
+        if options.astap is None or options.astap_catalog is None:
+            self.astap_problem = "No local ASTAP executable and catalog configured."
+        if self.astap_setup is None and self.astap_problem is None:
+            assert options.astap is not None and options.astap_catalog is not None
+            try:
+                self.astap_setup = check_astap_setup(
+                    options.astap, options.astap_catalog, options.astap_database, self.context
+                )
+            except subprocess.TimeoutExpired:
+                self.astap_problem = "The ASTAP CLI did not answer its help check in time."
+            except (OSError, ValueError) as error:
+                self.astap_problem = str(error)
+        return self.astap_setup
+
+    def attempt(
+        self,
+        stage: Stage,
+        method: str,
+        position: tuple[float, float] | None,
+        gaia_scale: float | None,
+        vertical_scale: float | None,
+    ) -> tuple[PanelGeometry | None, SolverAttempt, dict[str, object] | None]:
+        options, context, budget = self.options, self.context, self.budget
+        started = budget.clock()
+        search_started = validation_started = None
+        remaining = search_limit = None
+        attempt = SolverAttempt(stage, "skipped", "", method=method)
+        geometry = None
+        quality = None
+
+        def start_search() -> float:
+            nonlocal search_started, remaining, search_limit
+            context.check_cancelled()
+            remaining = budget.remaining()
+            search_limit = budget.search_seconds(
+                stage if stage.startswith("astap-") else f"gaia-{method}",
+                options.timeout_seconds,
+                astap_only=not self.gaia_available and method == "blind",
+            )
+            search_started = budget.clock()
+            return search_limit
+
+        try:
+            context.check_cancelled()
+            header = None
+            if stage.startswith("astap-"):
+                if method == "hinted" and position is None and vertical_scale is None:
+                    attempt = replace(attempt, detail="No usable pointing or scale hint.")
+                elif (setup := self.astap_ready()) is None:
+                    attempt = replace(attempt, detail=self.astap_problem or "ASTAP unavailable.")
+                else:
+                    assert options.astap is not None and options.astap_catalog is not None
+                    effective_position = position if method in ("hinted", "fov-recovery") else None
+                    fov = (
+                        degrees(2 * atan(radians(self.size[1] * vertical_scale / 3600) / 2))
+                        if method == "hinted" and vertical_scale is not None
+                        else 0.0
+                    )
+                    attempt = replace(
+                        attempt,
+                        backend_version=setup.version,
+                        catalog_selection=setup.selection_reason,
+                        effective_position_deg=effective_position,
+                        effective_fov_deg=fov,
+                    )
+                    candidate = solve_astap(
+                        options.astap,
+                        options.astap_catalog,
+                        lambda path: _stage_astap_input(self.source, path, options, context),
+                        position=effective_position,
+                        field_height_deg=fov,
+                        setup=setup,
+                        database=options.astap_database,
+                        search_seconds=start_search,
+                        sip=True,
+                        context=context,
+                    )
+                    validation_started = budget.clock()
+                    attempt = replace(
+                        attempt, catalog=candidate.database, backend_version=candidate.version
+                    )
+                    header, quality = _validate_astap(
+                        candidate,
+                        options.astap_catalog,
+                        self.size,
+                        self.coordinates(),
+                        options.strict_edges,
+                        context,
+                    )
+            elif options.gaia_catalog is None or not options.gaia_catalog.is_file():
+                attempt = replace(attempt, detail="Choose a readable local Seiza Gaia DR3 catalog.")
+            elif method == "hinted" and (position is None or gaia_scale is None):
+                attempt = replace(
+                    attempt, detail="Gaia hinted solving requires pointing and scale."
+                )
+            elif method == "blind" and (
+                options.gaia_index is None or not options.gaia_index.is_file()
+            ):
+                attempt = replace(attempt, detail="Choose the matching local Gaia blind index.")
+            else:
+                effective_position = position if method == "hinted" else None
+                effective_scale = gaia_scale if method == "hinted" else None
+                attempt = replace(
+                    attempt,
+                    effective_position_deg=effective_position,
+                    effective_scale_arcsec_px=effective_scale,
+                    effective_scale_interval_arcsec_px=GAIA_BROAD_SCALES
+                    if method == "blind"
+                    else None,
+                )
+                coordinates = self.coordinates()
+                native = search_gaia(
+                    options.gaia_catalog,
+                    options.gaia_index,
+                    self.size,
+                    coordinates,
+                    effective_position,
+                    effective_scale,
+                    start_search(),
+                    context,
+                )
+                validation_started = budget.clock()
+                attempt = replace(attempt, catalog=native.catalog, backend_version=native.version)
+                header, quality = validate_gaia(
+                    native,
+                    options.gaia_catalog,
+                    self.size,
+                    coordinates,
+                    options.strict_edges,
+                    budget.remaining(),
+                    context,
+                )
+
+            if header is not None:
+                context.check_cancelled()
+                geometry = read_panel_geometry(header, *self.size)
+                assert quality is not None
+                count, rms_arcsec = quality["unique_matches"], quality["rms_arcsec"]
+                assert isinstance(count, int) and isinstance(rms_arcsec, float)
+                attempt = replace(
+                    attempt,
+                    outcome="solved",
+                    detail=f"Catalog-validated {quality['model']} WCS.",
+                    matched_stars=count,
+                    rms_arcsec=rms_arcsec,
+                )
+        except MosaicCancelled:
+            raise
+        except SolveBudgetExceeded as error:
+            attempt = replace(attempt, outcome="budget-exhausted", detail=str(error))
+        except (TimeoutError, subprocess.TimeoutExpired):
+            attempt = replace(attempt, outcome="timeout", detail="The solver attempt timed out.")
+        except QualityRejected as error:
+            attempt = replace(
+                attempt,
+                outcome="rejected",
+                detail=str(error),
+                rejection_evidence=error.evidence,
+            )
+        except (OSError, RuntimeError, ValueError, OverflowError) as error:
+            attempt = replace(attempt, outcome="failed", detail=str(error))
+
+        # Cancellation wins even if a backend reports an ordinary error on exit.
+        try:
+            context.check_cancelled()
+        except SolveBudgetExceeded as error:
+            geometry = None
+            attempt = replace(attempt, outcome="budget-exhausted", detail=str(error))
+        now = budget.clock()
+        return (
+            geometry,
+            replace(
+                attempt,
+                preparation_seconds=(search_started if search_started is not None else now)
+                - started,
+                search_seconds=(validation_started if validation_started is not None else now)
+                - search_started
+                if search_started is not None
+                else 0.0,
+                validation_seconds=now - validation_started
+                if validation_started is not None
+                else 0.0,
+                remaining_at_search_seconds=remaining,
+                search_limit_seconds=search_limit,
+            ),
+            quality if geometry is not None else None,
+        )
 
 
 def solve_panel(
-    source: PanelSource, options: SolveOptions, context: JobContext = DEFAULT_JOB_CONTEXT
+    source: PanelSource,
+    options: SolveOptions,
+    context: JobContext = DEFAULT_JOB_CONTEXT,
+    *,
+    budget: SolveBudget | None = None,
+    existing_sidecar: Path | None = None,
 ) -> SolveResult:
-    """Stop at the first validated local WCS and report each attempted stage."""
+    """Run the ordered local policy under a deadline started by the caller."""
     if not isfinite(options.timeout_seconds) or options.timeout_seconds <= 0:
         raise ValueError("The solver timeout must be positive and finite.")
     if min(options.max_working_bytes, options.max_scratch_bytes) <= 0:
         raise ValueError("Solver resource budgets must be positive.")
-    width, height = source.descriptor.width, source.descriptor.height
-    position, scale, vertical_scale = _pointing(source, options)
+    budget = budget if budget is not None else panel_budget(options)
+    run = _PanelSolve(source, options, budget, context)
     attempts: list[SolverAttempt] = []
-    for stage in _STAGES:
-        context.check_cancelled()
-        catalog = options.gaia_catalog
-        if stage == "gaia-dr3" and catalog is None:
+    hints: dict[str, object] | None = None
+
+    def finish(
+        geometry: PanelGeometry | None,
+        stage: Stage | None,
+        outcome: str,
+        quality: dict[str, object] | None = None,
+        reason: str | None = None,
+    ) -> SolveResult:
+        return SolveResult(
+            geometry, stage, tuple(attempts), outcome, budget.report(), hints, quality, reason
+        )
+
+    try:
+        run.context.check_cancelled()
+        started = budget.clock()
+        if options.revalidate or options.strict_edges:
             attempts.append(
-                SolverAttempt(stage, "skipped", "No local Gaia DR3 catalog configured.")
+                SolverAttempt("existing-wcs", "skipped", "Explicit revalidation requested.")
             )
-            continue
-        if stage == "astap-hinted" and position is None:
-            attempts.append(SolverAttempt(stage, "skipped", "No usable pointing hint."))
-            continue
-        if stage.startswith("astap-") and (options.astap is None or options.astap_catalog is None):
-            attempts.append(
-                SolverAttempt(stage, "skipped", "No local ASTAP executable and catalog configured.")
-            )
-            continue
-        try:
-            if stage == "existing-wcs":
-                header = source.header
-                detail = (
-                    "Validated embedded TIFF WCS."
-                    if source.descriptor.wcs_provenance == "tiff-description"
-                    else "Validated primary FITS WCS."
-                )
-                attempt = SolverAttempt(stage, "solved", detail)
-            elif stage == "gaia-dr3":
-                assert catalog is not None
-                header, attempt = _solve_gaia(source, options, catalog, position, scale, context)
-            else:
-                assert options.astap is not None and options.astap_catalog is not None
-                header, backend = solve_astap(
-                    options.astap,
-                    options.astap_catalog,
-                    lambda path: _stage_astap_input(source, path, options, context),
-                    position=position if stage == "astap-hinted" else None,
-                    field_height_deg=height * vertical_scale / 3600 if vertical_scale else 0,
-                    timeout_seconds=options.timeout_seconds,
-                    database=options.astap_database,
-                    context=context,
-                )
-                attempt = SolverAttempt(
-                    stage, "solved", "Validated ASTAP WCS.", backend, options.astap_database
-                )
-            context.check_cancelled()
-            geometry = read_panel_geometry(header, width, height)
-        except MosaicCancelled:
-            raise
-        except (TimeoutError, subprocess.TimeoutExpired):
-            context.check_cancelled()
-            attempts.append(
-                SolverAttempt(stage, "timeout", f"Exceeded {options.timeout_seconds:g} seconds.")
-            )
-        except (OSError, RuntimeError, ValueError) as error:
-            context.check_cancelled()
-            attempts.append(SolverAttempt(stage, "failed", str(error)))
         else:
+            try:
+                if existing_sidecar is not None:
+                    geometry, detail = load_solution(existing_sidecar, source)
+                else:
+                    geometry = read_panel_geometry(source.header, *run.size)
+                    detail = (
+                        "Validated embedded TIFF WCS."
+                        if source.descriptor.wcs_provenance == "tiff-description"
+                        else "Validated primary FITS WCS."
+                    )
+            except (OSError, ValueError, OverflowError) as error:
+                attempts.append(SolverAttempt("existing-wcs", "failed", str(error)))
+            else:
+                run.context.check_cancelled()
+                attempts.append(
+                    SolverAttempt(
+                        "existing-wcs",
+                        "solved",
+                        detail,
+                        preparation_seconds=budget.clock() - started,
+                    )
+                )
+                return finish(geometry, "existing-wcs", "solved", {"grade": "geometry-only"})
+
+        position, scale, vertical_scale = _pointing(source, options)
+        run.gaia_available = options.gaia_catalog is not None and options.gaia_catalog.is_file()
+        scale_origin = None
+        if scale is not None or vertical_scale is not None:
+            if options.scale_arcsec is not None:
+                scale_origin = "explicit scale"
+            elif positive_number(source.header.get("PIXSCALE")) is not None:
+                scale_origin = "embedded PIXSCALE"
+            elif options.optics != PanelOptics():
+                scale_origin = "optical metadata with project overrides"
+            else:
+                scale_origin = "embedded optical metadata"
+        hints = {
+            "position_deg": position,
+            "position_source": (
+                "explicit pointing" if options.position is not None else "embedded RA/DEC"
+            )
+            if position is not None
+            else None,
+            "gaia_scale_arcsec_px": scale,
+            "astap_vertical_scale_arcsec_px": vertical_scale,
+            "scale_source": scale_origin,
+            "astap_requested_database": options.astap_database,
+        }
+        # In ASTAP-only setups a known pointing makes the native FOV scan useful.
+        # Keep a full-sky blind path when there is no pointing or when Gaia can
+        # recover from a stale hint independently.
+        recovery = (
+            "fov-recovery"
+            if not run.gaia_available and position is not None and vertical_scale is not None
+            else "blind"
+        )
+        selections: list[tuple[Stage, str]] = [
+            ("astap-hinted", "hinted"),
+            ("astap-blind", recovery),
+        ]
+        if options.gaia_catalog is not None and (position is not None and scale is not None):
+            selections.append(("gaia-dr3", "hinted"))
+        if (
+            options.gaia_catalog is None
+            or options.gaia_index is not None
+            or (position is None or scale is None)
+        ):
+            selections.append(("gaia-dr3", "blind"))
+        for stage, method in selections:
+            solved, attempt, quality = run.attempt(stage, method, position, scale, vertical_scale)
             attempts.append(attempt)
-            return SolveResult(geometry, stage, tuple(attempts))
-    return SolveResult(None, None, tuple(attempts))
+            if solved is not None:
+                return finish(solved, stage, "solved", quality)
+            if attempt.outcome == "budget-exhausted":
+                return finish(None, None, "budget-exhausted", reason=attempt.detail)
+        run.context.check_cancelled()
+    except SolveBudgetExceeded as error:
+        return finish(None, None, "budget-exhausted", reason=str(error))
+    if any(attempt.outcome == "rejected" for attempt in attempts):
+        return finish(None, None, "quality-rejected")
+    if all(a.outcome == "skipped" for a in attempts if a.stage != "existing-wcs"):
+        return finish(None, None, "unavailable")
+    return finish(None, None, "unsolved")
 
 
 def _source_identity(source: PanelSource) -> dict[str, object]:
@@ -312,21 +574,31 @@ def _source_identity(source: PanelSource) -> dict[str, object]:
     }
 
 
-def write_solution(path: Path, source: PanelSource, solution: SolveResult) -> None:
+def write_solution(
+    path: Path,
+    source: PanelSource,
+    solution: SolveResult,
+    context: JobContext = DEFAULT_JOB_CONTEXT,
+) -> None:
+    context.check_cancelled()
     if solution.geometry is None:
         raise ValueError("A WCS sidecar requires a solved panel.")
     header = solution.geometry.wcs.to_header(relax=True)
     record = {
-        "version": 1,
+        "version": 2,
         "source": _source_identity(source),
         **solution.report(),
+        "quality": solution.quality or {"grade": "geometry-only"},
         "wcs": header.tostring(sep="\n", padding=False),
     }
-    with atomic_binary_file(path) as stream:
-        stream.write((json.dumps(record, indent=2, allow_nan=False) + "\n").encode("utf-8"))
+    payload = (json.dumps(record, indent=2, allow_nan=False) + "\n").encode("utf-8")
+    if len(payload) > 128 * 1024:
+        raise ValueError("The generated WCS sidecar exceeds its size limit.")
+    with atomic_binary_file(path, publish_check=context.check_cancelled) as stream:
+        stream.write(payload)
 
 
-def load_solution(path: Path, source: PanelSource) -> tuple[PanelGeometry, str]:
+def _read_solution_record(path: Path) -> dict[str, Any]:
     with path.open("rb") as stream:
         payload = stream.read(128 * 1024 + 1)
     if len(payload) > 128 * 1024:
@@ -334,12 +606,33 @@ def load_solution(path: Path, source: PanelSource) -> tuple[PanelGeometry, str]:
     record = json.loads(payload)
     if (
         not isinstance(record, dict)
-        or record.get("version") != 1
+        or record.get("version") not in (1, 2)
         or record.get("status") != "solved"
         or record.get("stage") not in _STAGES
         or not isinstance(record.get("wcs"), str)
     ):
-        raise ValueError("Expected a version 1 solved AstroMosaic WCS sidecar.")
+        raise ValueError("Expected a supported solved AstroMosaic WCS sidecar.")
+    if record["version"] == 2:
+        quality = record.get("quality")
+        if not isinstance(quality, dict) or quality.get("grade") not in (
+            "geometry-only",
+            "catalog-validated",
+        ):
+            raise ValueError("The WCS sidecar has an invalid quality grade.")
+    return record
+
+
+def read_solution_quality(path: Path) -> dict[str, object]:
+    """Read diagnostics for an already verified sidecar."""
+    record = _read_solution_record(path)
+    if record["version"] == 1:
+        return {"grade": "geometry-only"}
+    quality: dict[str, object] = record["quality"]
+    return quality
+
+
+def load_solution(path: Path, source: PanelSource) -> tuple[PanelGeometry, str]:
+    record = _read_solution_record(path)
     if record.get("source") != _source_identity(source):
         raise ValueError("The WCS sidecar belongs to a different input or sky mask revision.")
     header = fits.Header.fromstring(record["wcs"], sep="\n")

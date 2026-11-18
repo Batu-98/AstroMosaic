@@ -23,7 +23,7 @@ from PySide6.QtWidgets import (
 )
 
 from astromosaic.astrometry.hints import PanelOptics
-from astromosaic.astrometry.solve import Stage
+from astromosaic.astrometry.solve import Stage, read_solution_quality
 from astromosaic.display import DisplayFrame, highlight_overlap
 from astromosaic.storage.project import (
     FileReference,
@@ -46,6 +46,7 @@ from astromosaic.ui.mosaic_job import (
     PlateSolveJob,
     PreviewJob,
 )
+from astromosaic.ui.plate_solve_details import PlateSolveDetails
 from astromosaic.ui.plate_solve_settings import PlateSolveSettings, load_plate_solve_settings
 from astromosaic.ui.project_settings import (
     PANEL_FILES,
@@ -70,10 +71,10 @@ _Job = (
 )
 _LAYERS: tuple[Layer, ...] = ("sky", "foreground", "composition")
 _SOLVER_NAMES: dict[Stage, str] = {
-    "existing-wcs": "Embedded WCS",
+    "existing-wcs": "Existing WCS",
     "gaia-dr3": "Gaia DR3",
     "astap-hinted": "ASTAP hinted",
-    "astap-blind": "ASTAP blind",
+    "astap-blind": "ASTAP recovery",
 }
 
 
@@ -116,6 +117,12 @@ class ProjectWindow(QMainWindow):
         tools_menu = self.menuBar().addMenu("&Tools")
         self.plate_solve_settings_action = tools_menu.addAction(
             "Plate Solve Settings…", self._plate_solve_settings
+        )
+        self.revalidate_solve_action = panel_menu.addAction(
+            "Revalidate Plate Solution", self._revalidate_plate_solve
+        )
+        self.solve_details_action = panel_menu.addAction(
+            "Plate Solve Details…", self._plate_solve_details
         )
 
         body = QWidget(self)
@@ -249,15 +256,25 @@ class ProjectWindow(QMainWindow):
             tooltip = [f"{role}: {reference.path}" for role, reference in panel.references()]
             if info is not None:
                 tooltip.append(info.detail)
+                if info.camera_model is not None:
+                    tooltip.append(f"Camera: {info.camera_model}")
             if (outcome := self._solve_outcomes.get(index)) is not None:
                 if outcome.sidecar is not None and outcome.stage is not None:
                     item.setText(f"{item.text()}  ·  Solved with {_SOLVER_NAMES[outcome.stage]}")
                 else:
-                    item.setText(f"{item.text()}  ·  Solve failed")
+                    item.setText(
+                        f"{item.text()}  ·  {outcome.status.replace('-', ' ').capitalize()}"
+                    )
                 if outcome.error is not None:
                     tooltip.append(outcome.error)
                 tooltip.extend(
                     f"{_SOLVER_NAMES[attempt.stage]} {attempt.outcome}. {attempt.detail}"
+                    + (f" Catalog {attempt.catalog}." if attempt.catalog is not None else "")
+                    + (
+                        f" {attempt.matched_stars} matches, RMS {attempt.rms_arcsec:.2f}″."
+                        if attempt.matched_stars is not None and attempt.rms_arcsec is not None
+                        else ""
+                    )
                     for attempt in outcome.attempts
                 )
             item.setToolTip("\n".join(tooltip))
@@ -307,7 +324,8 @@ class ProjectWindow(QMainWindow):
             ) * len(job.project.panels)
             if self._panel_dialog is not None:
                 index, dialog = self._panel_dialog
-                dialog.show_embedded_optics(self._inspections[index].embedded_optics)
+                info = self._inspections[index]
+                dialog.show_embedded_optics(info.embedded_optics, info.camera_model)
         job.deleteLater()
         if self._close_after_job:
             if self.job is None:
@@ -380,6 +398,11 @@ class ProjectWindow(QMainWindow):
         self.check_foreground.setEnabled(selected)
         self.propose_mask.setEnabled(
             selected and self.project.panels[index].foreground_tag in ("mixed", "uncertain")
+        )
+        self.revalidate_solve_action.setEnabled(selected and index in self.project.sky_indices())
+        info = self._panel_inspection(index)
+        self.solve_details_action.setEnabled(
+            selected and info is not None and info.wcs_status in ("Embedded", "Sidecar")
         )
 
     def _confirm_discard(self) -> bool:
@@ -511,7 +534,10 @@ class ProjectWindow(QMainWindow):
         panels = self.project.panels
         dialog = PanelSettings(panels[index], self)
         info = self._panel_inspection(index)
-        dialog.show_embedded_optics(info.embedded_optics if info is not None else PanelOptics())
+        dialog.show_embedded_optics(
+            info.embedded_optics if info is not None else PanelOptics(),
+            info.camera_model if info is not None else None,
+        )
         self._panel_dialog = (index, dialog)
         try:
             while dialog.exec():
@@ -572,6 +598,36 @@ class ProjectWindow(QMainWindow):
             dialog.deleteLater()
 
     def _plate_solve(self) -> None:
+        self._start_plate_solve()
+
+    def _revalidate_plate_solve(self) -> None:
+        index = self.panels.currentRow()
+        if index in self.project.sky_indices():
+            self._start_plate_solve(index)
+
+    def _plate_solve_details(self) -> None:
+        index = self.panels.currentRow()
+        info = self._panel_inspection(index)
+        if info is None or info.wcs_status not in ("Embedded", "Sidecar"):
+            return
+        quality: dict[str, object] = {}
+        if info.wcs_status == "Sidecar":
+            reference = self.project.panels[index].wcs_sidecar
+            assert reference is not None
+            try:
+                if reference.status() != "Ready":
+                    raise ValueError("The WCS sidecar changed. Reopen the project to verify it.")
+                quality = read_solution_quality(reference.path)
+            except (OSError, ValueError) as error:
+                self.status.setText(str(error))
+                return
+        dialog = PlateSolveDetails(quality, self)
+        try:
+            dialog.exec()
+        finally:
+            dialog.deleteLater()
+
+    def _start_plate_solve(self, selected_panel: int | None = None) -> None:
         if self.job is not None or not self.project.sky_indices():
             return
         if self.project_path is None:
@@ -581,7 +637,8 @@ class ProjectWindow(QMainWindow):
             directory = Path(chosen)
         else:
             directory = self.project_path.with_name(f"{self.project_path.name}.wcs")
-        job = PlateSolveJob(self.project, load_plate_solve_settings(), directory, self)
+        options = replace(load_plate_solve_settings(), revalidate=selected_panel is not None)
+        job = PlateSolveJob(self.project, options, directory, self, selected_panel=selected_panel)
         self._launch_job(job, "Finding sky panels that need a WCS…")
 
     def _start(self) -> None:
@@ -739,6 +796,10 @@ class ProjectWindow(QMainWindow):
         if job.total:
             self.progress.setValue(100 * completed // job.total)
         summary = f"{solved} solved, {completed - solved} failed."
+        self.status.setToolTip(
+            f"Batch elapsed {job.elapsed_seconds:.2f} s. Queue {job.queue_seconds:.2f} s. "
+            f"Eligibility check {job.eligibility_seconds:.2f} s."
+        )
         if job.cancelled:
             self.status.setText(f"Plate solve cancelled. {summary}")
         elif job.error is not None:

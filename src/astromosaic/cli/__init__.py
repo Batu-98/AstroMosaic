@@ -25,7 +25,15 @@ def _panel_files(values: list[str], count: int) -> dict[int, Path]:
 
 def _run_solve(arguments: argparse.Namespace) -> tuple[dict[str, object], int]:
     os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
-    from astromosaic.astrometry.solve import SolveOptions, solve_panel, write_solution
+    from astromosaic.astrometry.solve import (
+        SolveOptions,
+        SolveResult,
+        panel_budget,
+        solve_panel,
+        write_solution,
+    )
+    from astromosaic.astrometry.solve_budget import SolveBudgetExceeded
+    from astromosaic.core import SourceFingerprint
     from astromosaic.core.job import DEFAULT_JOB_CONTEXT
     from astromosaic.io import open_panel
 
@@ -38,36 +46,78 @@ def _run_solve(arguments: argparse.Namespace) -> tuple[dict[str, object], int]:
         position=tuple(arguments.hint) if arguments.hint is not None else None,
         scale_arcsec=arguments.scale,
         timeout_seconds=arguments.timeout,
+        total_seconds=arguments.total_budget,
+        job_seconds=arguments.job_budget,
+        revalidate=arguments.revalidate,
+        strict_edges=arguments.require_edge_validation,
         max_working_bytes=arguments.memory_mib * 1024**2,
         max_scratch_bytes=arguments.scratch_mib * 1024**2,
     )
-    if arguments.path.suffix.lower() == ".astromosaic":
-        from astromosaic.storage.project import load_project, open_project_sky_panel
+    budget = panel_budget(options)
+    context = budget.context(DEFAULT_JOB_CONTEXT)
+    solution = SolveResult(None, None, ())
+    existing = None
+    source_path, mask_path = arguments.path, arguments.sky_mask
+    try:
+        context.check_cancelled()
+        if arguments.path.suffix.lower() == ".astromosaic":
+            from astromosaic.storage.project import load_project, open_project_sky_panel
 
-        if arguments.panel is None or arguments.sky_mask is not None:
-            raise ValueError("For a project, use --panel and its saved sky mask.")
-        project = load_project(arguments.path)
-        if not 1 <= arguments.panel <= len(project.panels):
-            raise ValueError("The panel number is outside the project.")
-        project_panel = project.panels[arguments.panel - 1]
-        options = replace(options, optics=project_panel.optics)
-        opened = open_project_sky_panel(
-            project_panel, options.max_working_bytes, DEFAULT_JOB_CONTEXT
+            if arguments.panel is None or arguments.sky_mask is not None:
+                raise ValueError("For a project, use --panel and its saved sky mask.")
+            project = load_project(arguments.path)
+            panel_index = arguments.panel - 1
+            if not 0 <= panel_index < len(project.panels):
+                raise ValueError("The panel number is outside the project.")
+            if panel_index not in project.sky_indices():
+                raise ValueError("The selected panel is excluded from the sky layer.")
+            project_panel = project.panels[panel_index]
+            options = replace(options, optics=project_panel.optics)
+            if (
+                project_panel.wcs_sidecar is not None
+                and project_panel.wcs_sidecar.status() == "Ready"
+            ):
+                existing = project_panel.wcs_sidecar.path
+            source_path = project_panel.source.path
+            mask_path = project_panel.sky_mask.path if project_panel.sky_mask is not None else None
+            opened = open_project_sky_panel(project_panel, options.max_working_bytes, context)
+        else:
+            if arguments.panel is not None:
+                raise ValueError("Use --panel with an AstroMosaic project.")
+            opened = open_panel(
+                arguments.path,
+                max_tile_bytes=options.max_working_bytes,
+                sky_mask=arguments.sky_mask,
+            )
+        context.check_cancelled()
+        with opened as panel:
+            solution = solve_panel(
+                panel, options, context, budget=budget, existing_sidecar=existing
+            )
+            if solution.geometry is not None and arguments.output is not None:
+                for path, fingerprint in (
+                    (source_path, panel.descriptor.fingerprint),
+                    (mask_path, panel.sky_mask_fingerprint),
+                ):
+                    if path is not None and isinstance(fingerprint, SourceFingerprint):
+                        stat = path.stat()
+                        if SourceFingerprint(stat.st_size, stat.st_mtime_ns) != fingerprint:
+                            raise ValueError("The source or sky mask changed during the solve.")
+                write_solution(arguments.output, panel, solution, context)
+    except SolveBudgetExceeded as error:
+        solution = replace(
+            solution,
+            geometry=None,
+            stage=None,
+            quality=None,
+            outcome="budget-exhausted",
+            reason=str(error),
         )
-    else:
-        if arguments.panel is not None:
-            raise ValueError("Use --panel with an AstroMosaic project.")
-        opened = open_panel(
-            arguments.path, max_tile_bytes=options.max_working_bytes, sky_mask=arguments.sky_mask
-        )
-    with opened as panel:
-        solution = solve_panel(panel, options)
-        report = solution.report()
-        if solution.geometry is None:
-            return report, 1
-        if arguments.output is not None:
-            write_solution(arguments.output, panel, solution)
-        return report, 0
+    budget_report = budget.report()
+    report = replace(solution, budget=budget_report).report()
+    if solution.geometry is not None and arguments.output is not None:
+        report["sidecar"] = arguments.output.name
+    return report, int(solution.geometry is None)
 
 
 def _run_mosaic(arguments: argparse.Namespace) -> tuple[dict[str, object], int]:
@@ -165,11 +215,37 @@ def main(argv: list[str] | None = None) -> int:
     solve.add_argument("--gaia-index", type=Path, help="Matching local Gaia DR3 blind index.")
     solve.add_argument("--astap", type=Path, help="Local ASTAP executable.")
     solve.add_argument("--astap-catalog", type=Path, help="Local ASTAP star catalog directory.")
-    solve.add_argument("--astap-database", default="d05", choices=("d05", "d20", "d50", "d80"))
+    solve.add_argument(
+        "--astap-database",
+        default="auto",
+        choices=("auto", "d05", "d20", "d50", "d80"),
+        help="Use Automatic selection or pin an installed D-series catalog.",
+    )
     solve.add_argument("--hint", nargs=2, type=float, metavar=("RA", "DEC"), help="ICRS degrees.")
     solve.add_argument("--scale", type=float, metavar="ARCSEC", help="Approximate pixel scale.")
     solve.add_argument(
-        "--timeout", type=float, default=60, help="Solve time limit per stage, in seconds."
+        "--timeout", type=float, default=60, help="Upper limit per native attempt, in seconds."
+    )
+    solve.add_argument(
+        "--total-budget",
+        type=float,
+        default=120,
+        metavar="SECONDS",
+        help="Panel time budget including preparation, validation and sidecar publication (120).",
+    )
+    solve.add_argument(
+        "--job-budget",
+        type=float,
+        metavar="SECONDS",
+        help="Optional overall job deadline. Takes precedence if it expires first.",
+    )
+    solve.add_argument(
+        "--revalidate", action="store_true", help="Require a new catalog-validated WCS."
+    )
+    solve.add_argument(
+        "--require-edge-validation",
+        action="store_true",
+        help="Require a new WCS with supported held-out field-edge accuracy.",
     )
     solve.add_argument("--memory-mib", type=int, default=64, help="Working buffer budget in MiB.")
     solve.add_argument("--scratch-mib", type=int, default=1024, help="ASTAP staging limit in MiB.")

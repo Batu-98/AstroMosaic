@@ -10,6 +10,7 @@ import numpy as np
 from PySide6.QtCore import QObject, QThread, Signal
 
 from astromosaic.astrometry.solve import SolveOptions
+from astromosaic.astrometry.solve_budget import SolveBudget, SolveBudgetExceeded
 from astromosaic.core import Tile
 from astromosaic.core.job import JobContext, MosaicCancelled
 from astromosaic.core.masks import MASK_EDGE, SKY, UNCLASSIFIED, SourceMask
@@ -99,25 +100,65 @@ class PlateSolveJob(_ProjectJob[None]):
     progress_units = "panels"
 
     def __init__(
-        self, project: MosaicProject, options: SolveOptions, directory: Path, parent: QObject
+        self,
+        project: MosaicProject,
+        options: SolveOptions,
+        directory: Path,
+        parent: QObject,
+        *,
+        selected_panel: int | None = None,
     ) -> None:
         super().__init__(project, parent)
         self.options = options
         self.directory = directory
+        self.selected_panel = selected_panel
+        self.batch_budget = (
+            SolveBudget.begin(options.job_seconds, scope="job")
+            if options.job_seconds is not None
+            else None
+        )
+        self.queued_at = monotonic()
+        self.queue_seconds = self.eligibility_seconds = self.elapsed_seconds = 0.0
         self.total = 0
         self.outcomes: list[PanelSolveOutcome] = []
 
     def perform(self, context: JobContext) -> None:
-        indices = panels_needing_wcs(self.project, context)
-        self.total = len(indices)
-        if self.total:
-            self._progress(0, self.total)
-        for done, index in enumerate(indices, 1):
-            outcome = solve_project_panel(
-                index, self.project.panels[index], self.options, self.directory, context
-            )
-            self.outcomes.append(outcome)
-            self._progress(done, self.total)
+        started = monotonic()
+        self.queue_seconds = started - self.queued_at
+        if self.batch_budget is not None:
+            context = self.batch_budget.context(context)
+        try:
+            try:
+                context.check_cancelled()
+                indices = (
+                    (self.selected_panel,)
+                    if self.selected_panel is not None
+                    else panels_needing_wcs(self.project, context)
+                )
+                context.check_cancelled()
+            finally:
+                self.eligibility_seconds = monotonic() - started
+            self.total = len(indices)
+            if self.total:
+                self._progress(0, self.total)
+            for done, index in enumerate(indices, 1):
+                context.check_cancelled()
+                outcome = solve_project_panel(
+                    index,
+                    self.project.panels[index],
+                    self.options,
+                    self.directory,
+                    context,
+                    job_budget=self.batch_budget,
+                )
+                self.outcomes.append(outcome)
+                self._progress(done, self.total)
+                if self.batch_budget is not None and outcome.status == "budget-exhausted":
+                    self.batch_budget.check()
+                    if outcome.budget is not None and outcome.budget["limiting_scope"] == "job":
+                        raise SolveBudgetExceeded(outcome.error or "The job solve budget elapsed.")
+        finally:
+            self.elapsed_seconds = monotonic() - self.queued_at
 
 
 class MosaicJob(_ProjectJob[MosaicResult]):

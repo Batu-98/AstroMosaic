@@ -21,6 +21,7 @@ from tifffile import (
 
 from astromosaic.core import PanelDescriptor, Region, SourceFingerprint, Tile
 from astromosaic.io.fits import FitsTileSource, open_fits_sky_mask, optional_header_text
+from astromosaic.io.tiff_metadata import add_tiff_optical_metadata
 
 DESCRIPTION_PREFIX = "AstroMosaic TIFF "
 DESCRIPTION_VERSION = DESCRIPTION_PREFIX + "1\n"
@@ -280,6 +281,7 @@ def open_tiff_panel(
             raise ValueError("Expected 16-bit integer or float32 TIFF with mono or RGB samples.")
         science = _Segments(page, stream, stat.st_size, tiff.byteorder)
         header, coverage_page = _read_metadata(page)
+        header = add_tiff_optical_metadata(page, header)
         coverage = None
         mask = None
         provenance: tuple[str, ...] = ("finite-raw-pixels",)

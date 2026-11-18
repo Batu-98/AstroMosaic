@@ -2,6 +2,7 @@
 
 import os
 import sys
+from multiprocessing import freeze_support
 
 
 def main() -> int:
@@ -36,4 +37,5 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    freeze_support()
     raise SystemExit(main())

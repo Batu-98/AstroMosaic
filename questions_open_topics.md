@@ -17,21 +17,21 @@ This register tracks unresolved decisions, problems, and risks. It is not a work
 ### Q-003 - Reference datasets and frozen acceptance thresholds
 
 - **Status / priority:** Investigating / P1
-- **Opened / updated:** 2026-11-15 / 2026-11-16
-- **Affected phase:** Phase 0 fixture design and the numerical gates in phases 1, 2, 3.5, and 4.
-- **Impact and evidence:** The [Phase 1 fixtures](docs/phase-1.md) verify independent FITS export truth. [Phase 2](docs/phase-2.md#acceptance-fixtures) fixes and verifies held-out alignment, stellar flux and profile, injected extended signal, masks, and weak or disconnected inputs. [Phase 3A fixtures](docs/phase-3a.md#acceptance-fixtures) fix sample, channel, coverage, and WCS tolerances for linear TIFF. [Phase 3C](docs/phase-3c.md#windows-verification) confirms preview and export agreement at coincident sample positions.
+- **Opened / updated:** 2026-11-15 / 2026-11-17
+- **Affected phase:** Phase 0 fixture design and the numerical gates in phases 1, 2, 3.5, 3.6, and 4.
+- **Impact and evidence:** The [Phase 1 fixtures](docs/phase-1.md) verify independent FITS export truth. [Phase 2](docs/phase-2.md#acceptance-fixtures) fixes and verifies held-out alignment, stellar flux and profile, injected extended signal, masks, and weak or disconnected inputs. [Phase 3A fixtures](docs/phase-3a.md#acceptance-fixtures) fix sample, channel, coverage, and WCS tolerances for linear TIFF. [Phase 3C](docs/phase-3c.md#windows-verification) confirms preview and export agreement at coincident sample positions. [Phase 3.5A](docs/phase-35.md#frozen-supplementary-fixtures) reran the baseline and froze cases for narrow support, saturation, and explicit DSS crops. The [sidecar check](docs/phase-35.md#masked-wcs-sidecar-reuse) uses the existing bilinear and WCS bounds.
 - **Current assumption:** Generate small deterministic same-filter FITS fixtures for development. Store provenance for external data with the validation procedure.
-- **Next action / responsibility:** In [Phase 3.5A](astro_mosaic_python_first_architecture_en.md#phase-35-astronomy-engine-revalidation), review the Phase 2 reference coverage and freeze thresholds for any added cases before revising the engine. Freeze large-mosaic, RGB photometry, and mixed-scene tolerances for Phase 4.
+- **Next action / responsibility:** Use the [frozen 3.6A manifest](tests/fixtures/plate_solve_v36.json) for match/RMS, bad-hint, SIP/edge and time tests before tuning B–F, preserving Phase 3.5 envelopes. Then freeze large-mosaic, RGB photometry and mixed-scene tolerances for Phase 4. [3.5 verification results](docs/phase-35.md#phase-35c-windows-verification)
 - **Closure condition:** Freeze dataset-specific tolerances before algorithm tuning, including alignment, stellar profiles/flux, injected faint emission, and tiled/reference agreement. Link the fixture manifest and test results.
 
 ### Q-004 - Resource budgets and representative workload
 
 - **Status / priority:** Investigating / P1
-- **Opened / updated:** 2026-11-15 / 2026-11-16
-- **Affected phase:** Phase 0 scheduling contracts, Phase 1 rendering, Phase 2 solvers and fitting, Phase 3 preview, and Phase 4 large-job scaling.
+- **Opened / updated:** 2026-11-15 / 2026-11-17
+- **Affected phase:** Phase 0 scheduling contracts, Phase 1 rendering, Phase 2 solvers and fitting, Phase 3 preview, Phase 3.6 solver deadlines and catalog validation, and Phase 4 large-job scaling.
 - **Impact and evidence:** The one-worker FITS renderer enforces a combined tile reservation with no queue. A two-panel 3328 × 1536 render peaked at 89.0 MiB working set and 101.5 MiB commit with one OpenBLAS thread. An unhinted Gaia solve with the deep native index peaked at 1066 MiB working set and 281 MiB commit. The desktop preview of the same two-panel workload peaked at 226.7/259.8 MiB on OpenGL and 175.9/164.0 MiB on CPU for working set and commit. [Phase 1 rendering measurements](docs/phase-1.md#working-set-and-cancellation) · [Phase 2 solver measurements](docs/phase-2.md#windows-solver-evidence) · [Phase 3C preview measurements](docs/phase-3c.md#resource-check)
 - **Current assumption:** Default to 128-pixel render tiles, an estimated 64 MiB working buffer budget, and a 2048 MiB output limit. Reserve the active preview raster in the job budget and cap its longest edge at 512 pixels. Account for the display buffers, Qt framebuffers, and driver allocation separately. [TIFF](docs/phase-3a.md#sample-and-metadata-contract) reserves compressed-segment decode buffers as well as the requested window. Budget native catalog mappings separately from science tiles. The [Phase 2 solver settings](docs/phase-2.md#offline-solvers) include a separate ASTAP staging limit.
-- **Next action / responsibility:** The [Phase 3F package checks](docs/phase-3f.md#windows-evidence) passed background cancellation and retry on Windows. Repeat bounded-render and cancellation checks in Phase 4 with 12 panels at 6000 × 4000 for FITS, TIFF, RGB, and mixed cases.
+- **Next action / responsibility:** Measure native catalog/query memory and freeze the [Phase 3.6 total-deadline](docs/phase-36.md#7-total-deadline-cancellation-and-reporting) and cleanup defaults under Q-018. The [Phase 3F package checks](docs/phase-3f.md#windows-evidence) passed background cancellation and retry on Windows. Repeat bounded-render and cancellation checks in Phase 4 with 12 panels at 6000 × 4000 for FITS, TIFF, RGB, and mixed cases.
 - **Closure condition:** Document initial defaults and over-budget behavior; verify bounded queues, temporary allocations, cancellation, and peak usage for a named workload. Revisit defaults during the Phase 4 large-mosaic benchmark.
 
 ### Q-005 - Application licensing and distribution model
@@ -94,6 +94,36 @@ This register tracks unresolved decisions, problems, and risks. It is not a work
 - **Next action / responsibility:** Review the expected terminal workflows at the start of Phase 4C and record the selected scope.
 - **Closure condition:** Record the selected desktop terminal scope and verify its agreed workflows on Windows 11 x64.
 
+### Q-015 - Offline solver coverage on the 40′ Orion field
+
+- **Status / priority:** Open / P2
+- **Opened / updated:** 2026-11-17 / 2026-11-18
+- **Affected phase:** Phase 3.6A fixtures and 3.6F real-field verification, following the coverage finding in 3.5C.
+- **Impact and evidence:** Portable Seiza 0.48.2 solved the 40′ ESO M42 cutout with hints. Its blind index exhausted 400 hypotheses. ASTAP 2026.11.01 with D05 reported an unsuccessful hinted fit and timed out blind. A 55′ M42 cutout solved blind with the same Seiza bundle. [M42 inputs and results](docs/phase-35.md#m42-offline-astrometry-and-documents-catalogs)
+- **Current assumption:** Use pointing and scale for the 40′ reference or the tested wider field for blind solving. The 3.6 source runs reproduced hinted 40′ and blind 55′ success. The 40′ blind Gaia retry reached the 30-second cap. [Updated measurements](docs/phase-36-results.md#real-field-source-checks)
+- **Next action / responsibility:** Benchmark the 40′ cutout and additional subdegree fields with denser installed ASTAP catalogs under the [Phase 3.6](docs/phase-36.md) priority, quality and total-budget policy. Record measured coverage or supported hint requirements; do not assume density alone fixes the case.
+- **Closure condition:** Record validated solutions and elapsed times across a named subdegree sample, or document the supported hint requirements for those fields.
+
+### Q-016 - Plate solve quality, incorrect-scale recovery and distortion
+
+- **Status / priority:** Investigating / P1
+- **Opened / updated:** 2026-11-17 / 2026-11-18
+- **Affected phase:** Phase 3.6A quality/fixture freeze, 3.6D bad-scale recovery, 3.6E SIP/edge validation and 3.6F acceptance; required before Phase 4A.
+- **Impact and evidence:** The [Mosaic Master comparison](docs/plate-solve-comparison.md) verified that the Seiza wrapper retains a supplied scale within 0.8–1.2 on blind retry and does not request SIP (`sip_order=0` in installed Seiza 0.48.2). Blind ASTAP retains a supplied vertical FOV. Existing geometry checks do not independently establish catalog accuracy at field edges. Q-015 separately tracks the real 40′ M42 blind coverage result.
+- **Current assumption:** The source uses the common 15-match and RMS gate, Gaia's confidence check, unrestricted Gaia 0.1–120 arcsec/pixel recovery and a spatial holdout for application SIP promotion. Real M13/M42 checks preserve the earlier supported envelopes. ASTAP-only local FOV recovery retains pointing when both hints were supplied. [Measurements](docs/phase-36-results.md)
+- **Next action / responsibility:** Broaden real sparse and dense-catalog coverage as separate datasets become available. Local source and portable results retain an explicit insufficient result for unsupported grid regions. [Windows acceptance](docs/phase-36-results.md#portable-windows-verification)
+- **Closure condition:** The implemented match/RMS boundaries, bad-hint recovery, supported SIP/edge cases, legacy reuse and Windows source/portable regressions meet the frozen 3.6 gates with independently recorded errors. Planning alone does not resolve this topic.
+
+### Q-017 - Automatic ASTAP catalog selection and ASTAP-only quality evidence
+
+- **Status / priority:** Investigating / P1
+- **Opened / updated:** 2026-11-17 / 2026-11-18
+- **Affected phase:** Phase 3.6A capabilities, 3.6B catalog automation, 3.6D candidate validation and 3.6F settings/migration.
+- **Impact and evidence:** The earlier ASTAP CLI silently substituted D05 for a missing manual D20. The new adapter inventories tiles, checks actual native catalog identity and independently validates the selected catalog. Native D05 Auto passed M13 with 164 measured matches and 0.442″ RMS. Local catalog paths outside the Windows code page used a scratch alias. [Results](docs/phase-36-results.md)
+- **Current assumption:** Fresh settings use one Automatic mode; preserve manual choices. Prefer verified native auto with recorded selected data, otherwise resolve to an explicit installed catalog. Use the actual local command-line program. ASTAP-only operation must meet the 15-match/RMS contract without requiring Seiza or treating detections as matches.
+- **Next action / responsibility:** Exercise D20, D50 and D80 in real installations with one and several complete sets. Fixtures currently cover alternatives and truncated/moved tiles. Review actual alternate executable versions and catalog terms before adding their support claims.
+- **Closure condition:** Automatic/manual modes, actual catalog provenance and the ASTAP-only quality path pass real Windows native cases, including missing/partial catalogs and unknown/bad FOV. Preserve user ASTAP settings and original images; unsupported cases remain explicit.
+
 ## Resolved Topics
 
 ### Q-001 - Python, dependency, and platform compatibility matrix
@@ -133,23 +163,58 @@ This register tracks unresolved decisions, problems, and risks. It is not a work
 
 - **Status / priority:** Resolved / P1
 - **Opened / updated:** 2026-11-15 / 2026-11-17
-- **Affected phase:** Phase 0 adapter experiment, Phase 2 offline astrometry, and Phase 3.1 desktop solver settings and jobs.
+- **Affected phase:** Phase 0 adapter experiment, Phase 2 offline astrometry, Phase 3.1 desktop solver settings and jobs, and Phase 3.5 revalidation.
 - **Impact and evidence:** The Windows M13 reference passed both hinted and blind Gaia DR3 and ASTAP, ordered fallback, real ASTAP cancellation, missing-catalog diagnostics, and unchanged-source checks. The catalog and index were verified against the versioned manifest.
 - **Current assumption:** Install explicit local Gaia and ASTAP files separately, keep the Gaia catalog and index version paired, and save solved WCS in a source-bound sidecar.
-- **Next action / responsibility:** Recheck the solver matrix in Phase 3.5C, on catalog updates, and during release packaging. Release notices and data terms remain under Q-005.
+- **Next action / responsibility:** Recheck the solver matrix on catalog updates and during release packaging. Track the 40′ M42 coverage result under Q-015 and release notices and data terms under Q-005.
 - **Closure condition:** Record a tested solver/version/catalog matrix and deployment/update policy, including ordered fallbacks, cancellation, missing-catalog diagnostics, exhausted-chain behavior, and unchanged-source checks.
-- **Resolution:** 2026-11-15. [ADR-0010](docs/adr/0010-seiza-gaia-backend.md) records the backend. The [Phase 2 solver matrix and setup](docs/phase-2.md#offline-solvers) record results, catalog provenance, and the update procedure. On 2026-11-17, the [Phase 3.1C desktop checks](docs/phase-3b.md#desktop-plate-solving) verified the M13 chain and cancellation through the packaged UI.
+- **Resolution:** 2026-11-15. The backend decision and Phase 2 evidence record results, catalog provenance, and the update procedure. The 3.5C Windows rerun verified the M13 matrix, new M42 fields, solver cleanup, and the Documents XPSD format diagnostics. [ADR-0010](docs/adr/0010-seiza-gaia-backend.md) · [Phase 2 setup](docs/phase-2.md#offline-solvers) · [Phase 3.1C desktop checks](docs/phase-3b.md#desktop-plate-solving) · [Phase 3.5C solver results](docs/phase-35.md#m42-offline-astrometry-and-documents-catalogs)
 
 ### Q-013 - Optical metadata conventions for solve hints
 
 - **Status / priority:** Resolved / P1
-- **Opened / updated:** 2026-11-16 / 2026-11-16
-- **Affected phase:** 3.1A panel metadata.
+- **Opened / updated:** 2026-11-16 / 2026-11-18
+- **Affected phase:** 3.1A panel metadata and the 3.6A TIFF EXIF/XMP extension.
 - **Impact and evidence:** FITS writers may report native or effective pixel pitch. The reader supports numeric FITS-style optical fields in FITS and AstroMosaic TIFF. Binned fixtures verify native and effective pitch, while a conventional TIFF resolution tag leaves the optical values unset. [Optics tests](tests/integration/test_panel_inspection.py)
 - **Current assumption:** Interpret the documented field conventions and use panel overrides or a compatible blind solve when the image has no reliable scale hint.
 - **Next action / responsibility:** Evaluate additional metadata mappings when a representative acquisition export establishes its field meaning and units.
 - **Closure condition:** Document supported conventions and verify the derived scale and missing-metadata behavior with representative fixtures, including a binned case.
 - **Resolution:** 2026-11-16. Synthetic FITS and TIFF cases passed, including stale masked WCS and ambiguous binning. Local Gaia and ASTAP solved M13 using embedded optical hints. [Supported metadata and Windows evidence](docs/phase-3b.md#panel-wcs-and-plate-solve-hints)
+
+- **Extension:** 2026-11-18. [3.6A](docs/phase-36a.md#tiff-metadata-at-panel-import) verified standard EXIF/XMP physical focal length, focal-plane inch/centimeter units and camera display, including both owner TIFFs. Print DPI, 35 mm equivalents and ambiguous/invalid resampling or zoom metadata do not create sensor-scale hints. Explicit source fields and user overrides retain precedence; absent reference dimensions leave nominal pitch labeled as a hint.
+
+### Q-014 - Regression coverage for narrow overlaps, saturation, and WCS reuse
+
+- **Status / priority:** Resolved / P1
+- **Opened / updated:** 2026-11-17 / 2026-11-17
+- **Affected phase:** 3.5B revision and 3.5C verification.
+- **Impact and evidence:** Three automated regressions verify offset selection with a four-pixel overlap, exclusion of saturated stars from gain measurements, and masked WCS reuse. [Review and reproduction](docs/phase-35.md#supplementary-results-and-follow-up) · [3.5B results](docs/phase-35.md#phase-35b-regression-results)
+- **Current assumption:** Use deterministic synthetic fixtures for the suite and the recorded M13 and M31 recipes for real-field checks.
+- **Next action / responsibility:** Rerun the recorded cases when changing refinement, masks, or WCS reuse.
+- **Closure condition:** The added regressions protect the frozen sample, geometry, and fitting criteria. The Windows source and bundled checks meet the recorded thresholds.
+- **Resolution:** 2026-11-17. The 88 source tests, identical masked CLI exports for common WCS inputs, and the real-field checks met their thresholds in 3.5C. [Windows verification](docs/phase-35.md#phase-35c-windows-verification)
+
+### Q-018 - End-to-end solve deadlines and compatibility
+
+- **Status / priority:** Resolved / P1
+- **Opened / updated:** 2026-11-17 / 2026-11-18
+- **Affected phase:** Phase 3.6A budget freeze, 3.6C orchestration/cleanup, 3.6F CLI/desktop/report compatibility and Phase 4 automation.
+- **Impact and evidence:** The implementation keeps `--timeout` per native attempt and shares a default 120-second panel deadline through source opening, staging, searches, validation, and sidecar publication. Gaia catalog/native work uses reaped spawn workers. Source tests pass late-candidate, late-publication and nonresponsive-worker cases. Version 1 reading and version 2 publication are covered. [Deadline contract](docs/phase-36.md#7-total-deadline-cancellation-and-reporting) · [Results](docs/phase-36-results.md#deadlines-and-compatibility)
+- **Current assumption:** Local Windows samples support the stated deadlines at checkpoints. Filesystem and OS stalls can add a reported overrun. Neither the validation reserve nor worker cleanup restarts the panel timer.
+- **Next action / responsibility:** Carry the panel and batch report into Phase 4 automation. Keep clean-machine and storage-dependent timings separate.
+- **Closure condition:** Deterministic boundary tests and real source/portable jobs meet the frozen whole-pipeline, cancellation and cleanup limits, reject late success, retain earlier panels, and read old settings/projects/sidecars without silent semantic changes.
+- **Resolution:** 2026-11-18. The source and portable local Windows gates passed. A real ASTAP cancellation reaped the process and cleared scratch in about 0.025 seconds. Portable exhaustion and timeout published no sidecars. [Deadline evidence](docs/phase-36-results.md#deadlines-and-compatibility)
+
+### Q-019 - Owner wide-field TIFF solve and regional validation coverage
+
+- **Status / priority:** Resolved / P1
+- **Opened / updated:** 2026-11-17 / 2026-11-18
+- **Affected phase:** Phase 3.6A real fixtures, 3.6D scale recovery, 3.6E regional/SIP accuracy and 3.6F acceptance.
+- **Impact and evidence:** The two 6000 × 4000 RGB owner TIFFs contain Nikon D5300 EXIF with 24 mm focal length and nominal 3.9083 micrometer pixels (33.59 arcsec/pixel). The load path now imports these hints; local Gaia TAN solves found 890/894 matches at about 54 arcsec RMS. [3.6A broad blind/SIP probes](docs/phase-36a.md#owner-wide-field-results) found 992/1009 native matches at about 10 arcsec RMS; independent D05 checks found 1425/1461 matches at about 13 arcsec RMS. The 21.TIF fine support map contains insufficient-star cells, so this is not an entire-frame accuracy certificate. Correct wide-field ASTAP hints recommend missing W08 and fail after D05 fallback/cropping.
+- **Current assumption:** Keep source TIFFs ignored, immutable and offline. Use native EXIF focal-plane units rather than print DPI or 35 mm equivalent focal length. Distinguish approximate optical hints, native fit statistics and independent regional evidence. Keep supported ASTAP catalog domains and broad Gaia recovery ranges explicit.
+- **Next action / responsibility:** Retain the private files as optional local regression inputs and continue to show insufficient regional support. Wide-field ASTAP catalog validation is a separate format and deployment follow-up.
+- **Closure condition:** The owner cases have reproducible source/portable outcomes under the finalized quality/budget policy, with unchanged image hashes, explicit supported catalog/scale ranges and independent spatial accuracy or documented support limitations. Native solve success alone does not close this topic.
+- **Resolution:** 2026-11-18. Both source and portable runs qualified SIP-3 after recovery. The independent D05 edge P95 values were 0.895 and 0.985 px. The original files matched their initial SHA-256 values, and each new sidecar drove an independently reopened RGB export. [Windows evidence](docs/phase-36-results.md#portable-windows-verification)
 
 ## New Entry Template
 

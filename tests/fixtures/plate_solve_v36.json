@@ -1,0 +1,141 @@
+{
+  "version": 1,
+  "frozen_date": "2026-11-18",
+  "scope": "Phase 3.6A reference contracts captured before production dispatch integration",
+  "quality": {
+    "minimum_unique_matches": 15,
+    "rms_floor_arcsec": 3.0,
+    "rms_pixel_multiplier": 2.0,
+    "scale_definition": "smaller positive solved-center tangent-plane X/Y scale",
+    "gaia_max_false_match_probability": 0.001,
+    "match_radius_source_px": 3.0,
+    "regional_minimum_matches": 5,
+    "model_grid_shape": [9, 9],
+    "wide_field_catalog_candidates": "brightest max(30, 3 * measured sources) per query cell",
+    "unsupported_region_value": null
+  },
+  "recovery": {
+    "incorrect_scale_factors": [0.5, 2.0],
+    "gaia_broad_scale_arcsec_px": [0.1, 120.0],
+    "maximum_astap_searches": 2,
+    "maximum_required_gaia_searches": 2,
+    "astap_fov": "vertical angular extent; use 2*atan(tangent height/2) for known rectilinear optics"
+  },
+  "sip": {
+    "orders": [0, 2, 3],
+    "minimum_training_pairs": {"2": 30, "3": 70},
+    "held_out_fraction": 0.2,
+    "minimum_held_out_pairs": 10,
+    "minimum_held_out_outer_pairs": 10,
+    "minimum_occupied_cells_of_3x3": 6,
+    "required_quadrants": 4,
+    "minimum_p95_relative_improvement": 0.1,
+    "edge_worsening_allowance_px": 0.05,
+    "edge_worsening_allowance_fraction": 0.02,
+    "round_trip_tolerance_px": 0.0001,
+    "synthetic_p95_source_px": 0.5,
+    "synthetic_grid_max_source_px": 1.0,
+    "real_catalog_p95_source_px": 1.0,
+    "real_outer_p95_source_px": 1.5,
+    "m13_archive_repeatability_allowance_arcsec": 0.1
+  },
+  "time": {
+    "panel_total_seconds": 120.0,
+    "legacy_attempt_limit_seconds": 60.0,
+    "search_caps_seconds": {"astap_hinted": 20.0, "astap_blind": 25.0, "gaia_hinted": 20.0, "gaia_blind": 30.0},
+    "validation_publication_reserve_seconds": 10.0,
+    "cleanup_allowance_seconds": 5.0,
+    "local_cancellation_target_seconds": 2.0,
+    "job_budget_optional": true,
+    "note": "Targets for 3.6C enforcement; share source measurements and vectorized coordinate inputs"
+  },
+  "format": {
+    "astap_d_series_record_bytes": 5,
+    "astap_tile_header_bytes": 110,
+    "catalog_cone_max_radius_deg": 10.0,
+    "catalog_cone_default_max_stars": 20000,
+    "wide_field_regional_max_stars": 100000,
+    "catalog_read_budget_bytes": 67108864,
+    "legacy_sidecar_version": 1,
+    "planned_quality_sidecar_version": 2,
+    "legacy_quality_grade": "geometry-only",
+    "new_quality_grade": "catalog-validated",
+    "edge_statuses": ["supported-pass", "supported-fail", "insufficient"]
+  },
+  "native": {
+    "astap_version": "CLI-2026.11.01",
+    "astap_executable_sha256": "805c5b352dfa9e57eeeacffa4d64eec63e8729099fdfc3f2a3b351ec9a917b46",
+    "astap_database_archive_sha256": "39d59b73cb960fa0956c35162e70b09a8af10ef20a1e8f5cae7b77d48be5ce31",
+    "astap_database": "d05",
+    "astap_database_epoch": 2025.0,
+    "native_automatic_syntax": ["omit -D", "-D auto"],
+    "native_chosen_database_line": "Using star database D05",
+    "manual_catalog_presence_must_be_checked": true,
+    "seiza_version": "0.48.2",
+    "gaia_bundle": "catalog-bundle-v4-2026-11-15",
+    "star_catalog_sha256": "7c85771caf678e2fd446abfe2b8993da34074e6e98875365fbf60716fc913043",
+    "blind_index_sha256": "cdbeb77aaa4e49b077d3868f14f7281ce811224a8af814aee7ee126fb030ecc9"
+  },
+  "external_fixtures": [
+    {
+      "id": "m13-unsolved",
+      "path": ".tooling/phase2-solve-evidence/m13-primary.fits",
+      "sha256": "987c27c17cac869aa23d328dd2192076b892e1e308b4be1bf00894c3e57d4588",
+      "size_xy": [3267, 3274],
+      "hint_deg": [250.42, 36.46],
+      "scale_arcsec_px": 1.0069,
+      "expected": "native Auto/TAN succeeds; native SIP-3 is not automatically preferred"
+    },
+    {
+      "id": "m42-40arcmin",
+      "path": ".tooling/phase35c/m42-dss-red-eso.fits",
+      "sha256": "c980865e1b21fe2a170152e4ae08e36ed1afc9391cb1b9952cb50a26fcded771",
+      "size_xy": [2376, 2381],
+      "expected": "retain hinted success and recorded unhinted coverage limitation under Q-015"
+    },
+    {
+      "id": "m42-55arcmin",
+      "path": ".tooling/phase35c/m42-dss-red-archive.fits",
+      "sha256": "d2efd23be2ac10e98bdb449e0f99e1a10b2e19668c462eb394fe6bcf848e36f0",
+      "size_xy": [3267, 3274],
+      "expected": "retain recorded blind Gaia success"
+    },
+    {
+      "id": "owner-wide-20",
+      "path": "tests/20.TIF",
+      "sha256": "c3d7f1bd6264ea489ed62220ef051ffda2911cd9d7c5daef1ce00b9d9983d4db",
+      "optional_local_private_fixture": true,
+      "size_xy": [6000, 4000],
+      "camera_model": "NIKON D5300",
+      "focal_length_mm": 24.0,
+      "expected": "EXIF import; scale-aware or broad blind Gaia; qualify SIP and regional support separately"
+    },
+    {
+      "id": "owner-wide-21",
+      "path": "tests/21.TIF",
+      "sha256": "71aca62355bf0fb86c6ef8012ce98f729a7b90e5cc3d6de1bc4b2db66ed68171",
+      "optional_local_private_fixture": true,
+      "size_xy": [6000, 4000],
+      "camera_model": "NIKON D5300",
+      "focal_length_mm": 24.0,
+      "expected": "EXIF import; scale-aware or broad blind Gaia; unsupported fine regions remain unvalidated"
+    }
+  ],
+  "synthetic_recipes": {
+    "seed": 360601,
+    "size_xy": [1024, 768],
+    "center_deg": [359.999, 20.0],
+    "scale_arcsec_px": 2.0,
+    "rotation_deg": 15.0,
+    "star_grid_xy": [20, 15],
+    "position_jitter_source_px": 0.2,
+    "centroid_noise_sigma_source_px": 0.05,
+    "linear_skew_deg": [0.0, 1.5],
+    "corner_vector_displacement_source_px": [0.0, 1.0, 3.0, 8.0],
+    "sip_coefficients": "For order d, set A_d_0 = displacement/(sqrt(2)*511.5^d), B_0_d = -displacement/(sqrt(2)*383.5^d); all other nonlinear terms zero",
+    "center_only_domain_fraction": [0.35, 0.65],
+    "quality_boundary_counts": [14, 15, 16],
+    "quality_boundary_scales_arcsec_px": [0.5, 1.0, 3.0],
+    "cases": ["TAN", "linear-skew-without-SIP", "SIP-2", "SIP-3", "mirrored", "RA-wrap", "center-only-support", "unrelated-catalog", "duplicate-associations", "invalid-metrics"]
+  }
+}

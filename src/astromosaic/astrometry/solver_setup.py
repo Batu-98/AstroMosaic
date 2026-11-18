@@ -57,7 +57,7 @@ def _astap_status(options: SolveOptions, context: JobContext) -> str:
     if options.astap is None or options.astap_catalog is None:
         return "Choose the ASTAP CLI executable and the folder containing its catalog tiles."
     try:
-        version = check_astap_setup(
+        setup = check_astap_setup(
             options.astap, options.astap_catalog, options.astap_database, context
         )
     except subprocess.TimeoutExpired:
@@ -66,4 +66,5 @@ def _astap_status(options: SolveOptions, context: JobContext) -> str:
         return "Could not run ASTAP or read the catalog tile. Check the executable and folder."
     except ValueError as error:
         return str(error)
-    return f"ASTAP {version} responds and a {options.astap_database.upper()} catalog tile opens."
+    names = ", ".join(name.upper() for name in setup.installed)
+    return f"ASTAP {setup.version} responds. Complete catalogs: {names}. {setup.selection_reason}"

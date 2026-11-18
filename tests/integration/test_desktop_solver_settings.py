@@ -57,6 +57,10 @@ def test_desktop_saves_solver_paths_and_reopens_them(
         astap=executable,
         astap_catalog=catalog_folder,
         astap_database="d50",
+        timeout_seconds=18,
+        total_seconds=90,
+        job_seconds=230,
+        strict_edges=True,
     )
     main_thread = get_ident()
     entered, release = Event(), Event()
@@ -92,7 +96,12 @@ def test_desktop_saves_solver_paths_and_reopens_them(
             }
             for label in (*choices, "Catalog folder"):
                 browse[f"Browse for {label.lower()}"].click()
+            assert dialog.astap_database.currentText() == "Automatic"
             dialog.astap_database.setCurrentText("D50")
+            dialog.timeout_seconds.setValue(18)
+            dialog.total_seconds.setValue(90)
+            dialog.job_seconds.setValue(230)
+            dialog.strict_edges.setChecked(True)
             dialog.check_button.click()
             until(entered.is_set)
             assert not dialog.save_button.isEnabled()
@@ -149,6 +158,7 @@ options = plate_solve_settings.load_plate_solve_settings()
 print(json.dumps([
     str(options.gaia_catalog), str(options.gaia_index), str(options.astap),
     str(options.astap_catalog), options.astap_database,
+    options.timeout_seconds, options.total_seconds, options.job_seconds, options.strict_edges,
 ]))
 """
     restarted = subprocess.run(
@@ -164,4 +174,8 @@ print(json.dumps([
         str(executable),
         str(catalog_folder),
         "d50",
+        18.0,
+        90.0,
+        230.0,
+        True,
     ]
