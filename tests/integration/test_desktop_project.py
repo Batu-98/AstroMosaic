@@ -2,6 +2,7 @@ import json
 import subprocess
 import sys
 from collections.abc import Callable
+from importlib.metadata import version
 from pathlib import Path
 from threading import Event, get_ident
 
@@ -11,6 +12,7 @@ import pytest
 import tifffile
 from astropy.io import fits
 from astropy.wcs import WCS
+from packaging.version import Version
 
 from astromosaic.astrometry.hints import PanelOptics
 from astromosaic.astrometry.solve import SolveOptions, solve_panel, write_solution
@@ -161,10 +163,13 @@ def test_desktop_project_roundtrip_progress_cancel_and_retry(
 
     try:
         window.show()
+        app_version = Version(version("astromosaic"))
+        beta_label = " (Beta)" if app_version.pre and app_version.pre[0] == "b" else ""
+        app_title = f"AstroMosaic {app_version}{beta_label}"
+        assert window.windowTitle() == f"Untitled — {app_title}"
         click(window.add_button)
-        assert window.panels.properties.rowCount() == 2 and window.windowTitle().startswith(
-            "Untitled*"
-        )
+        assert window.panels.properties.rowCount() == 2
+        assert window.windowTitle() == f"Untitled* — {app_title}"
         until(lambda: window.job is None)
         until(lambda: window.panels.cell(0, "WCS").data() == "Embedded")
         window.panels.selectRow(0)
@@ -179,6 +184,7 @@ def test_desktop_project_roundtrip_progress_cancel_and_retry(
         new, open_project, save, _save_as = window._file_actions
         save.trigger()
         assert load_project(manifest).render == window.project.render
+        assert window.windowTitle() == f"{manifest.name} — {app_title}"
         new.trigger()
         assert window.panels.properties.rowCount() == 0
         original = source.read_bytes()

@@ -6,10 +6,10 @@ Use this file for concise development history and handoff state. Detailed techni
 
 - **Last updated:** 2026-11-19
 - **Active baseline:** Python-first architecture revision 3.10 covers [Phase 3.6 plate solve reliability](astro_mosaic_python_first_architecture_en.md#phase-36-plate-solve-reliability) and [Phase 4A–4C automation and scaling](astro_mosaic_python_first_architecture_en.md#102-phase-4-delivery-stages). [ADR-0017](docs/adr/0017-astap-first-validated-solving.md) records ASTAP priority, quality and budgets. See [ADR-0003](docs/adr/0003-windows-first-platform-scope.md) for Windows scope, [ADR-0006](docs/adr/0006-dual-fits-and-tiff-workflow.md) for formats, and [ADR-0007](docs/adr/0007-sky-and-foreground-mosaics.md) for mixed panels.
-- **Current stage:** The 0.1.0 public source publication is prepared. The Windows builds are local release candidates. Phase 5 meets the local Windows acceptance criteria for [per-band products](docs/phase-5c.md), [ZEA projection](docs/phase-5b.md) and [XISF interchange](docs/phase-5a.md). The separate clean-machine check remains open. Linux and macOS support is deferred.
+- **Current stage:** The first source beta is `0.1.0b1`. The earlier Windows builds are local release candidates. Phase 5 meets the local Windows acceptance criteria for [per-band products](docs/phase-5c.md), [ZEA projection](docs/phase-5b.md) and [XISF interchange](docs/phase-5a.md). The separate clean-machine check remains open. Linux and macOS support is deferred.
 - **Available artifacts:** The candidate Windows ZIPs and source snapshot are in ignored `.tooling/release-0.1.0/artifacts/`. See the [release guide](docs/windows-release.md), [Phase 5C results](docs/phase-5c.md#local-windows-results) and [Phase 3.6 evidence](docs/phase-36-results.md).
 - **Implementation / verification:** All 179 native Windows tests and the copied CPU/OpenGL desktop and console checks passed for the latest Phase 5 and desktop baseline. The [dense ASTAP follow-up](docs/phase-36-results.md#dense-astap-catalog-verification) verified catalog selection, local Orion recovery with D20/D50 from supplied pointing and scale, and the blind timeout. A native desktop solve with pinned D50 drove an independently reopened FITS export. The follow-up passed 42 targeted regression tests.
-- **Version control:** The Phase 5A–5C, optical metadata, and desktop table and theme follow-ups are consolidated on `main` after the Phase 4 baseline at `e0a3a39`. [AstroMosaic GitHub repository](https://github.com/Batu-98/AstroMosaic)
+- **Version control:** The first source beta uses the annotated Git tag `v0.1.0b1`. The Phase 5A–5C, optical metadata, and desktop table and theme follow-ups are consolidated on `main` after the Phase 4 baseline at `e0a3a39`. [AstroMosaic GitHub repository](https://github.com/Batu-98/AstroMosaic)
 - **Next action:** Finish the native corresponding-source and redistribution review under Q-005 before publishing Windows binaries. Run the clean-machine launcher and export check when a fresh Windows installation is available.
 - **Open dependencies:** Q-003 tracks the frozen criteria and Q-016 extended astrometry quality. Q-005, Q-009, Q-010 and Q-020 track distribution, formats and mixed-panel work. Q-008 tracks deferred platforms and Q-011 deferred visual fill. Q-015 and Q-017 record the verified narrow-field requirements and catalog matrix.
 
@@ -675,6 +675,13 @@ The table is a status summary, not a replacement for the full exit gates in Sect
 - **Verified:** All five command examples were preserved. The revised Markdown links and headings resolved, the support URL returned HTTP 200, and `poetry check --lock` passed.
 - **Related:** Q-005 tracks Windows distribution.
 - **Next:** Continue the Windows redistribution review and clean-machine validation.
+
+### 2026-11-19 - Release - Recorded AstroMosaic 0.1.0 Beta 1
+
+- **Changed:** Set the installed version to `0.1.0b1`, show it with a Beta label in the desktop title, and document the source pre-release and verification process. [Release process](docs/windows-release.md)
+- **Verified:** The Windows test suite passed 178 tests with the native Qt platform. The opt-in OpenGL test passed separately. The desktop title, CLI version, Poetry lock, wheel metadata, and documentation links were checked.
+- **Related:** Q-005 tracks Windows binary distribution. [GitHub pre-release](https://github.com/Batu-98/AstroMosaic/releases/tag/v0.1.0b1)
+- **Next:** Complete the redistribution review and clean Windows 11 x64 acceptance before publishing portable packages.
 
 ## Entry Template
 

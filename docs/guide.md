@@ -13,7 +13,7 @@ AstroMosaic assembles calibrated, integrated, linear astrophotography panels int
 
 ## Quick Start
 
-Windows 11 x64 is the tested platform. Run these source setup commands from the repository root in PowerShell with CPython 3.13 and Poetry 2.5 installed. Portable Windows builds are release candidates awaiting redistribution review and clean-machine validation. [Windows release preparation](windows-release.md)
+AstroMosaic is in beta. Windows 11 x64 is the tested platform. Run these source setup commands from the repository root in PowerShell with CPython 3.13 and Poetry 2.5 installed. Portable Windows distribution awaits redistribution review and clean-machine validation. [Release process](windows-release.md)
 
 ### Run the Desktop App
 

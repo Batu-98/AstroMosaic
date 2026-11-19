@@ -1,10 +1,17 @@
-# AstroMosaic 0.1.0 release preparation
+# AstroMosaic release process
 
-AstroMosaic is a GPL-3.0-only application for calibrated, integrated astronomical panels. The initial source release targets Windows 11 x64. Desktop and CLI workflows cover linear FITS, TIFF and uncompressed XISF, offline plate solving, TAN and ZEA sky grids, and per-band sky exports. The desktop also supports separate foreground and sky layers and visual composition. [Application license](../LICENSE) · [Desktop and CLI quick start](guide.md#quick-start)
+AstroMosaic is a GPL-3.0-only application for calibrated, integrated astronomical panels. The initial source beta, `0.1.0b1`, targets Windows 11 x64. Desktop and CLI workflows cover linear FITS, TIFF and uncompressed XISF, offline plate solving, TAN and ZEA sky grids, and per-band sky exports. The desktop also supports separate foreground and sky layers and visual composition. [Application license](../LICENSE) · [Desktop and CLI quick start](guide.md#quick-start)
+
+## Record a release
+
+- Commit the application version in `pyproject.toml`. The desktop and CLI read the installed package version. Use Python's beta suffix for beta releases, such as `0.1.0b1`, and prefix the matching Git tag with `v`.
+- Check the Poetry lockfile, run the relevant tests, and verify `python -m astromosaic --version` in the release environment. Create an annotated Git tag on the verified commit and leave published tags on their original commits.
+- Generate the source archive from that tag. Record the full commit ID, verification results, and known issues in the GitHub release notes. Attach a `SHA256SUMS.txt` for the release archives and mark beta releases as pre-releases.
+- Build portable Windows packages from a clean checkout of the tag and verify both launchers. Publish Windows downloads after the redistribution review and clean-machine acceptance described below.
 
 ## Build portable Windows packages
 
-Use a dedicated Windows x64 environment with CPython 3.13 and Poetry 2.5. This release preparation used CPython 3.13.18. Poetry installs the dependency versions in [the lockfile](../poetry.lock).
+Use a dedicated Windows x64 environment with CPython 3.13 and Poetry 2.5. Poetry installs the dependency versions in [the lockfile](../poetry.lock). Record the exact Python runtime provider and version in the build notes.
 
 ```powershell
 poetry env use 3.13
@@ -15,9 +22,10 @@ poetry sync --only main,build -E desktop -E gaia
 The desktop folder is `dist/windows/AstroMosaic`. The console folder is `dist/windows/astromosaic-cli`. Archive each complete folder, including its `_internal` directory. Extract the complete folder on Windows before opening `AstroMosaic.exe` or running `astromosaic-cli.exe --help` from PowerShell.
 
 ```powershell
-Compress-Archive -LiteralPath dist/windows/AstroMosaic -DestinationPath dist/AstroMosaic-0.1.0-windows-x64.zip
-Compress-Archive -LiteralPath dist/windows/astromosaic-cli -DestinationPath dist/astromosaic-cli-0.1.0-windows-x64.zip
-Get-FileHash -Algorithm SHA256 dist/*-0.1.0-windows-x64.zip
+$releaseVersion = poetry version --short
+Compress-Archive -LiteralPath dist/windows/AstroMosaic -DestinationPath "dist/AstroMosaic-${releaseVersion}-windows-x64.zip"
+Compress-Archive -LiteralPath dist/windows/astromosaic-cli -DestinationPath "dist/astromosaic-cli-${releaseVersion}-windows-x64.zip"
+Get-FileHash -Algorithm SHA256 "dist/*-${releaseVersion}-windows-x64.zip"
 ```
 
 The builder includes the application license, `THIRD_PARTY_NOTICES.md`, wheel and supplemental notices in `ThirdParty`, and a list of the bundled native files. The index uses the PyInstaller archive, bundled extension modules and installed wheel metadata to record component versions for each launcher. Review the inventory when the lockfile, Python provider or PyInstaller build changes. [Build script](../packaging/build-windows.ps1) · [Supplemental notice provenance](../packaging/notices/README.md)
@@ -33,7 +41,7 @@ The builder includes the application license, `THIRD_PARTY_NOTICES.md`, wheel an
 | Qt, PySide6 and Shiboken | The desktop uses the open-source Qt distribution. Its dynamic libraries remain in `_internal`. The Qt software OpenGL DLL identifies Mesa 11.2.2 and LLVM 3.6.2. Preserve applicable GPL and LGPL texts and the Qt third-party notices. [Qt source archives](https://download.qt.io/archive/qt/) · [Qt for Python source](https://github.com/pyside/pyside-setup/tree/v6.12.0) · [Qt third-party notices](https://doc.qt.io/qt-6/licenses-used-in-qt.html) · [Qt software OpenGL builds](https://download.qt.io/development_releases/prebuilt/llvmpipe/windows/) |
 | Microsoft runtime files | The selected CPython and PySide6 builds supply the Microsoft runtime DLLs listed in the inventory. Apply the distributor terms for these exact files when preparing public Windows downloads. [Microsoft redistribution terms](https://learn.microsoft.com/cpp/windows/redistributing-visual-cpp-files) |
 
-This preparation publishes AstroMosaic source and produces local portable candidates. Public Windows binary distribution still requires a complete notice and corresponding-source review of the native libraries supplied by the Python and Qt builds and compiled wheels. That review includes the Qt software OpenGL renderer, bundled Microsoft runtime files and any native components whose wheel notices do not identify the exact source. When distributing GPL-covered executables, make the corresponding source available alongside the binary download as described in GPLv3 §6. [GNU GPLv3](https://www.gnu.org/licenses/gpl-3.0.html#section6) · [Release tracking](../questions_open_topics.md#q-005---application-licensing-and-distribution-model)
+Public Windows binary distribution requires a complete notice and corresponding-source review of the native libraries supplied by the Python and Qt builds and compiled wheels. That review includes the Qt software OpenGL renderer, bundled Microsoft runtime files and any native components whose wheel notices do not identify the exact source. When distributing GPL-covered executables, make the corresponding source available alongside the binary download as described in GPLv3 §6. [GNU GPLv3](https://www.gnu.org/licenses/gpl-3.0.html#section6) · [Release tracking](../questions_open_topics.md#q-005---application-licensing-and-distribution-model)
 
 ## External solver and reference data
 
@@ -43,4 +51,4 @@ Download public DSS reference images from their archives for optional reproducti
 
 ## Verification status
 
-The release preparation covers locked builds and inspection of the resulting package contents. Application tests were deferred at the owner's request. The separate Windows launcher and export check still needs a fresh Windows 11 x64 installation. [Prior Windows acceptance and clean-machine check](phase-3f.md#pending-clean-machine-check)
+The beta verification is recorded in the GitHub release notes. The Windows launcher and export check still needs a fresh Windows 11 x64 installation. [GitHub releases](https://github.com/Batu-98/AstroMosaic/releases) · [Prior Windows acceptance and clean-machine check](phase-3f.md#pending-clean-machine-check)

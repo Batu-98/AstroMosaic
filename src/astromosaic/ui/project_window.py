@@ -1,6 +1,8 @@
 """Desktop project and background render workflow."""
 
+import re
 from dataclasses import replace
+from importlib.metadata import version
 from pathlib import Path
 from typing import cast
 
@@ -81,6 +83,9 @@ _LAYERS: tuple[Layer, ...] = ("sky", "foreground", "composition")
 class ProjectWindow(QMainWindow):
     def __init__(self, *, use_gpu: bool = True, preferences: QSettings | None = None) -> None:
         super().__init__()
+        app_version = version("astromosaic")
+        beta_label = " (Beta)" if re.match(r"(?:\d+!)?[\d.]+b\d+", app_version) else ""
+        self._app_title = f"AstroMosaic {app_version}{beta_label}"
         self.project = MosaicProject()
         self._saved = self.project
         self.project_path: Path | None = None
@@ -94,7 +99,6 @@ class ProjectWindow(QMainWindow):
         self._preview_project: MosaicProject | None = None
         self._display_frame: DisplayFrame | None = None
         self._close_after_job = False
-        self.setWindowTitle("AstroMosaic")
         self.resize(1140, 780)
         self.setMinimumWidth(630)
 
@@ -286,7 +290,7 @@ class ProjectWindow(QMainWindow):
         self._selection_changed()
         name = self.project_path.name if self.project_path else "Untitled"
         marker = "*" if self.project != self._saved else ""
-        self.setWindowTitle(f"{name}{marker} — AstroMosaic")
+        self.setWindowTitle(f"{name}{marker} — {self._app_title}")
         self.command_panel.set_project_path(self.project_path)
         self._refresh_bands()
         self._layer_controls()
