@@ -662,6 +662,13 @@ The table is a status summary, not a replacement for the full exit gates in Sect
 - **Related:** Q-005 tracks remaining binary redistribution work. [Release guide](docs/windows-release.md) · [GitHub repository](https://github.com/Batu-98/AstroMosaic)
 - **Next:** Review native corresponding sources and redistribution terms before publishing the portable binaries. The clean-machine acceptance check remains open.
 
+### 2026-11-19 - Documentation - README quick starts and project support
+
+- **Changed:** Added a Buy Me a Coffee section, moved the source quick starts ahead of the development references, and clarified supported formats and Windows release status.
+- **Verified:** README link and heading checks, the support URL (HTTP 200), the Poetry lock check, and both dependency sync dry runs passed.
+- **Related:** Q-005 tracks Windows distribution.
+- **Next:** Continue the Windows redistribution review and clean-machine validation.
+
 ## Entry Template
 
 Copy this format into a new entry immediately above this template, preserving chronological order:
