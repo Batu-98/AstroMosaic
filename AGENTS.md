@@ -65,3 +65,13 @@ These rules apply to the whole AstroMosaic project. Keep development focused, un
 - Keep source images, catalogs, caches, generated output, environments, and secrets out of version control.
 - Use open-source software dependencies for supported workflows. Check compatibility and notices before copying third-party code or distributing dependencies, catalogs, and fixtures.
 - Do not upload user images implicitly, overwrite unrelated work, or include private data in logs.
+
+## 10. Version Control and Releases
+
+- Keep Git commits small and descriptive. Use short-lived branches for work that needs several commits and merge verified changes into `main`.
+- Define the application version in [pyproject.toml](pyproject.toml). The desktop and CLI read the installed package metadata. Version `.astromosaic` project manifests and CLI JSON schemas independently of the application version.
+- Use `MAJOR.MINOR.PATCH` for release versions. Increment `PATCH` for compatible fixes and `MINOR` for compatible features. Use a minor increment for incompatible changes during `0.x` and a major increment from `1.0.0` onward. Document compatibility changes and any migration steps in the release notes.
+- Use the Python beta suffix and increment it for successive betas of the same target version, for example `0.1.0b1` and `0.1.0b2`. Mark beta releases as pre-releases on GitHub.
+- Run `poetry check --lock` and the applicable tests before tagging the release commit with an annotated `v<version>` tag, such as `v0.1.0b2`. Keep published tags and artifacts fixed. Publish corrections under a new version.
+- Create the source archive from the tag. Build any release packages from a clean checkout of the tagged commit using `poetry.lock`. Verify that the tag, `python -m astromosaic --version`, the desktop title when applicable, and the archive names report the same version. [Release procedure](docs/windows-release.md#record-a-release)
+- Record the full commit ID, user-facing changes, known issues, and verification results in the GitHub release notes. Attach `SHA256SUMS.txt` and verify each release archive against it. Publish portable Windows packages after the [clean-machine checks](docs/phase-3f.md#pending-clean-machine-check) and [redistribution review](questions_open_topics.md#q-005---application-licensing-and-distribution-model) are complete for that build.

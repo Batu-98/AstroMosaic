@@ -9,8 +9,8 @@ Use this file for concise development history and handoff state. Detailed techni
 - **Current stage:** [Phases 6A–6D](docs/phase-6.md) and [local 6E](docs/phase-6.md#local-windows-lifecycle-and-package-results) passed on Windows. The calibrated ESO control, PA4 foreground comparisons, masked solve outcomes, and ZEA replay remain the real-observation references. The terrain evidence is ready for [Phase 7A](docs/phase-7.md#7a-freeze-the-reference-and-diagnose-pa4). The first source beta is `0.1.0b1`. Clean-machine acceptance for the packaged 6E candidate and review of the native distribution remain open. Linux and macOS support is deferred.
 - **Available artifacts:** The [application test guide](docs/application-tests.md) and [extended cases](docs/application-tests-extension.md) cover the fixtures in ignored `data/application-tests/`. The [test findings](docs/application-test-findings.md) also cover the local owner sequence. The 6E Windows ZIPs, matching source snapshot, SHA-256 list and build record are in `.tooling/phase6e-20261119/artifacts/`. The verification evidence is in `output/application-tests/phase6e/`. [Release guide](docs/windows-release.md)
 - **Implementation / verification:** Eight corrected lifecycle sequences and 54 scientific outputs passed across source and portable CPU and OpenGL desktop and CLI. The regular packaged launcher opened and exported M17. Both CLIs repeated the 14 real solve cases. Twenty real-observation tests, Ruff and mypy passed. The preceding Phase 5 Windows baseline passed 179 tests, and the [dense ASTAP follow-up](docs/phase-36-results.md#dense-astap-catalog-verification) passed 42 targeted regressions.
-- **Version control:** The first source beta uses the annotated Git tag `v0.1.0b1`. The Phase 5A–5C, optical metadata, and desktop table and theme follow-ups are consolidated on `main` after the Phase 4 baseline at `e0a3a39`. [AstroMosaic GitHub repository](https://github.com/Batu-98/AstroMosaic)
-- **Next action:** Verify the [recorded 6E candidate](docs/phase-6.md#local-windows-lifecycle-and-package-results) on a fresh Windows installation when one is available. Continue the corresponding-source and redistribution review under Q-005. Use the [6A–6B terrain results](docs/phase-6.md#handoff-to-phase-7a) for the 7A landmark and geometry comparison.
+- **Version control:** The current development version on `main` is `0.1.0b2`. The first published source beta uses the annotated Git tag `v0.1.0b1`. [AstroMosaic GitHub repository](https://github.com/Batu-98/AstroMosaic)
+- **Next action:** Build the `0.1.0b2` portable packages from matching source and verify them on a fresh Windows installation when one is available. Continue the corresponding-source and redistribution review under Q-005. Use the [6A–6B terrain results](docs/phase-6.md#handoff-to-phase-7a) for the 7A landmark and geometry comparison. [Release verification status](docs/windows-release.md#verification-status)
 - **Open dependencies:** Q-003 tracks reference data and frozen criteria. Q-010 tracks real-scene diagnostics and the proposed terrain models. Q-016 tracks astrometry. Q-005, Q-009 and Q-020 track distribution and format work. Q-008 tracks deferred platforms and Q-011 deferred visual fill. Resolved Q-022 and Q-023 record the Windows lifecycle and ZEA results.
 
 ## Phase Overview
@@ -845,6 +845,20 @@ The table is a status summary, not a replacement for the full exit gates in Sect
 - **Verified** Matched all changed Python files to the verified 6E snapshot. Ruff, mypy and the repository link checks passed.
 - **Related** [6E evidence](docs/phase-6.md#local-windows-lifecycle-and-package-results) and Q-005.
 - **Next** Run fresh Windows acceptance for the recorded 6E archives.
+
+### 2026-11-19 - Documentation - Recorded version control and release rules
+
+- **Changed** Added the Git workflow, application and schema version rules, beta tags, and release verification to [AGENTS.md](AGENTS.md#10-version-control-and-releases).
+- **Verified** Reviewed the rules against the current package version and release procedure. Checked all links in `AGENTS.md` and ran `git diff --check` for the documentation edits.
+- **Related** [Release procedure](docs/windows-release.md#record-a-release) and Q-005.
+- **Next** Apply the rules when preparing the next release.
+
+### 2026-11-19 - Phase 6 - Advanced the development beta
+
+- **Changed** Set the application version to `0.1.0b2` and recorded the version of the earlier Phase 6E build.
+- **Verified** `poetry check --lock`, the wheel metadata, CLI version, and desktop title passed. The real M17 project validated and reopened after saving with the new application version.
+- **Related** [Version control and releases](AGENTS.md#10-version-control-and-releases) and [Phase 6E evidence](docs/phase-6.md#local-windows-lifecycle-and-package-results).
+- **Next** Build matching `0.1.0b2` Windows packages and complete the fresh-installation checks for that build.
 
 ## Entry Template
 
