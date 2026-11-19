@@ -108,6 +108,20 @@ class PanelGeometry:
             pixels = result["pixcrd"]
             pixels[~usable] = np.nan
             return cast(NDArray[np.float64], pixels)
+        pixels = cast(NDArray[np.float64], self.wcs.wcs_world2pix(world, 0))
+        if not self.wcs.has_distortion:
+            return pixels
+        # SIP and lookup-table iteration need a finite seed from the core projection.
+        # An entirely unprojectable batch would otherwise enter an all-NaN reduction.
+        usable = np.isfinite(pixels).all(axis=1)
+        if usable.all():
+            return self._inverse_distortion(world)
+        pixels[~usable] = np.nan
+        if usable.any():
+            pixels[usable] = self._inverse_distortion(world[usable])
+        return pixels
+
+    def _inverse_distortion(self, world: NDArray[np.float64]) -> NDArray[np.float64]:
         try:
             pixels = self.wcs.all_world2pix(world, 0, tolerance=_INVERSE_TOLERANCE)
         except NoConvergence as error:

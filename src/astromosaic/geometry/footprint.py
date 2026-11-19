@@ -1,6 +1,7 @@
 """Conservative pixel bounds for selecting panels before mapping a tile."""
 
 from dataclasses import dataclass
+from re import fullmatch
 
 import numpy as np
 from astropy.coordinates import ICRS, SkyCoord
@@ -11,10 +12,13 @@ from astromosaic.geometry import ROUND_TRIP_TOLERANCE, PanelGeometry
 
 # Restrict corner projection to a well-conditioned part of the TAN hemisphere.
 _MAX_TAN_DISTANCE_DEG = 80.0
+_MAX_ZEA_DISTANCE_DEG = 150.0
 _MIN_TARGET_SCALE_DEG = 1e-8
 MAX_FOOTPRINT_COORDINATE = 2**32
 _TAN_AXES = ("RA---TAN", "DEC--TAN")
-_PLAIN_TAN_CARDS = frozenset(
+_TAN_SIP_AXES = ("RA---TAN-SIP", "DEC--TAN-SIP")
+_ZEA_AXES = ("RA---ZEA", "DEC--ZEA")
+_STANDARD_SKY_CARDS = frozenset(
     {
         "WCSAXES",
         "WCSNAME",
@@ -116,15 +120,22 @@ def enclosing_bounds(points: NDArray[np.float64]) -> PixelBounds | None:
     return PixelBounds(float(left) - 1, float(top) - 1, float(right) + 1, float(bottom) + 1)
 
 
-def _simple_icrs_tan(geometry: PanelGeometry) -> bool:
+def _simple_icrs_projection(geometry: PanelGeometry, axes: tuple[str, str]) -> bool:
     wcs = geometry.wcs
     if (
         not isinstance(geometry.frame, ICRS)
-        or wcs.has_distortion
-        or tuple(wcs.wcs.ctype) != _TAN_AXES
+        or tuple(wcs.wcs.ctype) != axes
         or tuple(map(str, wcs.wcs.cunit)) != ("deg", "deg")
         or not np.all(np.abs(wcs.wcs.crpix) <= MAX_FOOTPRINT_COORDINATE)
     ):
+        return False
+    sip_only = axes == _TAN_SIP_AXES
+    if sip_only:
+        if wcs.sip is None or any(
+            item is not None for item in (wcs.cpdis1, wcs.cpdis2, wcs.det2im1, wcs.det2im2)
+        ):
+            return False
+    elif wcs.has_distortion:
         return False
     # WCSLIB can normalize TPV to TAN internally while retaining its polynomial.
     # Serialization exposes the actual projection and any extra distortion cards.
@@ -132,8 +143,10 @@ def _simple_icrs_tan(geometry: PanelGeometry) -> bool:
         header = wcs.to_header(relax=True)
     except (ValueError, RuntimeError):
         return False
-    return (header.get("CTYPE1"), header.get("CTYPE2")) == _TAN_AXES and (
-        _PLAIN_TAN_CARDS.issuperset(header)
+    return (header.get("CTYPE1"), header.get("CTYPE2")) == axes and all(
+        key in _STANDARD_SKY_CARDS
+        or (sip_only and fullmatch(r"(?:A|B|AP|BP)_(?:ORDER|[0-9]+_[0-9]+)", key))
+        for key in header
     )
 
 
@@ -156,8 +169,8 @@ def tan_footprint(
     on the rectangle occur at the corners. Other projections keep the full path.
     """
     if (
-        not _simple_icrs_tan(source)
-        or not _simple_icrs_tan(target)
+        not _simple_icrs_projection(source, _TAN_AXES)
+        or not _simple_icrs_projection(target, _TAN_AXES)
         or min(abs(target.wcs.wcs.cdelt)) < _MIN_TARGET_SCALE_DEG
         or max(*source_size, *target_size, *map(abs, shift)) > MAX_FOOTPRINT_COORDINATE
         or not np.isfinite(shift).all()
@@ -184,3 +197,75 @@ def tan_footprint(
     if np.max(np.abs(points)) > MAX_FOOTPRINT_COORDINATE:
         return None
     return enclosing_bounds(points + shift)
+
+
+def _sip_padding(
+    source: PanelGeometry, lower: NDArray[np.float64], upper: NDArray[np.float64]
+) -> NDArray[np.float64] | None:
+    sip = source.wcs.sip
+    if sip is None:
+        return np.zeros(2, dtype=np.float64)
+    offsets = np.maximum(np.abs(lower + 1 - sip.crpix), np.abs(upper + 1 - sip.crpix))
+    if max(sip.a_order, sip.b_order) > 5 or not np.all(offsets <= MAX_FOOTPRINT_COORDINATE):
+        return None
+    # Bound each forward SIP displacement by the sum of its absolute terms.
+    padding = []
+    for polynomial in (sip.a, sip.b):
+        coefficients = np.abs(polynomial)
+        if not np.all(coefficients <= MAX_FOOTPRINT_COORDINATE):
+            return None
+        x_power, y_power = np.indices(coefficients.shape)
+        padding.append(np.sum(coefficients * offsets[0] ** x_power * offsets[1] ** y_power))
+    return np.array(padding, dtype=np.float64)
+
+
+def zea_footprint(
+    source: PanelGeometry,
+    target: PanelGeometry,
+    source_size: tuple[int, int],
+    target_size: tuple[int, int],
+    shift: tuple[float, float],
+) -> PixelBounds | None:
+    """Enclose TAN or TAN-SIP support in a ZEA output, including curved edges."""
+    axes = _TAN_SIP_AXES if source.wcs.sip is not None else _TAN_AXES
+    if (
+        not _simple_icrs_projection(source, axes)
+        or not _simple_icrs_projection(target, _ZEA_AXES)
+        or max(*source_size, *target_size, *map(abs, shift)) > MAX_FOOTPRINT_COORDINATE
+        or not np.isfinite(shift).all()
+    ):
+        return None
+
+    lower, upper = raster_bounds(Region(0, 0, *source_size)).corners()[[0, 3]]
+    lower -= ROUND_TRIP_TOLERANCE
+    upper += ROUND_TRIP_TOLERANCE
+    padding = _sip_padding(source, lower, upper)
+    if padding is None or np.any(padding > MAX_FOOTPRINT_COORDINATE):
+        return None
+
+    # Subdivide the corrected detector rectangle. The normalized gnomonic ray has
+    # angular derivative at most one, so the plane radius bounds each sky cap.
+    step = (upper - lower + 2 * padding) / 4
+    centers = lower - padding + (np.indices((4, 4)).reshape(2, -1).T + 0.5) * step
+    half_x, half_y = step / 2
+    offsets = PixelBounds(-half_x, -half_y, half_x, half_y).corners()
+    source_matrix = source.wcs.pixel_scale_matrix
+    if not np.all(np.abs(source_matrix) <= _MAX_ZEA_DISTANCE_DEG):
+        return None
+    radius = np.hypot(*(offsets @ source_matrix.T).T).max()
+    if not 0 < radius < _MAX_ZEA_DISTANCE_DEG:
+        return None
+
+    try:
+        scale = np.linalg.svd(target.wcs.pixel_scale_matrix, compute_uv=False).min()
+        sky = SkyCoord(*source.wcs.wcs_pix2world(centers, 0).T, unit="deg", frame=source.frame)
+        pole = SkyCoord(*target.wcs.wcs.crval, unit="deg", frame=target.frame)
+        distance = sky.separation(pole).deg + radius
+        if not (scale >= _MIN_TARGET_SCALE_DEG and np.all(distance < _MAX_ZEA_DISTANCE_DEG)):
+            return None
+        # Along any cap radius, the maximum ZEA scale is sec(distance / 2).
+        spread = radius / (scale * np.cos(np.deg2rad(distance / 2)))
+        points = target.inverse(sky) + shift
+    except (ValueError, ArithmeticError, np.linalg.LinAlgError):
+        return None
+    return enclosing_bounds(np.vstack((points - spread[:, None], points + spread[:, None])))

@@ -27,7 +27,7 @@ from astromosaic.geometry import (
     read_panel_geometry,
     sky_output_wcs,
 )
-from astromosaic.geometry.footprint import PixelBounds, raster_bounds, tan_footprint
+from astromosaic.geometry.footprint import PixelBounds, raster_bounds, tan_footprint, zea_footprint
 from astromosaic.io import TIFF_SUFFIXES, XISF_SUFFIX, PanelSource, SkyMask, open_panel
 from astromosaic.io.fits_export import open_fits_mosaic
 from astromosaic.photometry import PanelCorrection
@@ -554,12 +554,13 @@ def _prepare_mosaic(
                 )
         size = crop.width, crop.height
         footprint_bytes = 0
-        if spec.projection == "TAN" and _footprint_reservation(len(panels), spec.max_working_bytes):
+        if _footprint_reservation(len(panels), spec.max_working_bytes):
+            panel_footprint = tan_footprint if spec.projection == "TAN" else zea_footprint
             for index, panel in enumerate(panels):
                 context.check_cancelled()
                 descriptor = panel.source.descriptor
                 shift = panel.correction.shift if panel.correction else (0.0, 0.0)
-                footprint = tan_footprint(
+                footprint = panel_footprint(
                     panel.geometry, target, (descriptor.width, descriptor.height), size, shift
                 )
                 if footprint is not None:

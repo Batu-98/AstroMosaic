@@ -5,7 +5,7 @@ These rules apply to the whole AstroMosaic project. Keep development focused, un
 ## 1. Language and Plan
 
 - Write all project Markdown, code identifiers, comments, logs, and default UI text in English. Conversation may follow the user's language.
-- Follow [the Python-first plan](astro_mosaic_python_first_architecture_en.md), revision 3.10. The earlier .NET/Avalonia plan is historical.
+- Follow [the Python-first plan](astro_mosaic_python_first_architecture_en.md), revision 3.12. The earlier .NET/Avalonia plan is historical.
 - Use the plan for detailed technical requirements and phase acceptance criteria. Follow explicit owner instructions and keep affected documentation consistent.
 - When drafting a phase in the project plan, describe its scope and acceptance criteria in detail. Assess its impact on the rest of the project and consider potential improvements related to the phase as you draft it.
 
@@ -49,6 +49,7 @@ These rules apply to the whole AstroMosaic project. Keep development focused, un
 - Check that the change does what was requested and run the relevant existing tests, if available.
 - Open test windows and dialogs on the second monitor when one is available.
 - Add a focused test when new behavior or a bug fix needs one. Documentation-only edits need a content and link review, not application tests.
+- Use real observational data exclusively for Phase 6 and 7 reproductions, regressions, benchmarks, and acceptance. Follow the [Phase 6 data requirement](docs/phase-6.md#test-data-requirement) and [Phase 7 real-data measurements](docs/phase-7.md#real-data-and-acceptance-measurements).
 - Report what passed and what could not be checked. Fix failures or record the remaining issue; do not claim unverified success.
 - Apply detailed numerical and platform checks when the relevant feature or phase requires them. Mark a phase complete only when its planned criteria are met.
 

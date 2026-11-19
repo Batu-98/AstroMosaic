@@ -51,4 +51,4 @@ Download public DSS reference images from their archives for optional reproducti
 
 ## Verification status
 
-The beta verification is recorded in the GitHub release notes. The Windows launcher and export check still needs a fresh Windows 11 x64 installation. [GitHub releases](https://github.com/Batu-98/AstroMosaic/releases) · [Prior Windows acceptance and clean-machine check](phase-3f.md#pending-clean-machine-check)
+The beta verification is recorded in the GitHub release notes. The Phase 6E development candidate has separate source, desktop and CLI ZIPs in `.tooling/phase6e-20261119/artifacts/`. The SHA-256 list and local verification record identify the exact candidate for the remaining fresh Windows 11 x64 check and native redistribution review. [Phase 6E evidence](phase-6.md#local-windows-lifecycle-and-package-results) · [GitHub releases](https://github.com/Batu-98/AstroMosaic/releases) · [Clean-machine check](phase-3f.md#pending-clean-machine-check)

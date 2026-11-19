@@ -35,7 +35,9 @@ Choose **XISF mosaic** in the export dialog for a single file containing linear 
 
 For a mixed panel, choose **Panel → Propose Sky Mask** and review the overlay, or draw the mask with **More → Edit Sky Mask**. Use **Panel Settings** to override the foreground tag. [Mixed-panel workflow](phase-3d.md#desktop-workflow)
 
-Use **Tools → Plate Solve Settings** to choose and check the local ASTAP CLI and Gaia paths. Fresh ASTAP settings use **Automatic**. Set the per-panel, per-attempt and optional batch limits there. Select **Plate Solve** and save the project to retain the results. **Panel → Plate Solve Details** shows predicted distortion and measured regional errors. **Panel → Revalidate Plate Solution** requests a fresh catalog fit. [Desktop plate solving](phase-3b.md#desktop-plate-solving)
+After **Layers → Align Foreground**, use **Foreground Alignment Details** to inspect paired panels, overlap support, correlation and rejection reasons. Select a pair and choose **Inspect Mask A** or **Inspect Mask B** to open its saved mask. [Foreground diagnostic results](phase-6.md#local-foreground-diagnostics-results)
+
+Use **Tools → Plate Solve Settings** to choose and check the local ASTAP CLI and Gaia paths. For an ASTAP installation, select `astap_cli.exe` and the folder containing its catalog tiles. Fresh ASTAP settings use **Automatic**. Set the per-panel, per-attempt and optional batch limits there. Select **Plate Solve** and save the project to retain the results. **Panel → Plate Solve Details** shows effective hints, the catalog, the result of each attempt and measured regional errors when available. **Panel → Revalidate Plate Solution** requests a fresh catalog fit. [Desktop plate solving](phase-3b.md#desktop-plate-solving) · [Masked solve results](phase-6.md#local-masked-solve-results)
 
 Open **Tools → Command Panel** to run AstroMosaic CLI commands such as `project validate` and `project export` inside the desktop app. The panel shows command output and render progress and supports cancellation and session history. [Command panel workflow](phase-4c.md#desktop-workflow)
 
@@ -99,7 +101,7 @@ The viewport command checks a small projection and exits. The [Phase 0 evidence]
 | [AGENTS.md](../AGENTS.md) | Mandatory working rules for development agents. |
 | [progression.md](../progression.md) | Current phase, concise work history, verification, and next action. |
 | [questions_open_topics.md](../questions_open_topics.md) | Open decisions, problems, risks, and their resolutions. |
-| [Python-first architecture](../astro_mosaic_python_first_architecture_en.md) | Active technical plan, revision 3.10, including desktop plate solving, engine revalidation, [Phase 3.6 plate solve reliability](../astro_mosaic_python_first_architecture_en.md#phase-36-plate-solve-reliability), and [Phase 4 automation and large mosaics](../astro_mosaic_python_first_architecture_en.md#102-phase-4-delivery-stages). |
+| [Python-first architecture](../astro_mosaic_python_first_architecture_en.md) | Active technical plan, revision 3.12, covering desktop workflows, astronomy validation, automation, formats, and [Phase 7 terrain panorama registration](../astro_mosaic_python_first_architecture_en.md#105-phase-7-delivery-stages). |
 | [Phase 0 evidence](phase-0.md) | Platform matrix, fixture tolerances, probe results, and packaging procedure. |
 | [Phase 1 FITS reference](phase-1.md) | CLI contract, fixtures, export checks, and measured resource use. |
 | [Phase 2 astronomy reference](phase-2.md) | Offline catalog setup, WCS sidecars, masks, refinement, and acceptance evidence. |
@@ -109,6 +111,7 @@ The viewport command checks a small projection and exits. The [Phase 0 evidence]
 | [Phase 3D sky masks](phase-3d.md) | Foreground tags, editable masks, and sky-only processing. |
 | [Phase 3E foreground and composition](phase-3e.md) | Independent layers, shared horizon placement, seam controls, and layer exports. |
 | [Phase 3F Windows package](phase-3f.md) | Reproducible package build, background acceptance checks, and clean-machine follow-up. |
+| [Application test guide](application-tests.md) | Agent instructions and reproducible sky-only, wide-field, skewed and foreground fixture pairs. |
 | [Phase 3.6 plan](phase-36.md) | ASTAP priority, automatic catalogs, match/RMS evidence, scale recovery, SIP/edge validation and total solve budgets. |
 | [Phase 3.6 results](phase-36-results.md) | Windows plate-solving evidence, supported catalog modes and remaining checks. |
 | [Phase 3.6A evidence](phase-36a.md) | Native capabilities, frozen contracts, TIFF EXIF/XMP import and the reference experiments. |
@@ -116,6 +119,8 @@ The viewport command checks a small projection and exits. The [Phase 0 evidence]
 | [Phase 5A XISF interchange](phase-5a.md) | Linear XISF inputs, exports, supported metadata, and verification. |
 | [Phase 5B sky projection](phase-5b.md) | Equal-area ZEA grids, saved settings, and wide-field geometry checks. |
 | [Phase 5C per-band output](phase-5c.md) | Saved sky band assignments, individual previews and exports, and batch jobs. |
+| [Phase 6 real-observation reliability](phase-6.md) | Reference data, foreground pairing, masked solving, ZEA previews, and Windows lifecycle and release acceptance. |
+| [Phase 7 terrain panorama registration](phase-7.md) | Panorama research, manual and automatic terrain points, camera geometry, and real-data Windows acceptance. |
 | [ADR-0001](adr/0001-python-first-baseline.md) | Records which architecture is active and which decisions remain unverified. |
 
 All project Markdown, source comments, identifiers, logs, and default application text are written in English.

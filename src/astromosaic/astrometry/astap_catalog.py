@@ -7,6 +7,7 @@ The format and provenance are recorded in docs/phase-36a.md.
 """
 
 import re
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from math import asin, cos, degrees, isfinite, radians, sin
 from pathlib import Path
@@ -45,6 +46,27 @@ class CatalogCone:
     read_bytes: int
 
 
+@dataclass(slots=True)
+class CatalogReadUsage:
+    """Account for complete and interrupted reads of one validation cone."""
+
+    decoded_stars: int = 0
+    retained_stars: int = 0
+    read_bytes: int = 0
+
+
+@dataclass(frozen=True, slots=True)
+class CatalogSelection:
+    """Keep the brightest stars accepted by a bounded, order-preserving filter."""
+
+    brightest: int
+    filter_stars: Callable[[Sequence[CatalogStar]], Sequence[CatalogStar]]
+
+
+class CatalogBudgetExceeded(ValueError):
+    """A catalog cone exhausted a configured resource limit."""
+
+
 def _cone_tiles(center: tuple[float, float], radius_deg: float) -> tuple[str, ...]:
     ra, dec = center
     south, north = max(-90, dec - radius_deg), min(90, dec + radius_deg)
@@ -80,6 +102,8 @@ def query_astap_cone(
     max_stars: int = 20_000,
     max_read_bytes: int = 64 * 1024**2,
     context: JobContext = DEFAULT_JOB_CONTEXT,
+    usage: CatalogReadUsage | None = None,
+    selection: CatalogSelection | None = None,
 ) -> CatalogCone:
     """Read actual catalog positions, refusing missing tiles and truncated results.
 
@@ -97,6 +121,8 @@ def query_astap_cone(
         )
     if max_stars <= 0 or max_read_bytes <= 0:
         raise ValueError("Catalog star and read budgets must be positive.")
+    if selection is not None and not 0 < selection.brightest <= max_stars:
+        raise ValueError("The requested bright stars exceed the catalog retention budget.")
     if database not in _DATABASE_DENSITIES:
         raise ValueError("Expected an ASTAP D05, D20, D50, or D80 catalog.")
     paths = tuple(directory / f"{database}_{tile}" for tile in _cone_tiles(center, radius_deg))
@@ -107,20 +133,23 @@ def query_astap_cone(
                 f"Missing ASTAP catalog tile required by the validation field: {path.name}"
             )
     stars: list[CatalogStar] = []
-    read_bytes = 0
+    usage = usage if usage is not None else CatalogReadUsage()
     epoch: float | None = None
     center_dec = radians(dec)
     cone_limit = sin(radians(radius_deg) / 2) ** 2
+    magnitude_limit: float | None = None
     for path in paths:
         context.check_cancelled()
         stamp_before = path.stat()
         length = stamp_before.st_size
         if length < _HEADER_BYTES or (length - _HEADER_BYTES) % _RECORD_BYTES:
             raise ValueError(f"Invalid ASTAP tile length: {path.name}")
-        if read_bytes + length > max_read_bytes:
-            raise ValueError("The ASTAP catalog query exceeds its read byte budget.")
+        minimum_read = length if selection is None else _HEADER_BYTES
+        if usage.read_bytes + minimum_read > max_read_bytes:
+            raise CatalogBudgetExceeded("The ASTAP catalog query exceeds its read byte budget.")
         with path.open("rb") as stream:
             header = stream.read(_HEADER_BYTES)
+            usage.read_bytes += len(header)
             if len(header) != _HEADER_BYTES:
                 raise ValueError(f"Truncated ASTAP tile header: {path.name}")
             description = header[:109].decode("ascii", errors="strict")
@@ -143,19 +172,37 @@ def query_astap_cone(
             while remaining:
                 context.check_cancelled()
                 requested = min(remaining, _BLOCK_RECORDS * _RECORD_BYTES)
+                if usage.read_bytes + requested > max_read_bytes:
+                    raise CatalogBudgetExceeded(
+                        "The ASTAP catalog query exceeds its read byte budget."
+                    )
                 block = stream.read(requested)
+                usage.read_bytes += len(block)
                 if len(block) != requested:
                     raise ValueError(f"Truncated ASTAP tile while reading: {path.name}")
+                block_stars: list[CatalogStar] = [] if selection is not None else stars
+                reached_limit = False
                 for index in range(0, len(block), _RECORD_BYTES):
                     a, b, c, d, e = block[index : index + _RECORD_BYTES]
                     raw_ra = a + (b << 8) + (c << 16)
                     if raw_ra == 0xFFFFFF:
-                        high_dec, magnitude = d - 128, (e - 16) / 10
+                        next_magnitude = (e - 16) / 10
+                        if (
+                            selection is not None
+                            and high_dec is not None
+                            and next_magnitude < magnitude
+                        ):
+                            raise ValueError("ASTAP catalog magnitude sections are out of order.")
+                        high_dec, magnitude = d - 128, next_magnitude
+                        if magnitude_limit is not None and magnitude > magnitude_limit:
+                            reached_limit = True
+                            break
                         continue
                     if high_dec is None:
                         raise ValueError(
                             "An ASTAP star record precedes its declination/magnitude marker."
                         )
+                    usage.decoded_stars += 1
                     star_ra = raw_ra * (360 / 0xFFFFFF)
                     star_dec = (d + (e << 8) + (high_dec << 16)) * (90 / 0x7FFFFF)
                     if not -90 <= star_dec <= 90:
@@ -169,21 +216,32 @@ def query_astap_cone(
                         * sin(radians(star_ra - ra) / 2) ** 2
                     )
                     if distance <= cone_limit:
-                        if len(stars) == max_stars:
-                            raise ValueError(
+                        if selection is None and len(stars) == max_stars:
+                            raise CatalogBudgetExceeded(
                                 "The ASTAP catalog query exceeds its retained star budget."
                             )
-                        stars.append(
+                        block_stars.append(
                             CatalogStar(
                                 f"{path.name}:{offset + index}", star_ra, star_dec, magnitude
                             )
                         )
+                        if selection is None:
+                            usage.retained_stars += 1
+                if selection is not None and block_stars:
+                    stars.extend(selection.filter_stars(block_stars))
+                    stars.sort(key=lambda star: star.magnitude)
+                    del stars[selection.brightest :]
+                    usage.retained_stars = len(stars)
+                    if len(stars) == selection.brightest:
+                        # Bright-to-faint .1476 sections let later blocks skip fainter stars.
+                        magnitude_limit = stars[-1].magnitude
+                if reached_limit:
+                    break
                 offset += len(block)
                 remaining -= len(block)
             stamp_after = path.stat()
             if stamp_after.st_size != length or stamp_after.st_mtime_ns != stamp_before.st_mtime_ns:
                 raise ValueError(f"The ASTAP catalog tile changed during the query: {path.name}")
-        read_bytes += length
     context.check_cancelled()
     assert epoch is not None
-    return CatalogCone(tuple(stars), epoch, tuple(path.name for path in paths), read_bytes)
+    return CatalogCone(tuple(stars), epoch, tuple(path.name for path in paths), usage.read_bytes)

@@ -12,7 +12,12 @@ from astropy.io import fits
 
 from astromosaic.astrometry.astap_catalog import CatalogStar
 from astromosaic.astrometry.distortion import validate_models
-from astromosaic.astrometry.solve_validation import MIN_MATCHES, QualityRejected, associate
+from astromosaic.astrometry.solve_validation import (
+    MIN_MATCHES,
+    CatalogRegion,
+    QualityRejected,
+    associate,
+)
 from astromosaic.astrometry.solver_worker import run_solver_worker
 from astromosaic.core.job import JobContext
 from astromosaic.geometry import read_panel_geometry
@@ -97,7 +102,13 @@ def _search(
     if matches < MIN_MATCHES or not (isfinite(rms) and rms >= 0 and 0 <= probability <= 1e-3):
         raise QualityRejected(
             f"Gaia native confidence failed ({matches} native matches, "
-            f"RMS {rms:.3g} arcsec, false-match probability {probability:.3g})."
+            f"RMS {rms:.3g} arcsec, false-match probability {probability:.3g}).",
+            {
+                "native_match_count": matches,
+                "native_rms_arcsec": rms if isfinite(rms) else None,
+                "native_false_match_probability": probability if isfinite(probability) else None,
+            },
+            gate="association",
         )
     header = fits.Header(solution.fits_header_cards())
     return GaiaCandidate(
@@ -142,14 +153,18 @@ def _validate(
     context = JobContext(checkpoint=checkpoint)
     context.check_cancelled()
     if not candidate.catalog.startswith(_catalog_identity(catalog_path)):
-        raise QualityRejected("The Gaia star catalog changed after the native search.")
+        raise QualityRejected(
+            "The Gaia star catalog changed after the native search.", gate="catalog-query"
+        )
     catalog = seiza.StarCatalog.open(catalog_path)
     seed = read_panel_geometry(fits.Header.fromstring(candidate.header, sep="\n"), *size)
 
-    def query(center: tuple[float, float], radius: float, limit: int) -> list[CatalogStar]:
+    def query(region: CatalogRegion) -> list[CatalogStar]:
         return [
             CatalogStar(f"{ra:.15g}/{dec:.15g}", ra, dec, magnitude)
-            for ra, dec, magnitude in catalog.cone_search(*center, radius, limit=limit)
+            for ra, dec, magnitude in catalog.cone_search(
+                *region.center, region.radius_deg, limit=max(256, 6 * region.detected_stars)
+            )
         ]
 
     xy = np.asarray(coordinates, dtype=np.float64)[:, :2]

@@ -138,16 +138,22 @@ class SkyViewport(QWidget):
         if self._gl is not None and self._gl.isVisible() and not self._gl.isValid():
             self._fallback("Qt could not create the OpenGL preview context.")
 
+    def release_opengl(self) -> None:
+        """Release the preview's resources on the UI thread before removing its widget."""
+        if self._gl is None:
+            return
+        gl, self._gl = self._gl, None
+        gl.release_resources()
+        self._pages.setCurrentWidget(self._raster)
+        self._pages.removeWidget(gl)
+        gl.deleteLater()
+
     @Slot(str)
     def _fallback(self, reason: str) -> None:
         if self._gl is None:
             return
-        gl, self._gl = self._gl, None
         self._use_gpu = False
-        self._pages.setCurrentWidget(self._raster)
-        self._pages.removeWidget(gl)
-        gl.release_resources()
-        gl.deleteLater()
+        self.release_opengl()
         self._backend.setToolTip(reason)
         self._backend.setText(self.backend if self._frame is not None else "")
         self._update_display()

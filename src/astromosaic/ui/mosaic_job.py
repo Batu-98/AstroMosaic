@@ -18,6 +18,11 @@ from astromosaic.display import DisplayFrame, normalize_preview, normalize_tile
 from astromosaic.geometry.image import CompositionSpec
 from astromosaic.io import open_panel
 from astromosaic.io.fits import open_fits_sky_mask
+from astromosaic.pipeline.foreground import (
+    ForegroundAlignmentRejected,
+    ForegroundGraphResiduals,
+    ForegroundPairDiagnostic,
+)
 from astromosaic.pipeline.masking import (
     DETECTION_EDGE,
     propose_mask,
@@ -220,13 +225,40 @@ class PreviewJob(_ProjectJob[DisplayFrame]):
         return frame
 
 
+@dataclass(frozen=True, slots=True)
+class ForegroundAlignmentReport:
+    pairs: tuple[ForegroundPairDiagnostic, ...]
+    groups: tuple[tuple[int, ...], ...]
+    residuals: ForegroundGraphResiduals
+    error: str | None
+
+
 class ForegroundAlignmentJob(_ProjectJob[MosaicProject]):
     label = "foreground alignment"
     progress_label = "Comparing foreground"
     progress_units = "steps"
 
+    def __init__(self, project: MosaicProject, parent: QObject) -> None:
+        super().__init__(project, parent)
+        self.pairs: list[ForegroundPairDiagnostic] = []
+        self.groups: tuple[tuple[int, ...], ...] = ()
+        self.residuals: ForegroundGraphResiduals = ()
+
+    def report(self) -> ForegroundAlignmentReport | None:
+        if not self.pairs or self.cancelled:
+            return None
+        return ForegroundAlignmentReport(tuple(self.pairs), self.groups, self.residuals, self.error)
+
     def perform(self, context: JobContext) -> MosaicProject:
-        return align_project_foreground(self.project, context)
+        try:
+            result = align_project_foreground(self.project, context, on_pair=self.pairs.append)
+        except ForegroundAlignmentRejected as rejection:
+            self.groups = rejection.groups
+            self.residuals = rejection.residuals
+            raise
+        assert result.foreground is not None
+        self.groups = (tuple(panel.index for panel in result.foreground.alignment.panels),)
+        return result
 
 
 class CompositionProposalJob(_ProjectJob[CompositionSpec]):

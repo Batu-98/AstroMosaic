@@ -3,6 +3,7 @@
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from math import isfinite
+from typing import Literal
 
 import numpy as np
 from astropy.coordinates import SkyCoord
@@ -18,15 +19,45 @@ MATCH_RADIUS = 3.0
 REGION_MIN_MATCHES = 5
 MODEL_GRID = 9
 FloatArray = NDArray[np.float64]
-CatalogQuery = Callable[[tuple[float, float], float, int], Sequence[CatalogStar]]
+type QualityGate = Literal[
+    "detections",
+    "geometry",
+    "catalog-query",
+    "catalog-resource",
+    "association",
+    "rms",
+    "held-out",
+    "edge-support",
+]
+
+
+@dataclass(frozen=True, slots=True)
+class CatalogRegion:
+    row: int
+    column: int
+    center: tuple[float, float]
+    radius_deg: float
+    detected_stars: int
+    bounds: tuple[float, float, float, float]
+    brightest: int | None
+
+
+CatalogQuery = Callable[[CatalogRegion], Sequence[CatalogStar]]
 
 
 class QualityRejected(ValueError):
     """A localized candidate lacks sufficient astrometric evidence."""
 
-    def __init__(self, detail: str, evidence: dict[str, object] | None = None) -> None:
+    def __init__(
+        self,
+        detail: str,
+        evidence: dict[str, object] | None = None,
+        *,
+        gate: QualityGate = "geometry",
+    ) -> None:
         super().__init__(detail)
         self.evidence = evidence
+        self.gate = gate
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,6 +78,24 @@ def _cone(
     return (float(center.ra.deg), float(center.dec.deg)), float(np.max(center.separation(sky).deg))
 
 
+def project_catalog(
+    geometry: PanelGeometry, stars: Sequence[CatalogStar], bounds: tuple[float, float, float, float]
+) -> tuple[FloatArray, NDArray[np.intp]]:
+    """Project a bounded catalog batch and mark the stars inside the padded region."""
+    ra_dec = np.array([(star.ra_deg, star.dec_deg) for star in stars], dtype=np.float64)
+    sky = SkyCoord(ra_dec[:, 0], ra_dec[:, 1], unit="deg", frame="icrs")
+    projected = geometry.inverse(sky)
+    left, top, right, bottom = bounds
+    keep = np.flatnonzero(
+        np.all(np.isfinite(projected), axis=1)
+        & (projected[:, 0] >= left)
+        & (projected[:, 0] < right)
+        & (projected[:, 1] >= top)
+        & (projected[:, 1] < bottom)
+    )
+    return projected, keep
+
+
 def associate(
     geometry: PanelGeometry,
     size: tuple[int, int],
@@ -56,13 +105,18 @@ def associate(
 ) -> Associations:
     """Find mutual nearest stars, with shifted controls for coincidental matches."""
     if len(xy) < MIN_MATCHES or not np.all(np.isfinite(xy)):
-        raise QualityRejected(f"Fewer than {MIN_MATCHES} usable measured sky stars.")
+        raise QualityRejected(
+            f"Fewer than {MIN_MATCHES} usable measured sky stars.",
+            {"detected_stars": len(xy)},
+            gate="detections",
+        )
     width, height = size
     _, radius = _cone(geometry, (0, 0, width - 1, height - 1))
     # Avoid one large query for a very wide field. Controls share the same queries.
     div = MODEL_GRID if radius > 3 else 1
     measured_tree = cKDTree(xy)
     shifts = np.array([[13.1, 0], [-13.1, 0], [0, 13.1], [0, -13.1]])
+    pad = float(np.max(np.abs(shifts))) + MATCH_RADIUS
     control_counts = np.zeros(len(shifts), dtype=np.int64)
     matches: list[tuple[float, int, CatalogStar]] = []
     candidates = 0
@@ -76,7 +130,7 @@ def associate(
             )
             if not len(indexes):
                 continue
-            pad = float(np.max(np.abs(shifts))) + MATCH_RADIUS
+            bounds = (left - pad, top - pad, right + pad, bottom + pad)
             rect = (
                 max(0, left - pad),
                 max(0, top - pad),
@@ -87,27 +141,20 @@ def associate(
             radius_deg = cell_radius + 0.015
             if not 0 < radius_deg <= 10:
                 raise QualityRejected(
-                    "The candidate exceeds the supported local catalog query domain."
+                    "The candidate exceeds the supported local catalog query domain.",
+                    gate="catalog-query",
                 )
-            stars = query(center, radius_deg, max(256, 6 * len(indexes)))
+            brightest = max(30, 3 * len(indexes)) if div > 1 else None
+            stars = query(
+                CatalogRegion(row + 1, col + 1, center, radius_deg, len(indexes), bounds, brightest)
+            )
             context.check_cancelled()
             if not stars:
                 continue
-            ra_dec = np.array([(star.ra_deg, star.dec_deg) for star in stars], dtype=np.float64)
-            sky = SkyCoord(ra_dec[:, 0], ra_dec[:, 1], unit="deg", frame="icrs")
-            projected = geometry.inverse(sky)
-            keep = np.flatnonzero(
-                np.all(np.isfinite(projected), axis=1)
-                & (projected[:, 0] >= left - pad)
-                & (projected[:, 0] < right + pad)
-                & (projected[:, 1] >= top - pad)
-                & (projected[:, 1] < bottom + pad)
-            )
-            if div > 1:
+            projected, keep = project_catalog(geometry, stars, bounds)
+            if brightest is not None:
                 keep = np.array(
-                    sorted(keep, key=lambda i: stars[int(i)].magnitude)[
-                        : max(30, 3 * len(indexes))
-                    ],
+                    sorted(keep, key=lambda i: stars[int(i)].magnitude)[:brightest],
                     dtype=np.intp,
                 )
             if not len(keep):
@@ -128,7 +175,11 @@ def associate(
                 shifted, _ = tree.query(xy[indexes] + shift, k=1)
                 control_counts[i] += np.count_nonzero(shifted <= MATCH_RADIUS)
     if not matches:
-        raise QualityRejected("No mutual local catalog associations within three source pixels.")
+        raise QualityRejected(
+            "No mutual local catalog associations within three source pixels.",
+            {"unique_matches": 0, "chance_control_matches": int(control_counts.max())},
+            gate="association",
+        )
 
     distances = np.array([match[0] for match in matches])
     median = float(np.median(distances))
@@ -154,6 +205,7 @@ def associate(
             f"Only {len(selected)} unique catalog associations after rejection; "
             f"the shifted control found up to {chance}.",
             {"unique_matches": len(selected), "chance_control_matches": chance},
+            gate="association",
         )
     coords_array = np.array([(star.ra_deg, star.dec_deg) for _, star in selected], dtype=np.float64)
     return Associations(
@@ -185,7 +237,9 @@ def p95(values: FloatArray) -> float:
 def require_quality(count: int, rms_arcsec: float, scales: tuple[float, float]) -> float:
     if count < MIN_MATCHES or not all(isfinite(s) and s > 0 for s in scales):
         raise QualityRejected(
-            f"At least {MIN_MATCHES} unique matches and valid solved scales are required."
+            f"At least {MIN_MATCHES} unique matches and valid solved scales are required.",
+            {"unique_matches": count},
+            gate="association" if count < MIN_MATCHES else "geometry",
         )
     ceiling = max(3.0, 2.0 * min(scales))
     if not isfinite(rms_arcsec) or not 0 <= rms_arcsec <= ceiling:
@@ -196,6 +250,7 @@ def require_quality(count: int, rms_arcsec: float, scales: tuple[float, float]) 
                 "rms_arcsec": rms_arcsec if isfinite(rms_arcsec) else None,
                 "rms_limit_arcsec": ceiling,
             },
+            gate="rms",
         )
     return ceiling
 

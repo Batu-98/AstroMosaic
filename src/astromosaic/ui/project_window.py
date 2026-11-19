@@ -1,7 +1,7 @@
 """Desktop project and background render workflow."""
 
 import re
-from dataclasses import replace
+from dataclasses import asdict, replace
 from importlib.metadata import version
 from pathlib import Path
 from typing import cast
@@ -27,7 +27,7 @@ from PySide6.QtWidgets import (
 )
 
 from astromosaic.astrometry.hints import PanelOptics
-from astromosaic.astrometry.solve import read_solution_quality
+from astromosaic.astrometry.solve import read_solution_diagnostics
 from astromosaic.display import DisplayFrame, highlight_overlap
 from astromosaic.storage.project import (
     FileReference,
@@ -41,10 +41,12 @@ from astromosaic.storage.project import (
 )
 from astromosaic.ui.appearance import add_theme_menu
 from astromosaic.ui.command_panel import CommandPanel
+from astromosaic.ui.foreground_details import ForegroundAlignmentDetails
 from astromosaic.ui.mask_editor import MaskEditor
 from astromosaic.ui.mosaic_job import (
     CompositionProposalJob,
     ForegroundAlignmentJob,
+    ForegroundAlignmentReport,
     ForegroundJob,
     MaskEditorJob,
     MosaicJob,
@@ -95,6 +97,8 @@ class ProjectWindow(QMainWindow):
         self._inspections: tuple[PanelInspection, ...] = ()
         self._solved_panels: tuple[ProjectPanel, ...] = ()
         self._solve_outcomes: dict[int, PanelSolveOutcome] = {}
+        self._foreground_report: ForegroundAlignmentReport | None = None
+        self._foreground_panels: tuple[ProjectPanel, ...] | None = None
         self._panel_dialog: tuple[int, PanelSettings] | None = None
         self._preview_project: MosaicProject | None = None
         self._display_frame: DisplayFrame | None = None
@@ -119,6 +123,9 @@ class ProjectWindow(QMainWindow):
         self.propose_mask = panel_menu.addAction("Propose Sky Mask…", self._propose_mask)
         layers_menu = self.menuBar().addMenu("&Layers")
         self.align_action = layers_menu.addAction("Align Foreground", self._align_foreground)
+        self.foreground_details_action = layers_menu.addAction(
+            "Foreground Alignment Details…", self._foreground_alignment_details
+        )
         self.placement_action = layers_menu.addAction("Propose Placement", self._propose_placement)
         self.composition_action = layers_menu.addAction(
             "Composition Settings…", self._composition_settings
@@ -370,6 +377,10 @@ class ProjectWindow(QMainWindow):
         ground = self.project.current_foreground()
         sky = bool(self.project.sky_indices())
         self.align_action.setEnabled(idle and bool(self.project.foreground_inputs()))
+        if self._foreground_panels is not self.project.panels:
+            self._foreground_report = None
+            self._foreground_panels = None
+        self.foreground_details_action.setEnabled(idle and self._foreground_report is not None)
         self.placement_action.setEnabled(idle and ground is not None and sky)
         self.composition_action.setEnabled(idle and ground is not None and sky)
         self.layer_box.setEnabled(idle and bool(self.project.panels))
@@ -441,7 +452,11 @@ class ProjectWindow(QMainWindow):
         self.revalidate_solve_action.setEnabled(selected and index in self.project.sky_indices())
         info = self._panel_inspection(index)
         self.solve_details_action.setEnabled(
-            selected and info is not None and info.wcs_status in ("Embedded", "Sidecar")
+            selected
+            and (
+                index in self._solve_outcomes
+                or (info is not None and info.wcs_status in ("Embedded", "Sidecar"))
+            )
         )
 
     def _confirm_discard(self) -> bool:
@@ -458,6 +473,8 @@ class ProjectWindow(QMainWindow):
 
     def _set_project(self, project: MosaicProject, path: Path | None) -> None:
         self._clear_preview()
+        self._foreground_report = None
+        self._foreground_panels = None
         with QSignalBlocker(self.band_box):
             self.band_box.setCurrentIndex(0)
         self.project = self._saved = project
@@ -668,20 +685,40 @@ class ProjectWindow(QMainWindow):
     def _plate_solve_details(self) -> None:
         index = self.panels.currentIndex().row()
         info = self._panel_inspection(index)
-        if info is None or info.wcs_status not in ("Embedded", "Sidecar"):
+        outcome = self._solve_outcomes.get(index)
+        has_wcs = info is not None and info.wcs_status in ("Embedded", "Sidecar")
+        if outcome is None and not has_wcs:
             return
         quality: dict[str, object] = {}
-        if info.wcs_status == "Sidecar":
+        attempts: list[dict[str, object]] = []
+        if outcome is not None:
+            quality = outcome.quality or {}
+            attempts = [asdict(attempt) for attempt in outcome.attempts]
+            has_wcs = has_wcs or outcome.sidecar is not None
+        if (info is not None and info.wcs_status == "Sidecar") or (
+            outcome is not None and outcome.sidecar is not None
+        ):
             reference = self.project.panels[index].wcs_sidecar
             assert reference is not None
             try:
                 if reference.status() != "Ready":
                     raise ValueError("The WCS sidecar changed. Reopen the project to verify it.")
-                quality = read_solution_quality(reference.path)
+                quality, saved_attempts = read_solution_diagnostics(reference.path)
+                if outcome is None:
+                    attempts = saved_attempts
             except (OSError, ValueError) as error:
-                self.status.setText(str(error))
-                return
-        dialog = PlateSolveDetails(quality, self)
+                if outcome is None:
+                    self.status.setText(str(error))
+                    return
+                has_wcs = False
+                quality = {}
+        dialog = PlateSolveDetails(
+            quality,
+            self,
+            attempts=attempts,
+            solve_error=outcome.error if outcome is not None else None,
+            has_wcs=has_wcs,
+        )
         try:
             dialog.exec()
         finally:
@@ -762,6 +799,24 @@ class ProjectWindow(QMainWindow):
             self._launch_job(
                 ForegroundAlignmentJob(self.project, self), "Preparing foreground alignment…"
             )
+
+    def _foreground_alignment_details(self) -> None:
+        report = self._foreground_report
+        if (
+            report is None
+            or self._is_running()
+            or self._foreground_panels is not self.project.panels
+        ):
+            return
+        names = tuple(panel.source.path.name for panel in self.project.panels)
+        dialog = ForegroundAlignmentDetails(report, names, self)
+        try:
+            dialog.exec()
+            if dialog.selected_panel is not None:
+                self.panels.selectRow(dialog.selected_panel)
+                self._open_mask_editor(propose=False)
+        finally:
+            dialog.deleteLater()
 
     def _propose_placement(self) -> None:
         if not self._is_running():
@@ -911,13 +966,20 @@ class ProjectWindow(QMainWindow):
                 self._refresh(self.panels.currentIndex().row())
 
     def _finish_layer_job(self, job: ForegroundAlignmentJob | CompositionProposalJob) -> None:
+        details = ""
+        if isinstance(job, ForegroundAlignmentJob):
+            self._foreground_report = job.report()
+            self._foreground_panels = job.project.panels
+            self._layer_controls()
+            if self._foreground_report is not None:
+                details = " See Layers → Foreground Alignment Details."
         if job.result is None:
             self.progress.setValue(0)
             label = job.label.capitalize()
             self.status.setText(
                 f"{label} cancelled."
                 if job.cancelled
-                else f"{label} failed. {job.error or 'No result was returned.'}"
+                else f"{label} failed. {job.error or 'No result was returned.'}{details}"
             )
             return
         if isinstance(job, ForegroundAlignmentJob):
@@ -935,7 +997,7 @@ class ProjectWindow(QMainWindow):
         self._refresh(self.panels.currentIndex().row())
         self.layer_box.setCurrentIndex(_LAYERS.index(layer))
         self.progress.setValue(100)
-        self.status.setText(message)
+        self.status.setText(message + details)
 
     def _finish_foreground_check(self, job: ForegroundJob) -> None:
         if job.result is None:
@@ -1026,6 +1088,8 @@ class ProjectWindow(QMainWindow):
                 self._inspection_job.cancel()
             event.ignore()
         elif self._confirm_discard():
+            self.viewport.release_opengl()
+            self._clear_preview()
             event.accept()
         else:
             event.ignore()

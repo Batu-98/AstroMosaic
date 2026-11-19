@@ -5,13 +5,13 @@ Use this file for concise development history and handoff state. Detailed techni
 ## Current State
 
 - **Last updated:** 2026-11-19
-- **Active baseline:** Python-first architecture revision 3.10 covers [Phase 3.6 plate solve reliability](astro_mosaic_python_first_architecture_en.md#phase-36-plate-solve-reliability) and [Phase 4A–4C automation and scaling](astro_mosaic_python_first_architecture_en.md#102-phase-4-delivery-stages). [ADR-0017](docs/adr/0017-astap-first-validated-solving.md) records ASTAP priority, quality and budgets. See [ADR-0003](docs/adr/0003-windows-first-platform-scope.md) for Windows scope, [ADR-0006](docs/adr/0006-dual-fits-and-tiff-workflow.md) for formats, and [ADR-0007](docs/adr/0007-sky-and-foreground-mosaics.md) for mixed panels.
-- **Current stage:** The first source beta is `0.1.0b1`. The earlier Windows builds are local release candidates. Phase 5 meets the local Windows acceptance criteria for [per-band products](docs/phase-5c.md), [ZEA projection](docs/phase-5b.md) and [XISF interchange](docs/phase-5a.md). The separate clean-machine check remains open. Linux and macOS support is deferred.
-- **Available artifacts:** The candidate Windows ZIPs and source snapshot are in ignored `.tooling/release-0.1.0/artifacts/`. See the [release guide](docs/windows-release.md), [Phase 5C results](docs/phase-5c.md#local-windows-results) and [Phase 3.6 evidence](docs/phase-36-results.md).
-- **Implementation / verification:** All 179 native Windows tests and the copied CPU/OpenGL desktop and console checks passed for the latest Phase 5 and desktop baseline. The [dense ASTAP follow-up](docs/phase-36-results.md#dense-astap-catalog-verification) verified catalog selection, local Orion recovery with D20/D50 from supplied pointing and scale, and the blind timeout. A native desktop solve with pinned D50 drove an independently reopened FITS export. The follow-up passed 42 targeted regression tests.
+- **Active baseline:** Python-first architecture revision 3.12 adds [Phase 7 delivery stages](astro_mosaic_python_first_architecture_en.md#105-phase-7-delivery-stages). [ADR-0023](docs/adr/0023-terrain-control-point-registration.md) proposes a terrain control-point fit. [ADR-0017](docs/adr/0017-astap-first-validated-solving.md) records the solver policy. See [ADR-0003](docs/adr/0003-windows-first-platform-scope.md) for Windows scope, [ADR-0006](docs/adr/0006-dual-fits-and-tiff-workflow.md) for formats, and [ADR-0007](docs/adr/0007-sky-and-foreground-mosaics.md) for mixed panels.
+- **Current stage:** [Phases 6A–6D](docs/phase-6.md) and [local 6E](docs/phase-6.md#local-windows-lifecycle-and-package-results) passed on Windows. The calibrated ESO control, PA4 foreground comparisons, masked solve outcomes, and ZEA replay remain the real-observation references. The terrain evidence is ready for [Phase 7A](docs/phase-7.md#7a-freeze-the-reference-and-diagnose-pa4). The first source beta is `0.1.0b1`. Clean-machine acceptance for the packaged 6E candidate and review of the native distribution remain open. Linux and macOS support is deferred.
+- **Available artifacts:** The [application test guide](docs/application-tests.md) and [extended cases](docs/application-tests-extension.md) cover the fixtures in ignored `data/application-tests/`. The [test findings](docs/application-test-findings.md) also cover the local owner sequence. The 6E Windows ZIPs, matching source snapshot, SHA-256 list and build record are in `.tooling/phase6e-20261119/artifacts/`. The verification evidence is in `output/application-tests/phase6e/`. [Release guide](docs/windows-release.md)
+- **Implementation / verification:** Eight corrected lifecycle sequences and 54 scientific outputs passed across source and portable CPU and OpenGL desktop and CLI. The regular packaged launcher opened and exported M17. Both CLIs repeated the 14 real solve cases. Twenty real-observation tests, Ruff and mypy passed. The preceding Phase 5 Windows baseline passed 179 tests, and the [dense ASTAP follow-up](docs/phase-36-results.md#dense-astap-catalog-verification) passed 42 targeted regressions.
 - **Version control:** The first source beta uses the annotated Git tag `v0.1.0b1`. The Phase 5A–5C, optical metadata, and desktop table and theme follow-ups are consolidated on `main` after the Phase 4 baseline at `e0a3a39`. [AstroMosaic GitHub repository](https://github.com/Batu-98/AstroMosaic)
-- **Next action:** Finish the native corresponding-source and redistribution review under Q-005 before publishing Windows binaries. Run the clean-machine launcher and export check when a fresh Windows installation is available.
-- **Open dependencies:** Q-003 tracks the frozen criteria and Q-016 extended astrometry quality. Q-005, Q-009, Q-010 and Q-020 track distribution, formats and mixed-panel work. Q-008 tracks deferred platforms and Q-011 deferred visual fill. Q-015 and Q-017 record the verified narrow-field requirements and catalog matrix.
+- **Next action:** Verify the [recorded 6E candidate](docs/phase-6.md#local-windows-lifecycle-and-package-results) on a fresh Windows installation when one is available. Continue the corresponding-source and redistribution review under Q-005. Use the [6A–6B terrain results](docs/phase-6.md#handoff-to-phase-7a) for the 7A landmark and geometry comparison.
+- **Open dependencies:** Q-003 tracks reference data and frozen criteria. Q-010 tracks real-scene diagnostics and the proposed terrain models. Q-016 tracks astrometry. Q-005, Q-009 and Q-020 track distribution and format work. Q-008 tracks deferred platforms and Q-011 deferred visual fill. Resolved Q-022 and Q-023 record the Windows lifecycle and ZEA results.
 
 ## Phase Overview
 
@@ -47,6 +47,8 @@ The table is a status summary, not a replacement for the full exit gates in Sect
 | 5A - XISF interchange | Complete | Bounded mono and RGB attachments, WCS, units, coverage and contribution masks verified through independent reopening and copied Windows workflows. |
 | 5B - ZEA sky projection | Complete | Saved projection, longitude wrap, projection domain, preview and export agreement, and copied Windows workflows passed. |
 | 5C - Per-band output | Complete | Saved membership, band-local units and channels, common geometry, independent exports, and Windows desktop, CLI and batch checks passed. |
+| 6 - Real-observation reliability | Local 6A–6E checks passed | The real references, native lifecycle, and source and portable product comparison are recorded. Fresh Windows acceptance remains open for the named 6E build. |
+| 7 - Terrain panorama registration | Planned | Show improved held-out geometry on independently captured terrain, retain negative and legacy acceptance, and verify saved model, sky independence, and Windows exports. |
 
 ## Journal Rules
 
@@ -662,6 +664,55 @@ The table is a status summary, not a replacement for the full exit gates in Sect
 - **Related:** Q-005 tracks remaining binary redistribution work. [Release guide](docs/windows-release.md) · [GitHub repository](https://github.com/Batu-98/AstroMosaic)
 - **Next:** Review native corresponding sources and redistribution terms before publishing the portable binaries. The clean-machine acceptance check remains open.
 
+### 2026-11-19 - Application tests - Prepared five merge-ready image pairs
+
+- **Changed:** Added an [agent runbook](docs/application-tests.md) and a fixture generator for real M17 tiles, narrow skewed and wide RGB skies, and synthetic and Paranal nightscapes. The local pack includes labeled panels, masks, saved projects, hashes and a contact sheet.
+- **Verified:** All pairs exceeded 10% measured support overlap. Five preflights, ten source exports, independent FITS/TIFF/XISF checks, two native CPU previews and a packaged Paranal comparison passed. Qt reported one display. All 16 focused regression tests passed, and a fresh download and rebuild reproduced the fixture hashes.
+- **Related:** Q-010 tracks independently acquired foreground frames. The Paranal case uses two adapted crops of one credited panorama.
+- **Next:** Use the runbook for desktop and portable acceptance on a fresh Windows installation when available.
+
+### 2026-11-19 - Application tests - Prepared a local wide-angle capture sequence
+
+- **Changed:** Prepared a local owner-supplied case with an accepted multi-panel sky mosaic, a quick sky pair, editable masks and a foreground diagnostic. Added an optional case entry to the local fixture index.
+- **Verified:** Both ready sky projects exceeded 10% overlap on their connecting edges and passed preflight, export, independent TIFF checks and desktop CPU preview. The desktop reproduced the foreground rejection. Original input hashes matched after the run.
+- **Related:** Q-010 tracks the disconnected foreground alignment and Q-016 tracks the horizon-row solve failures and quality rejections.
+- **Next:** Inspect shared foreground features and refine the horizon masks before retrying the excluded frames.
+
+### 2026-11-19 - Application tests - Verified the five source and portable CLI cases
+
+- **Changed:** Ran SKY-01 through MIX-02 through both CLI launchers. Recorded stdout JSON, progress, elapsed time and input fingerprints under `output/application-tests/20261119-110157-116/`.
+- **Verified:** Both launchers passed five preflights and ten exports. Independent FITS, TIFF and XISF reads matched across launchers. All 27 prepared files retained their SHA-256 hashes.
+- **Related:** Q-003 and Q-010. Full-resolution previews confirmed 17,857 and 22,579 common pixels for MIX-01 and MIX-02 respectively.
+- **Next:** Finish native renderer and visual checks and summarize the run.
+
+### 2026-11-19 - Application tests - Completed the five native desktop cases
+
+- **Changed:** Tested all five fixture pairs on native Windows with CPU and OpenGL previews. The local `output/application-tests/20261119-110157-116/test-report.md` links the timings, logs, screenshots and independent checks. [Recorded findings](docs/application-test-findings.md#what-the-tests-established)
+- **Verified:** Both renderers passed all five cases. Desktop exports matched CLI samples and masks, and display stretch left export values unchanged. The two foreground fits recovered (+454, +8) and (+510, 0) pixels. All 13 focused regressions passed with native OpenGL enabled.
+- **Related:** Q-022 tracks early automation exits. Isolated runs passed, and both renderers also opened, previewed and exported the five sky projects in one window.
+- **Next:** Use a fresh Windows installation for the clean-machine check. Second-monitor placement remains unverified on the single-display host.
+
+### 2026-11-19 - Application tests - Prepared and verified ten extended cases
+
+- **Changed:** Added a labeled pack with three separate atlas tiles, scaled FITS, polar and skewed views, wide SIP imagery, XISF validity, per-band products, and three wide nightscapes. The [extended guide](docs/application-tests-extension.md) covers overlap, expected values, and repeat runs.
+- **Verified:** All ten cases passed the source and portable CLI and native CPU and OpenGL desktop. Each entry point produced 18 exports with identical samples, coverage, contribution masks, and applicable WCS metadata. Fresh public downloads reproduced the inputs and overlap geometry. The XISF input records a new creation timestamp per build. All 26 focused existing numerical tests passed.
+- **Related:** Q-003 and Q-010. The single-window desktop run also provides evidence for Q-022. The local report is `output/application-tests/extended-20261119/test-report.md`. [Extended results](docs/application-tests-extension.md#native-desktop-pass)
+- **Next:** Use the extended fixtures during clean Windows distribution acceptance. Qt reported one display on this host.
+
+### 2026-11-19 - Application tests - Repeated the local owner sequence
+
+- **Changed:** Repeated the two ready sky projects, masked plate solves and foreground checks. Saved 60 individual test logs in the local run directory.
+- **Verified:** CLI and CPU desktop TIFFs matched exactly. Native CPU and OpenGL previews passed on one display. Gaia repeated 15 accepted solutions. ASTAP D05 found one additional TAN candidate under the standard gate, and mandatory edge validation rejected it. The foreground checks reproduced the expected disconnected-overlap diagnostic. All source hashes matched.
+- **Related:** Q-010 and Q-016. The local report is `output/application-tests/pa4-retest-20261119-1145/test-report.md`. [PA4 findings](docs/application-test-findings.md#local-evidence)
+- **Next:** Check outer-field star support and shared terrain control points before attempting another mixed mosaic.
+
+### 2026-11-19 - Application tests - Reviewed results and proposed follow-up work
+
+- **Changed:** Wrote the [application test findings](docs/application-test-findings.md) with priorities and measurable checks for foreground diagnostics, masked plate solving, wide ZEA preview performance and native window lifecycle.
+- **Verified:** Cross-checked the three run reports, relevant logs, current code and frozen criteria. Reviewed report and guide links.
+- **Related:** Q-010, Q-016 and Q-022 track existing behavior. Q-023 records the wide ZEA warning and profiling work.
+- **Next:** Collect per-pair foreground rejection details and per-region catalog measurements. Clean-machine acceptance remains open.
+
 ### 2026-11-19 - Documentation - README quick starts and project support
 
 - **Changed:** Added a Buy Me a Coffee section, moved the source quick starts ahead of the development references, and clarified supported formats and Windows release status.
@@ -682,6 +733,118 @@ The table is a status summary, not a replacement for the full exit gates in Sect
 - **Verified:** The Windows test suite passed 178 tests with the native Qt platform. The opt-in OpenGL test passed separately. The desktop title, CLI version, Poetry lock, wheel metadata, and documentation links were checked.
 - **Related:** Q-005 tracks Windows binary distribution. [GitHub pre-release](https://github.com/Batu-98/AstroMosaic/releases/tag/v0.1.0b1)
 - **Next:** Complete the redistribution review and clean Windows 11 x64 acceptance before publishing portable packages.
+
+### 2026-11-19 - Documentation - Updated the GitHub repository description
+
+- **Changed:** Updated the GitHub About description to identify AstroMosaic as Windows astrophotography mosaic software and name its supported panel formats and offline plate solving.
+- **Verified:** The full description appears in the public repository page and API response.
+- **Related:** [AstroMosaic GitHub repository](https://github.com/Batu-98/AstroMosaic)
+- **Next:** Review search visibility after the updated description is crawled.
+
+### 2026-11-19 - Application tests - Verified rejection stages and prioritized follow-up
+
+- **Changed** Reviewed the application test matrix and recorded the foreground and inverse replays in the [test findings](docs/application-test-findings.md).
+- **Verified** All 37 focused layer, ZEA, solve-quality, ASTAP catalog and solve-budget tests passed. The saved six-panel PA4 group rejected all 15 pairs at the thumbnail correlation gate. A synthetic TAN-SIP inverse reproduced the all-NaN warning for invalid input and for finite directions outside the projection domain.
+- **Related** Q-010, Q-016, Q-022 and Q-023. Clean-machine acceptance for the intended Windows release bundles remains open.
+- **Next** Add pairwise foreground diagnostic results and verify PA4 terrain correspondences. Measure D50 catalog resource rejections separately from association and edge quality.
+
+### 2026-11-19 - Phase 6 - Planned real-observation reliability and Windows acceptance
+
+- **Changed** Raised the architecture to revision 3.11 and defined [6A–6E](docs/phase-6.md) for reference preparation, terrain diagnostics, masked solving, ZEA preview and native Windows verification. Specified real observational data for every test in the phase.
+- **Verified** Reviewed planned datasets and gates against PA4, the real archive and wide-field references, and the Windows release procedure. Reviewed Markdown content and links for this planning change.
+- **Related** Q-003, Q-005, Q-010, Q-016, Q-022 and Q-023.
+- **Next** Freeze the PA4 and archive references, select the independent positive and negative mixed captures, and record the baseline before tuning.
+
+### 2026-11-19 - Mixed panels - Traced the current processing path
+
+- **Reviewed** Followed the desktop import, mask editing, sky solving, ground alignment, placement, and shared rendering entry points in source.
+- **Verified** The import job proposes a foreground tag. Defined mask labels select the sky and ground samples. Ground alignment estimates translations, and composition placement fits a similarity transform between the two layers.
+- **Related** [Mask workflow](docs/phase-3d.md#desktop-workflow), [layer workflow](docs/phase-3e.md#desktop-workflow), and Q-010.
+- **Next** Use the traced foreground and sky paths when freezing real-observation references in [Phase 6A](docs/phase-6.md#6a-freeze-the-real-data-baseline).
+
+### 2026-11-19 - Phase 7 - Researched and planned terrain panorama registration
+
+- **Changed** Added [Phase 7A–7F](docs/phase-7.md) in revision 3.12. Planned manual terrain points first, bounded automatic matching, measured camera-model selection, and shared rendering and Windows acceptance on real captures.
+- **Verified** Compared PTGui and Hugin documentation and the original panorama literature with the PA4 measurements, translation matcher, persistence and composition paths. Reviewed the phase gates and documentation links.
+- **Related** Q-003, Q-005, Q-010 and [proposed ADR-0023](docs/adr/0023-terrain-control-point-registration.md).
+- **Next** Prepare the Phase 6A–6B real terrain references, annotate verified overlaps, and compare the candidate models using the Phase 7A split.
+
+### 2026-11-19 - Phases 6 and 7 - Clarified foreground responsibilities and handoff
+
+- **Changed** Assigned the current translation baseline and PA4 diagnostics to 6A–6B. Assigned expanded control points, holdout preparation and model comparison to 7A. Documented the handoff records and the Windows build covered by each acceptance run.
+- **Verified** Reviewed the updated phase scope, acceptance gates and links against the existing translation matcher, mixed export workflow and Windows release procedure.
+- **Related** Q-003 and Q-010. [Handoff to Phase 7A](docs/phase-6.md#handoff-to-phase-7a)
+- **Next** Freeze the real translation and rejection controls and record the 6B pair evidence before the 7A model comparison.
+
+### 2026-11-19 - Phase 6A - Recorded the first real-observation baseline
+
+- **Changed** Added individual case selection to the application checker. Recorded the input and catalog hashes, projects, mask versions, exports, commands and diagnostics in `output/application-tests/phase6a-20261119-155643-651/`.
+- **Verified** Independently reopened four sky exports and one foreground export. The eight PA4 horizon replays matched earlier outcomes. Five real solve controls met their quality limits. All 23 PA4 source hashes matched, and all 15 foreground comparisons reproduced their correlation rejections. Rebuilding the ESO control reproduced its reference manifest byte for byte. Ruff and the new documentation links passed.
+- **Related** The real ESO ALPACA pair recovered (+48, +16) source px against the landmark reference (+47.98, +16.23) px. The disjoint control returned two singleton groups. Q-003, Q-010, Q-016 and Q-023. [Phase 6A measurements](docs/phase-6.md#local-baseline-measurements)
+- **Next** Complete the mixed control's sky geometry and use the saved pair results for 6B. The ALPACA sky probe produced insufficient catalog matches, so its composition remains pending.
+
+### 2026-11-19 - Phase 6A - Verified the independent mixed reference
+
+- **Changed** Calibrated the two real ALPACA crops against Gaia DR3 and saved source- and mask-bound sidecars and a visual composition placement.
+- **Verified** Held-out P95 was 0.363 and 0.410 source px. The independently reopened sky, foreground and composition FITS files passed the coverage, sample and contribution checks. The reference files and calibration evidence are in `output/application-tests/phase6b-work/`.
+- **Related** Q-003 and Q-010. [Mixed reference](docs/phase-6.md#calibrated-alpaca-mixed-reference)
+- **Next** Use the mixed project for the foreground diagnostics replay and later native Windows acceptance.
+
+### 2026-11-19 - Phase 6B - Verified foreground alignment diagnostics
+
+- **Changed** Added pairwise support, correlation and refinement outcomes to the shared alignment operation. The desktop details dialog lists the pairs and groups and opens either selected mask.
+- **Verified** All 15 PA4 scores matched the original baseline. The reduced-mask variant saved and reopened and still gave six isolated groups. The ALPACA positive, negative, support and cancellation/retry checks passed. Native CPU and OpenGL mixed previews and exports, four focused real-data regressions, Ruff and mypy passed.
+- **Related** Q-003 and Q-010. [6B results](docs/phase-6.md#local-foreground-diagnostics-results)
+- **Next** Instrument the PA4 horizon solves in 6C and use the recorded terrain results to prepare the 7A landmark review.
+
+### 2026-11-19 - Phase 6C - Measured catalog limits in the real horizon row
+
+- **Changed** Added attempt gates, effective hints and regional ASTAP read diagnostics to the source CLI and desktop details. Verified the installed CLI and complete D05 and D20 catalogs.
+- **Verified** Replayed the original three D50 failures from captured native candidates. Smaller detection-bearing cones still hit 100,000 retained stars. Identified the existing bright-subset selection and validated bounded early filtering against the full D05 reference.
+- **Related** Q-016 and [Phase 6C measurements](docs/phase-6.md#local-masked-solve-results). The regional records and commands are in `output/application-tests/phase6c/`.
+- **Next** Verify the bounded reader across all eight PA4 horizon frames and the real solve controls.
+
+### 2026-11-19 - Phase 6C - Verified bounded validation and protected PA4 admission
+
+- **Changed** Adopted bright-first filtering in wide ASTAP validation. The three previously resource-limited candidates reached association at 17.69–23.92 MiB per candidate.
+- **Verified** All eight horizon frames retained explicit rejection reasons. The six real solve controls passed and the D50 Orion sidecar drove an independently verified FITS export. The real desktop rejection details, mask identity, source hashes, cancellation, late publication and retry checks passed. Fifteen targeted real-data tests, Ruff, mypy and local documentation links passed.
+- **Related** Q-016 and [Phase 6C measurements](docs/phase-6.md#local-masked-solve-results). The ready PA4 sky mosaic retains 15 qualified panels.
+- **Next** Capture the exact real PA4 ZEA warning for 6D.
+
+### 2026-11-19 - Phase 6D - Isolated the PA4 inverse warning
+
+- **Changed** Screened the core projection before the shared iterative inverse. The reduced replay uses PA4-10 and the first 128 × 128 tile of the recorded ZEA grid.
+- **Verified** All 16,384 directions are finite in ZEA and outside PA4-10's TAN hemisphere. The baseline hit Astropy's all-NaN reduction. The corrected real tile, mixed batches, near-rim sample and singular WCS checks passed.
+- **Related** Q-023 and [6D acceptance](docs/phase-6.md#6d-reproduce-the-zea-warning-and-measure-preview-cost).
+- **Next** Compare conservative ZEA panel selection with all-panel renders and finish the native timing runs.
+
+### 2026-11-19 - Phase 6D - Verified ZEA output and adopted conservative panel selection
+
+- **Changed** Added conservative ZEA candidate bounds for ordinary ICRS TAN and TAN-SIP sources. Documented the bound and the full traversal fallback in [ADR-0024](docs/adr/0024-conservative-zea-footprints.md).
+- **Verified** The full PA4 export matched the guarded all-panel and 6A TIFF references for samples, 3,238,763 covered pixels and WCS. Profiled export time fell from 83.91 to 38.25 s. The 24 native CPU and OpenGL previews matched at both resolutions. Independent cropped, rim, FITS and XISF checks, ALPACA layer parity, PA4 hashes, 15 real-data regressions, Ruff and mypy passed.
+- **Related** Resolved Q-023. [6D evidence](docs/phase-6.md#local-zea-geometry-and-performance-results) records the cold and warm timings, inverse work, TIFF reads, candidate counts and reservations.
+- **Next** Investigate native close, reopen and cancellation in 6E, then check the intended portable build on a clean Windows 11 x64 environment.
+
+### 2026-11-19 - Phase 6E - Reproduced both Windows lifecycle failures
+
+- **Changed** Added a real-data native replay with Qt messages and window and worker lifecycle events. Release OpenGL preview resources before closing an accepted project window.
+- **Verified** Replacing a window while its real export was still cancelling reproduced `0xc0000409` on CPU and OpenGL. Qt reported a running `QThread` being destroyed. The orderly close waited for cancellation and removed the temporary export. The initial orderly OpenGL run exposed a separate texture destructor running during a later worker's Python garbage collection.
+- **Related** Q-022 and [6E requirements](docs/phase-6.md#6e-verify-native-lifecycle-and-windows-packages). Initial traces are in `output/application-tests/phase6e/`.
+- **Next** Rerun the native transitions with the OpenGL cleanup and verify packages built from the updated source.
+
+### 2026-11-19 - Phase 6E - Verified the local Windows candidate
+
+- **Changed** Built and inventoried the desktop and CLI packages from the same source snapshot. Recorded their ZIP and executable hashes and resolved Q-022.
+- **Verified** Eight normal native lifecycle sequences passed with clean cancellation and same-name retry. The nine real products matched on all six source and portable entry points. The regular packaged launcher exported the M17 TIFF and exited normally. CLI solve admission, desktop M13 and PA4-07 checks, the frozen input hashes, 20 real-observation tests, Ruff and mypy passed.
+- **Related** [6E evidence](docs/phase-6.md#local-windows-lifecycle-and-package-results), Q-022 and Q-005. Candidate files are in `.tooling/phase6e-20261119/artifacts/`.
+- **Next** Record fresh Windows 11 x64 acceptance for the exact candidate and finish the redistribution review. The development host has Windows Sandbox and Hyper-V disabled.
+
+### 2026-11-19 - Phase 6 - Prepared the source checkpoint
+
+- **Changed** Collected the Phase 6 implementation, real-observation tests and updated architecture and test guides for `main`.
+- **Verified** Matched all changed Python files to the verified 6E snapshot. Ruff, mypy and the repository link checks passed.
+- **Related** [6E evidence](docs/phase-6.md#local-windows-lifecycle-and-package-results) and Q-005.
+- **Next** Run fresh Windows acceptance for the recorded 6E archives.
 
 ## Entry Template
 

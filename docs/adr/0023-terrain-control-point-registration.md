@@ -1,0 +1,18 @@
+# ADR-0023 - Fit foreground geometry from terrain control points
+
+- **Date** 2026-11-19
+- **Status** Proposed for Phase 7.
+
+## Context
+
+The Phase 3E matcher fits masked X/Y translations on a common pixel scale and orientation. The six-panel PA4 ground replay rejected all 15 pairs at the thumbnail correlation gate. An independently marked overlap is needed to distinguish weak common terrain from geometry that a translation cannot represent. [Current foreground design](0015-independent-layer-rendering.md) · [PA4 measurements](../application-test-findings.md#foreground-alignment-and-mask-feedback)
+
+## Proposed Decision
+
+Use source-pixel control points on valid terrain and fit an anchored graph with robust reprojection residuals. Accept manually marked points through the same fit used for automatic matches. Compare translation and similarity first. Use a lens-aware camera-rotation model for real near-fixed-viewpoint sequences where calibrated optics and held-out measurements support it. Diagnose depth-dependent errors and restrict any planar experiment to a verified planar region.
+
+Keep foreground geometry in the shared CPU processing core. Compose the selected transform with layer placement during tiled sampling from the original source. Use the existing independent celestial WCS branch for sky work. Retain compatibility with saved translation transforms and record the model, originating inputs and fit evidence for new ones.
+
+## Consequences
+
+The plan adds a point review workflow, bounded automatic matching, transform-aware tile bounds, and a compatibility check for saved foreground geometry. New models and dependencies require measured accuracy, memory and Windows packaging evidence. Acceptance uses independently captured real data and preserves explicit rejection of unsupported overlaps. [Detailed Phase 7 plan](../phase-7.md)

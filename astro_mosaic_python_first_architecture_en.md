@@ -4,8 +4,8 @@
 
 # AstroMosaic v1: Python-First Architecture and Implementation Plan
 
-- **Revision:** 3.10
-- **Date:** November 17, 2026
+- **Revision:** 3.12
+- **Date:** November 19, 2026
 - **Status:** Proposed implementation baseline following local source inspection
 - **Initial target:** Windows 11 x64
 - **Deferred platform support:** Linux and macOS may be added later. See [ADR-0003](docs/adr/0003-windows-first-platform-scope.md).
@@ -290,6 +290,8 @@ Derive sky and foreground masks from the same segmentation and apply manual corr
 - **Sky:** Use the existing celestial WCS and offline solver chain, then apply sky-only registration, photometric matching, reprojection, and blending. A sky-only panel contributes directly to this branch.
 - **Foreground:** Use image-space registration based on matching overlapping terrestrial features. Use the foreground mask when estimating transforms and blending. This branch uses no plate solve and can still use a panel whose sky solution failed. Report weak or disconnected overlaps so they can be corrected before final rendering.
 
+The Phase 3E foreground baseline fits translations. [Phase 7](docs/phase-7.md) compares masked terrain control-point fits with that baseline, starting with manual correspondences and similarity geometry. Adopt camera rotation or shared lens terms where real held-out observations support the added parameters. [Proposed foreground geometry decision](docs/adr/0023-terrain-control-point-registration.md)
+
 Keep the coordinate transforms and fit diagnostics for each branch. Reuse the headless tile scheduler, validity-aware sampling, and blend primitives wherever their contracts apply. Keep separate stitched layers and coverage masks for preview and export.
 
 #### Final composition
@@ -364,6 +366,8 @@ Record selected backend, fallback reason, dtype conversions, failed coordinate c
 | 3.6: Plate solve reliability | ASTAP priority and automatic catalogs, common match/RMS evidence, bad-scale recovery, supported SIP/edge validation and a total solve budget | Pass the [Phase 3.6A–3.6F gates](#phase-36-plate-solve-reliability), including ASTAP-only quality evidence and Windows CLI/desktop migration. |
 | 4: Automation, large mosaics, and desktop terminal | Scriptable project commands, budgeted large renders and improved blends, and a desktop command panel | Meet the [Phase 4A–4C gates](#102-phase-4-delivery-stages). |
 | 5: Extended formats and channels | Optional XISF, projections, and per-band outputs | Format, geometry, mask, unit, packaging, and channel-consistency checks pass for each added workflow. |
+| 6: Real-observation reliability and Windows acceptance | Real-data baseline, foreground and plate-solve diagnostics, ZEA preview reliability, and native Windows lifecycle | Pass the [Phase 6A–6E gates](#104-phase-6-delivery-stages) using exclusively real observational data, with independently reopened exports and clean Windows 11 x64 evidence for the intended build. |
+| 7: Terrain panorama registration | Ground control points, an anchored robust fit, and a verified camera model for real wide-angle captures | Pass the [Phase 7A–7F gates](#105-phase-7-delivery-stages). Demonstrate improvement on previously unsupported real terrain and retain the legacy, negative and sky regression checks. |
 
 Memory and portability contracts begin in Phase 0; Phase 4 scales and verifies them. Do not postpone their architectural design until after the GUI or blend engine is complete.
 
@@ -460,15 +464,42 @@ Start with [Phase 5A XISF interchange](docs/phase-5a.md). Use the shared panel a
 
 [Phase 5C](docs/phase-5c.md) renders one filter band's sky panels on the saved grid. Resolve explicit panel assignments and embedded labels, validate band-local units and layout, and retain independent coverage and WCS in each output. Verify desktop selection, Qt-free automation, batch cancellation, and independent reopening of the mono and RGB products.
 
+### 10.4 Phase 6 Delivery Stages
+
+Follow the [detailed Phase 6 plan](docs/phase-6.md) after Phase 5. Start with the frozen real-data baseline and add diagnostics to the current terrain aligner. Open Phase 7A from the [6A–6B foreground evidence](docs/phase-6.md#handoff-to-phase-7a) while masked solving, ZEA and native Windows checks proceed on their own references. The [application test findings](docs/application-test-findings.md) provide the starting measurements.
+
+| Stage | Deliverable | Acceptance evidence |
+| --- | --- | --- |
+| 6A | Real-observation reference inventory and baseline | Record reproducible inputs, provenance, masks, WCS, expected outcomes, and dataset-specific tolerances. Establish current behavior on PA4, archive sky fields, and independently captured positive and negative terrain cases. |
+| 6B | Foreground diagnostics and mask feedback | Report the measured stage for all 15 PA4 pairs. Verify the existing translation against the real positive control and verify expected negative outcomes. Record the references, mask variants, and pair diagnostics for 7A. |
+| 6C | Masked wide-field plate-solve recovery | Identify catalog resource, association, and edge-support outcomes within existing budgets. Repeat PA4 and the M13/M42 controls. Require strict-edge evidence for new frames admitted to the PA4 mosaic. |
+| 6D | Wide ZEA inverse and preview performance | Replay the warning from a real observation, preserve independently checked samples and coverage, and measure coordinate mapping, source reads, and viewport cost on the fixed PA4 grid. |
+| 6E | Native lifecycle and Windows package acceptance | Verify close, cancellation, cleanup, and retry on CPU and OpenGL. Compare real-data exports across Phase 6 source and portable launchers and verify the intended bundles on a clean Windows 11 x64 installation. |
+
+### 10.5 Phase 7 Delivery Stages
+
+Start 7A when the Phase 6A terrain references and 6B diagnostic checks are ready. The [detailed Phase 7 plan](docs/phase-7.md) uses those results to compare models, define measured quality limits, and verify source sampling, persistence and Windows delivery. [ADR-0023](docs/adr/0023-terrain-control-point-registration.md) records the proposal.
+
+| Stage | Deliverable | Acceptance evidence |
+| --- | --- | --- |
+| 7A | Real terrain references and PA4 diagnosis | Freeze independent point annotations, overlap, expected rejections, and held-out tolerances. Compare candidate geometry on the same points. |
+| 7B | Manual control points and anchored fit | Fit verified terrain with translation or similarity and report point residuals and disconnected groups. Reproduce the accepted transform from recorded inputs. |
+| 7C | Automatic ground feature matching | Verify spatially distributed local matches within a measured CPU budget. Exercise manual recovery and rejection of misleading overlap on real controls. |
+| 7D | Evidence-led camera and lens model | Compare rotation with the simpler models, verify near/far support and graph drift, and adopt added parameters only with repeatable held-out improvement. |
+| 7E | Shared rendering and compatible persistence | Compose transforms in the tile sampler, check independent sky and ground coverage, and reopen both new and earlier saved geometry. |
+| 7F | Point review and Windows delivery | Verify manual editing, preview, cancellation and independent exports across native Windows source and portable launchers on the real reference set. |
+
 ## 11. Validation and Acceptance Criteria
 
-Use synthetic data with known geometry, gains, gradients, and faint structures, plus representative real data. Include sparse/dense stars, saturation, low signal-to-noise, narrow overlaps, disconnected groups, strong distortion, negative/zero pixels, scaled FITS, holes in coverage, and oversized outputs.
+**Phase 6 and 7 test data requirement.** Use real observational data exclusively for reproductions, automated and manual regressions, benchmarks, and acceptance in both phases. Establish truth from catalog matches, independently measured corresponding points, archive reference products, and independent sample and WCS checks. Keep source lineage for any calibrated or cropped copy. [Phase 6 data and provenance](docs/phase-6.md#test-data-requirement) · [Phase 7 real-data measurements](docs/phase-7.md#real-data-and-acceptance-measurements)
+
+Phases 0–5 used synthetic data with known geometry, gains, gradients, and faint structures alongside representative real data. Select cases for the applicable workflow from sparse and dense star fields, saturation, low signal-to-noise, narrow or disconnected overlaps, strong distortion, negative and zero pixels, scaled FITS, holes in coverage, and oversized outputs.
 
 | Area | Required evidence |
 | --- | --- |
 | Registration | Held-out median/RMS/95th-percentile residuals in output pixels; catalog error reported separately. |
 | Photometry | Stellar aperture-flux bias, centroid/FWHM/ellipticity changes, and ringing near bright sources. |
-| Extended signal | Recovery of injected nebulosity and comparison with known synthetic background corrections. |
+| Extended signal | Earlier phases measured recovery of injected nebulosity and known background changes. Use independent measurements of observed extended structures for Phase 6 and 7 checks that affect this behavior. |
 | Geometry | Round trips, SIP/no-SIP transitions, longitude wrap, singularities, crop/rotation, and independent WCS export checks. |
 | Masks | Legitimate zero and negative values retained; missing data excluded; no fill bleeding through filters or pyramids. |
 | Mixed panels | Review detection errors on dark or low-contrast horizons. Verify manual corrections survive reload, terrestrial features stay out of sky fits, stars stay out of ground fits, and ground stitching succeeds with absent WCS. Test weak or missing reference alignment, reversible sky crop, and compositing with partial or zero common coverage. |
@@ -476,7 +507,7 @@ Use synthetic data with known geometry, gains, gradients, and faint structures, 
 | Tiling | Agreement with an untiled small reference, including tile origins, halos, and pyramid boundaries. |
 | UI/packaging | GUI responsiveness, cancellation, cold start, native imports, worker spawning, no-GPU operation, and clean-machine export. |
 
-Freeze dataset-specific numerical tolerances before tuning. Candidate starting thresholds for an appropriate well-sampled synthetic case are a held-out 95th-percentile alignment error below 0.5 output pixels and isolated-star aperture-flux bias below 1%. These are proposed evaluation thresholds, not verified capabilities or universal requirements.
+Freeze dataset-specific numerical tolerances before tuning. The earlier well-sampled synthetic cases had proposed starting targets of a held-out 95th-percentile alignment error below 0.5 output pixels and isolated-star aperture-flux bias below 1%. For phases 6 and 7, use the frozen Phase 3.6 limits for matching real astrometry cases and establish any new tolerances from independent real-data measurements.
 
 Performance targets must name hardware, data dimensions, filters/channels, panel count, and cold/warm cache state. Do not import benchmark numbers from source comments as promises for AstroMosaic.
 

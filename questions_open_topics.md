@@ -17,19 +17,19 @@ This register tracks unresolved decisions, problems, and risks. It is not a work
 ### Q-003 - Reference datasets and frozen acceptance thresholds
 
 - **Status / priority:** Investigating / P1
-- **Opened / updated:** 2026-11-15 / 2026-11-17
-- **Affected phase:** Phase 0 fixture design and the numerical gates in phases 1, 2, 3.5, 3.6, and 4.
+- **Opened / updated:** 2026-11-15 / 2026-11-19
+- **Affected phase:** Phase 0 fixture design and the numerical gates in phases 1, 2, 3.5, 3.6, 4, 6 and 7.
 - **Impact and evidence:** The [Phase 1 fixtures](docs/phase-1.md) verify independent FITS export truth. [Phase 2](docs/phase-2.md#acceptance-fixtures) fixes and verifies held-out alignment, stellar flux and profile, injected extended signal, masks, and weak or disconnected inputs. [Phase 3A fixtures](docs/phase-3a.md#acceptance-fixtures) fix sample, channel, coverage, and WCS tolerances for linear TIFF. [Phase 3C](docs/phase-3c.md#windows-verification) confirms preview and export agreement at coincident sample positions. [Phase 3.5A](docs/phase-35.md#frozen-supplementary-fixtures) reran the baseline and froze cases for narrow support, saturation, and explicit DSS crops. The [sidecar check](docs/phase-35.md#masked-wcs-sidecar-reuse) uses the existing bilinear and WCS bounds.
-- **Current assumption:** Generate small deterministic same-filter FITS fixtures for development. Store provenance for external data with the validation procedure.
-- **Next action / responsibility:** Use the [frozen 3.6A manifest](tests/fixtures/plate_solve_v36.json) for match/RMS, bad-hint, SIP/edge and time tests before tuning B–F, preserving Phase 3.5 envelopes. Then freeze large-mosaic, RGB photometry and mixed-scene tolerances for Phase 4. [3.5 verification results](docs/phase-35.md#phase-35c-windows-verification)
-- **Closure condition:** Freeze dataset-specific tolerances before algorithm tuning, including alignment, stellar profiles/flux, injected faint emission, and tiled/reference agreement. Link the fixture manifest and test results.
+- **Current assumption:** Phases 6 and 7 use real observations with recorded provenance and independent measurements. The [3.6A manifest](tests/fixtures/plate_solve_v36.json) identifies the established catalog-quality and timing contracts.
+- **Next action / responsibility:** Carry the frozen PA4, 2MASS, solve and ALPACA controls into 6E. Use the 6A–6B terrain evidence to extend landmark annotations and freeze the model comparison and held-out cases in 7A. [Phase 6A measurements](docs/phase-6.md#local-baseline-measurements) · [Calibrated ALPACA control](docs/phase-6.md#calibrated-alpaca-mixed-reference) · [Phase 7A](docs/phase-7.md#7a-freeze-the-reference-and-diagnose-pa4)
+- **Closure condition:** Record dataset-specific tolerances and reference results before algorithm tuning. Include the applicable Phase 4 large-mosaic, RGB photometry and mixed-scene measurements. Link the Phase 6 and 7 reference inventories and independent measurements of the real cases.
 
 ### Q-005 - Application licensing and distribution model
 
 - **Status / priority:** Investigating / P1
 - **Opened / updated:** 2026-11-15 / 2026-11-19
 - **Affected phase:** Public source publication and Windows binary distribution.
-- **Impact and evidence:** AstroMosaic source uses `GPL-3.0-only`. The portable builder now collects wheel notices, the CPython runtime license, upstream supplements for selected dependencies and an inventory of bundled native files. The release guide records upstream catalog distribution and attribution. [License decision](docs/adr/0009-gpl-v3-application-license.md) · [Windows release preparation](docs/windows-release.md)
+- **Impact and evidence:** AstroMosaic source uses `GPL-3.0-only`. The portable builder collects wheel notices, the CPython runtime license, upstream supplements for selected dependencies and the native file inventory. The local 6E candidate recorded 223 desktop and 178 CLI native files and the exact source and binary archive hashes. [License decision](docs/adr/0009-gpl-v3-application-license.md) · [Windows release preparation](docs/windows-release.md) · [6E candidate evidence](docs/phase-6.md#local-windows-lifecycle-and-package-results)
 - **Current assumption:** Publish the source on GitHub. Keep portable ZIP builds local until the remaining binary distribution review passes. Obtain external ASTAP binaries, solver catalogs and archive FITS references from upstream.
 - **Next action / responsibility:** Match the binary inventory to the exact native corresponding sources and confirm Microsoft runtime redistribution terms before publishing Windows downloads. The clean-machine check remains a separate acceptance step.
 - **Closure condition:** Record the applicable notices, matching source and redistribution terms for publicly distributed artifacts. Keep separately obtained data subject to its upstream terms.
@@ -57,12 +57,12 @@ This register tracks unresolved decisions, problems, and risks. It is not a work
 ### Q-010 - Foreground recognition, masks, and composition
 
 - **Status / priority:** Investigating / P1
-- **Opened / updated:** 2026-11-15 / 2026-11-18
-- **Affected phase:** Phase 2 masked sky processing, Phase 3D mask editing, Phase 3E foreground alignment and composition, Phase 3F packaged acceptance, and Phase 4 resource validation.
+- **Opened / updated:** 2026-11-15 / 2026-11-19
+- **Affected phase:** Phase 2 masked sky processing, Phase 3D mask editing, Phase 3E foreground alignment and composition, Phase 3F packaged acceptance, Phase 4 resource validation, Phase 6B real-scene validation, and Phase 7 panorama registration.
 - **Impact and evidence:** [Phase 3D](docs/phase-3d.md#windows-verification) verifies local suggestions, manual overrides and masks, and exclusion of foreground from sky fitting. [Phase 3E](docs/phase-3e.md#windows-verification) verifies WCS-free alignment and exports, shared-reference placement, saved edits, and seams with partial and zero common coverage. [Phase 4A](docs/phase-4a.md#local-windows-results) reproduced all three desktop layers from a saved mixed project in the portable CLI. Small, rotated, and ambiguous terrain still needs manual review.
 - **Current assumption:** Use the saved three-label mask for same-size, same-scale foreground translations. Use similarity placement between layers and restrict seam blending to valid common coverage.
-- **Next action / responsibility:** The [12-panel mixed comparison](docs/phase-4b.md#footprint-selection-results) matched the baseline under the saved limits and known fixture translations. Use real terrestrial captures to measure how often the detector and translation model need manual correction or a broader registration model.
-- **Closure condition:** Verify the Phase 2 and 3 mixed-panel gates, including separate layer exports and saved edits, then run the Phase 4 mixed workload within measured memory and worker limits.
+- **Next action / responsibility:** Review shared terrain landmarks in the PA4 pairs during 7A. The 6B details reproduced the 15 original rejections and the six singleton groups in a reduced-mask variant. The independent ESO translation and disconnection checks and mixed exports passed. Identify any omitted terrain, degree of depth-dependent motion and model support before selecting a more flexible fit. [Phase 6B results](docs/phase-6.md#local-foreground-diagnostics-results) · [Phase 6B handoff](docs/phase-6.md#handoff-to-phase-7a) · [Phase 7 design and acceptance](docs/phase-7.md)
+- **Closure condition:** Verify separate layer exports, saved edits and measured resource limits. Pass the Phase 6B diagnostics and the Phase 7 positive, held-out, negative and legacy checks on real captures. Account for the PA4 pair outcomes and document unsupported geometry.
 
 ### Q-011 - Optional generative fill for a visual seam
 
@@ -77,11 +77,11 @@ This register tracks unresolved decisions, problems, and risks. It is not a work
 ### Q-016 - Plate solve quality, incorrect-scale recovery and distortion
 
 - **Status / priority:** Investigating / P1
-- **Opened / updated:** 2026-11-17 / 2026-11-18
-- **Affected phase:** Phase 3.6A quality/fixture freeze, 3.6D bad-scale recovery, 3.6E SIP/edge validation and 3.6F acceptance.
+- **Opened / updated:** 2026-11-17 / 2026-11-19
+- **Affected phase:** Phase 3.6A quality/fixture freeze, 3.6D bad-scale recovery, 3.6E SIP/edge validation, 3.6F acceptance, and 6C masked solve recovery.
 - **Impact and evidence:** The [Mosaic Master comparison](docs/plate-solve-comparison.md) verified that the Seiza wrapper retains a supplied scale within 0.8–1.2 on blind retry and does not request SIP (`sip_order=0` in installed Seiza 0.48.2). The earlier ASTAP wrapper retained the supplied vertical FOV on blind retry. Geometry checks alone leave catalog accuracy at the edges unmeasured. Q-015 records the measured 40′ M42 blind limit.
 - **Current assumption:** The source uses the common 15-match and RMS gate, Gaia's confidence check, unrestricted Gaia 0.1–120 arcsec/pixel recovery and a spatial holdout for application SIP promotion. The rerun of the original D05 and Gaia cases met their archive envelopes. ASTAP-only local FOV recovery retains pointing when both hints were supplied. [Measurements](docs/phase-36-results.md)
-- **Next action / responsibility:** Broaden measured coverage with additional sparse fields. Review the D80 Orion candidate's 1.02 px held-out whole-field P95 and the D20 M13 archive comparison of 0.452″ against the 0.451″ reference envelope. Keep the frozen quality thresholds and assess whether Automatic can improve its recovery choice within the two-search limit. [Dense catalog results](docs/phase-36-results.md#dense-astap-catalog-verification)
+- **Next action / responsibility:** The 6C D50 replay moved all three resource-limited candidates to association at 17.69–23.92 MiB. The shifted-control, held-out and edge-support failures still exclude those frames. Reuse those diagnostics when stronger PA4 sky support is available. Review the D80 Orion candidate's 1.02 px held-out whole-field P95 and the D20 M13 archive comparison of 0.452″ against the 0.451″ reference envelope. Assess Automatic recovery and additional real sparse fields within the existing budgets. [Phase 6C measurements](docs/phase-6.md#local-masked-solve-results) · [Dense catalog results](docs/phase-36-results.md#dense-astap-catalog-verification)
 - **Closure condition:** The implemented match/RMS boundaries, bad-hint recovery, supported SIP/edge cases, legacy reuse and Windows source/portable regressions meet the frozen 3.6 gates with independently recorded errors. Planning alone does not resolve this topic.
 
 ### Q-020 - Additional XISF variants
@@ -242,6 +242,28 @@ This register tracks unresolved decisions, problems, and risks. It is not a work
 - **Next action / responsibility:** Carry the fixture into future geometry changes and verify the domain of each added projection.
 - **Closure condition:** The rim and exterior are uncovered, the valid crop reopens with its WCS, and an entirely invalid crop leaves the destination free.
 - **Resolution:** 2026-11-18. The polar fixture passed with serialized WCS and a shifted panel. The rim-centered crop reopened with 12 valid positions. The fully outside crop removed its temporary output. [Windows results](docs/phase-5b.md#local-windows-results)
+
+### Q-022 - Native desktop test automation process exits
+
+- **Status / priority:** Resolved / P2
+- **Opened / updated:** 2026-11-19 / 2026-11-19
+- **Affected phase:** Local Windows desktop application test automation and Phase 6E native acceptance.
+- **Impact and evidence:** An earlier multi-window run timed out and exited with `0xc0000409` on both renderers. The reduced real M17 and ALPACA replay reproduced the exit when it dropped the old window during deferred cancellation. Qt reported destruction of a running `QThread`. The initial local report is `output/application-tests/20261119-110157-116/test-report.md`. [Recorded lifecycle findings](docs/application-test-findings.md#native-desktop-lifecycle-and-release-acceptance)
+- **Current assumption:** Retain the window through accepted close and worker teardown. Release OpenGL preview resources on the UI thread while their context is usable.
+- **Next action / responsibility:** Retain the real replay and repeat the lifecycle checks on the clean-machine candidate selected for release.
+- **Closure condition:** Identify the cause of the process exits and record a repeatable native run of the affected window transition on both renderers.
+- **Resolution:** 2026-11-19. Eight orderly source and frozen desktop sequences passed across CPU and OpenGL. They verified idle reopen, close during preview and export, temporary-file cleanup and same-destination retry. The normal OpenGL teardown warning was traced to deferred texture destruction and fixed. [6E lifecycle evidence](docs/phase-6.md#local-windows-lifecycle-and-package-results)
+
+### Q-023 - Wide ZEA preview coordinate warnings and runtime
+
+- **Status / priority:** Resolved / P2
+- **Opened / updated:** 2026-11-19 / 2026-11-19
+- **Affected phase:** Shared sky coordinate mapping and Windows preview performance in phases 3C, 4B, 5B and 6D.
+- **Impact and evidence:** Both desktop backends and the 6A source CLI emitted the Astropy all-NaN-slice warning on the PA4 ZEA mosaic. The PA4-10 replay located 16,384 finite sky directions outside the panel's TAN projection in the first 128 × 128 tile. [Original findings](docs/application-test-findings.md#wide-zea-diagnostics-and-preview-performance) · [6D replay](docs/phase-6.md#local-zea-geometry-and-performance-results)
+- **Current assumption:** Send only finite core inverse seeds to the distortion solver. Use all-panel mapping wherever a conservative ZEA footprint is unavailable.
+- **Next action / responsibility:** Retain the real PA4 replay and timing baseline for future geometry and scheduler changes. Carry the qualified outputs into 6E.
+- **Closure condition:** Explain or handle the warning's confirmed cause, retain geometry and coverage checks, and record a repeatable timing comparison on a fixed project.
+- **Resolution:** 2026-11-19. The real replay, native previews and full source export no longer emit the warning. The 6A reference and both guarded full ZEA paths match for samples, coverage and WCS. Candidate selection reduced the full-render mapping count from 4,335 to 1,086. TIFF reads account for the largest remaining preview cost. [6D measurements](docs/phase-6.md#local-zea-geometry-and-performance-results) · [ADR-0024](docs/adr/0024-conservative-zea-footprints.md)
 
 ## New Entry Template
 

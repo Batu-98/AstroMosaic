@@ -43,6 +43,7 @@ from astromosaic.io.atomic import atomic_binary_file
 from astromosaic.io.fits import optional_header_text
 from astromosaic.pipeline.foreground import (
     ForegroundAlignment,
+    ForegroundPairDiagnostic,
     GroundOverlap,
     GroundPanel,
     align_foreground,
@@ -533,7 +534,13 @@ def _open_ground_source(
     return source
 
 
-def align_project_foreground(project: MosaicProject, context: JobContext) -> MosaicProject:
+def align_project_foreground(
+    project: MosaicProject,
+    context: JobContext,
+    *,
+    on_pair: Callable[[ForegroundPairDiagnostic], None] | None = None,
+) -> MosaicProject:
+    """Align the masked ground sources and optionally report each completed pair."""
     inputs = project.foreground_inputs()
     with ExitStack() as stack:
         candidates = []
@@ -542,7 +549,9 @@ def align_project_foreground(project: MosaicProject, context: JobContext) -> Mos
             assert bounds is not None
             source = _open_ground_source(project, index, mask, context, stack)
             candidates.append((index, source, bounds))
-        aligned = align_foreground(candidates, project.render.max_working_bytes, context)
+        aligned = align_foreground(
+            candidates, project.render.max_working_bytes, context, on_pair=on_pair
+        )
     keep_placement = project.foreground is not None and project.foreground.alignment == aligned
     return replace(
         project,

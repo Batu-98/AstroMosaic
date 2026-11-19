@@ -255,9 +255,8 @@ def validate_models(
     training, held = _spatial_split(xy, size)
     outer = outer_stars(xy, size)
     outer_held = held[outer[held]]
-    outer_support = (
-        len(outer_held) >= _OUTER_MIN and len(np.unique(cells(xy[outer_held], size, 3))) >= 3
-    )
+    outer_sectors = len(np.unique(cells(xy[outer_held], size, 3)))
+    outer_support = len(outer_held) >= _OUTER_MIN and outer_sectors >= 3
     spatial_support = (
         len(np.unique(cells(xy[training], size, 3))) >= 6
         and len(np.unique(cells(xy[training], size, 2))) == 4
@@ -339,7 +338,21 @@ def validate_models(
     scales = selected.field["center_scale_arcsec_px"]
     assert isinstance(scales, list) and len(scales) == 2
     angular, pixels = selected.angular, selected.pixels
-    limit = require_quality(len(xy), rms(angular), (scales[0], scales[1]))
+    angular_rms = rms(angular)
+    limit = require_quality(len(xy), angular_rms, (scales[0], scales[1]))
+    held_out_evidence = {
+        "held_out_matches": len(held),
+        "held_out_p95_source_px": selected.hold_p95,
+        "held_out_outer_matches": len(outer_held),
+        "held_out_outer_sectors": outer_sectors,
+        "held_out_outer_p95_source_px": selected.outer_p95,
+    }
+    rejection_evidence = {
+        **held_out_evidence,
+        "unique_matches": len(xy),
+        "rms_arcsec": angular_rms,
+        "rms_limit_arcsec": limit,
+    }
     edge_status = "insufficient"
     if selected.outer_p95 is not None and selected.hold_p95 is not None:
         edge_status = "supported-pass"
@@ -347,14 +360,15 @@ def validate_models(
             raise QualityRejected(
                 f"The held-out P95 is {selected.hold_p95:.3g} px overall and "
                 f"{selected.outer_p95:.3g} px at the edges. The limits are 1 and 1.5 px.",
-                {
-                    "edge_status": "supported-fail",
-                    "held_out_p95_source_px": selected.hold_p95,
-                    "held_out_outer_p95_source_px": selected.outer_p95,
-                },
+                {**rejection_evidence, "edge_status": "supported-fail"},
+                gate="held-out",
             )
     if strict_edges and edge_status != "supported-pass":
-        raise QualityRejected("Too few catalog stars support strict field-edge validation.")
+        raise QualityRejected(
+            "Too few catalog stars support strict field-edge validation.",
+            {**rejection_evidence, "edge_status": edge_status},
+            gate="edge-support",
+        )
     context.check_cancelled()
     return selected.geometry, {
         "grade": "catalog-validated",
@@ -363,7 +377,7 @@ def validate_models(
         "unique_matches": len(xy),
         "chance_control_matches": pairs.chance_matches,
         "catalog_candidates": pairs.catalog_candidates,
-        "rms_arcsec": rms(angular),
+        "rms_arcsec": angular_rms,
         "rms_limit_arcsec": limit,
         "p95_arcsec": p95(angular),
         "max_arcsec": float(angular.max()),
@@ -371,10 +385,7 @@ def validate_models(
         "p95_source_px": p95(pixels),
         "max_source_px": float(pixels.max()),
         "training_matches": len(training),
-        "held_out_matches": len(held),
-        "held_out_p95_source_px": selected.hold_p95,
-        "held_out_outer_matches": len(outer_held),
-        "held_out_outer_p95_source_px": selected.outer_p95,
+        **held_out_evidence,
         "edge_status": edge_status,
         "models": models,
         "field_geometry": selected.field,

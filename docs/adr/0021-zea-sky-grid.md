@@ -15,4 +15,4 @@ Store the explicit ZEA choice in project manifest version 5 so an older reader f
 
 ## Consequences
 
-Sky FITS, TIFF and XISF carry the selected FITS WCS projection. Composition contributions and geometric support remain independently testable. Wide ZEA jobs may traverse more panel candidates per tile because their projected edges are curved. A future optimization needs a conservative bound with measured benefit.
+Sky FITS, TIFF and XISF carry the selected FITS WCS projection. Composition contributions and geometric support remain independently testable. [ADR-0024](0024-conservative-zea-footprints.md) records the later conservative bound for curved ZEA panel footprints.
