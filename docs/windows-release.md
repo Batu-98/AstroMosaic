@@ -1,6 +1,6 @@
 # AstroMosaic 0.1.0 release preparation
 
-AstroMosaic is a GPL-3.0-only application for calibrated, integrated astronomical panels. The initial source release targets Windows 11 x64. Desktop and CLI workflows cover linear FITS, TIFF and uncompressed XISF, offline plate solving, TAN and ZEA sky grids, and per-band sky exports. The desktop also supports separate foreground and sky layers and visual composition. [Application license](../LICENSE) · [Desktop and CLI quick start](../README.md)
+AstroMosaic is a GPL-3.0-only application for calibrated, integrated astronomical panels. The initial source release targets Windows 11 x64. Desktop and CLI workflows cover linear FITS, TIFF and uncompressed XISF, offline plate solving, TAN and ZEA sky grids, and per-band sky exports. The desktop also supports separate foreground and sky layers and visual composition. [Application license](../LICENSE) · [Desktop and CLI quick start](guide.md#quick-start)
 
 ## Build portable Windows packages
 

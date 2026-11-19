@@ -669,6 +669,13 @@ The table is a status summary, not a replacement for the full exit gates in Sect
 - **Related:** Q-005 tracks Windows distribution.
 - **Next:** Continue the Windows redistribution review and clean-machine validation.
 
+### 2026-11-19 - Documentation - Simplified the repository README
+
+- **Changed:** Moved setup, command examples, and technical references to the [AstroMosaic guide](docs/guide.md). Put project support and licensing directly below the README introduction and updated the Windows release guide link.
+- **Verified:** All five command examples were preserved. The revised Markdown links and headings resolved, the support URL returned HTTP 200, and `poetry check --lock` passed.
+- **Related:** Q-005 tracks Windows distribution.
+- **Next:** Continue the Windows redistribution review and clean-machine validation.
+
 ## Entry Template
 
 Copy this format into a new entry immediately above this template, preserving chronological order:
