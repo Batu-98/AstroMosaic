@@ -10,7 +10,7 @@ poetry sync --only main,build -E desktop -E gaia
 .\packaging\build-windows.ps1 -DesktopCheck
 ```
 
-The desktop launcher is `dist/windows/AstroMosaic/AstroMosaic.exe`. The console launcher is `dist/windows/astromosaic-cli/astromosaic-cli.exe`. Keep each executable with its `_internal` directory. The acceptance executable in `build/windows/checks` is a development artifact. The build includes the application license. Release notices and catalog redistribution terms are tracked in Q-005. [Build script](../packaging/build-windows.ps1) · [Topic register](../questions_open_topics.md#q-005---application-licensing-and-distribution-model)
+The desktop launcher is `dist/windows/AstroMosaic/AstroMosaic.exe`. The console launcher is `dist/windows/astromosaic-cli/astromosaic-cli.exe`. Keep each executable with its `_internal` directory. The acceptance executable in `build/windows/checks` is a development artifact. The portable builds include the application license and a generated third-party notice inventory. [Build script](../packaging/build-windows.ps1) · [Windows release preparation](windows-release.md)
 
 ## Background Checks
 

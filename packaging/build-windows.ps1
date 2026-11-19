@@ -54,7 +54,10 @@ try {
         --exclude-module PySide6 --exclude-module shiboken6 src/astromosaic/__main__.py
     if ($LASTEXITCODE -ne 0) { throw 'The CLI bundle failed to build.' }
     foreach ($bundle in @('AstroMosaic', 'astromosaic-cli')) {
-        Copy-Item -LiteralPath LICENSE -Destination (Join-Path $distPath "$bundle/LICENSE")
+        $bundlePath = Join-Path $distPath $bundle
+        Copy-Item -LiteralPath LICENSE -Destination (Join-Path $bundlePath 'LICENSE')
+        & $Python packaging/write-windows-notices.py $bundlePath
+        if ($LASTEXITCODE -ne 0) { throw "Could not collect notices for $bundle." }
     }
 } finally {
     $env:Path = $previousPath

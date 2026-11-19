@@ -1,8 +1,8 @@
-# AstroMosaic v1
+# AstroMosaic
 
-A Windows-first desktop application in development for assembling linear astronomical image panels into reproducible mosaics.
+AstroMosaic assembles calibrated, linear astronomical images into reproducible mosaics. On Windows 11 x64, the desktop app can save and relink projects, edit sky and foreground masks, and preview and export either layer or a visual composition. The CLI supports offline plate solving, mono relative refinement and scripted exports. Linux and macOS support is deferred.
 
-**Current state:** The Windows 11 x64 desktop app can save and relink projects, edit sky and foreground masks, and preview and export each layer or a visual composition. The CLI supports offline solving and mono relative refinement. Linux and macOS support is deferred.
+[Desktop quick start](#run-the-desktop-app) · [CLI quick start](#run-the-headless-cli) · [Windows release preparation](docs/windows-release.md)
 
 ## Start Here
 
@@ -22,7 +22,7 @@ A Windows-first desktop application in development for assembling linear astrono
 | [Phase 3E foreground and composition](docs/phase-3e.md) | Independent layers, shared horizon placement, seam controls, and layer exports. |
 | [Phase 3F Windows package](docs/phase-3f.md) | Reproducible package build, background acceptance checks, and clean-machine follow-up. |
 | [Phase 3.6 plan](docs/phase-36.md) | ASTAP priority, automatic catalogs, match/RMS evidence, scale recovery, SIP/edge validation and total solve budgets. |
-| [Phase 3.6 results](docs/phase-36-results.md) | Source and Windows verification, including the two private TIFFs, supported catalog modes and remaining gates. |
+| [Phase 3.6 results](docs/phase-36-results.md) | Windows plate-solving evidence, supported catalog modes and remaining checks. |
 | [Phase 3.6A evidence](docs/phase-36a.md) | Native capabilities, frozen contracts, TIFF EXIF/XMP import and the reference experiments. |
 | [Phase 4B large mosaics](docs/phase-4b.md) | Reproducible 12-panel benchmarks, memory measurements and independent FITS/TIFF checks. |
 | [Phase 5A XISF interchange](docs/phase-5a.md) | Linear XISF inputs, exports, supported metadata, and verification. |
@@ -40,11 +40,11 @@ AstroMosaic is licensed under the [GNU General Public License version 3](LICENSE
 
 The headless reference processes calibrated, integrated, unstretched panels with matching channel layouts and brightness scales. It uses local astrometry, optional mono refinement, TAN or ZEA sky reprojection, and weighted blending. Float32 exports carry sky WCS and coverage in one file. Use FITS for mono or TIFF and XISF for mono and RGB.
 
-The user workflow provides first-class support for both FITS and linear TIFF panels, with a target benchmark of 12 panels at 6000 × 4000 pixels across both formats and optional camera RAW import deferred. AstroMosaic will be open source and use open-source components. [Dual format decision](docs/adr/0006-dual-fits-and-tiff-workflow.md) · [Product scope decision](docs/adr/0004-open-source-image-workflow.md)
+The Windows workflow supports FITS and linear TIFF panels. The development benchmarks include 12-panel, 6000 × 4000-pixel FITS and TIFF cases. Camera RAW import is deferred. [Dual format decision](docs/adr/0006-dual-fits-and-tiff-workflow.md) · [Windows benchmarks](docs/phase-4b.md)
 
 The offline solver reuses validated WCS, then tries local ASTAP before Gaia. New solutions require at least 15 catalog matches and comparable RMS, with supported TAN/SIP selection and one default 120-second panel deadline. The `gaia` extra adds Seiza. Catalogs and the external ASTAP CLI are installed separately. [Offline setup](docs/phase-2.md#offline-solvers) · [Phase 3.6 results](docs/phase-36-results.md)
 
-Mixed FITS and TIFF panels can contribute selected sky pixels to plate solving, refinement, and mosaics. The next desktop stage adds independent foreground stitching and layer placement, seam, overlap, and crop controls. [Mixed-panel decision](docs/adr/0007-sky-and-foreground-mosaics.md)
+Mixed FITS and TIFF panels can contribute selected sky pixels to plate solving, refinement, and mosaics. The desktop stitches foreground separately and provides layer placement, seam, overlap, and crop controls for visual composition. [Mixed-panel workflow](docs/phase-3e.md)
 
 The current lock uses CPython 3.13 with NumPy, SciPy, Astropy, SEP, reproject, tifffile, and imagecodecs. The `desktop` extra installs the PySide6 Essentials wheel.
 

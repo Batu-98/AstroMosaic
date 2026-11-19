@@ -26,13 +26,13 @@ This register tracks unresolved decisions, problems, and risks. It is not a work
 
 ### Q-005 - Application licensing and distribution model
 
-- **Status / priority:** Open / P1
-- **Opened / updated:** 2026-11-15 / 2026-11-15
-- **Affected phase:** 0 dependency/license inventory and release packaging; required before license-sensitive code reuse or redistribution.
-- **Impact and evidence:** The owner chose `GPL-3.0-only` for the application. The [initial license inventory](docs/phase-0.md#license-inventory) covers SEP, Qt, PyInstaller, ASTAP, and separate D05 data. `fitsio` is a GPL-2.0-or-later development dependency. Seiza is an optional Apache-2.0 backend whose local data are installed separately. TIFF uses BSD-3-Clause tifffile and imagecodecs. [License decision](docs/adr/0009-gpl-v3-application-license.md) · [Seiza decision](docs/adr/0010-seiza-gaia-backend.md) · [tifffile license](https://github.com/cgohlke/tifffile/blob/master/LICENSE) · [imagecodecs license](https://github.com/cgohlke/imagecodecs/blob/master/LICENSE)
-- **Current assumption:** Maintain original implementation. Obtain solver binaries and catalog data separately for experiments.
-- **Next action / responsibility:** Inventory bundled transitive notices and review catalog redistribution terms for the release.
-- **Closure condition:** Record the distribution decision, attribution/license inventory, and compatibility of any reused code or bundled materials. Independent development can continue while this decision is open.
+- **Status / priority:** Investigating / P1
+- **Opened / updated:** 2026-11-15 / 2026-11-19
+- **Affected phase:** Public source publication and Windows binary distribution.
+- **Impact and evidence:** AstroMosaic source uses `GPL-3.0-only`. The portable builder now collects wheel notices, the CPython runtime license, upstream supplements for selected dependencies and an inventory of bundled native files. The release guide records upstream catalog distribution and attribution. [License decision](docs/adr/0009-gpl-v3-application-license.md) · [Windows release preparation](docs/windows-release.md)
+- **Current assumption:** Publish the source on GitHub. Keep portable ZIP builds local until the remaining binary distribution review passes. Obtain external ASTAP binaries, solver catalogs and archive FITS references from upstream.
+- **Next action / responsibility:** Match the binary inventory to the exact native corresponding sources and confirm Microsoft runtime redistribution terms before publishing Windows downloads. The clean-machine check remains a separate acceptance step.
+- **Closure condition:** Record the applicable notices, matching source and redistribution terms for publicly distributed artifacts. Keep separately obtained data subject to its upstream terms.
 
 ### Q-008 - Linux and macOS support
 
@@ -74,35 +74,15 @@ This register tracks unresolved decisions, problems, and risks. It is not a work
 - **Next action / responsibility:** Revisit after the crop and overlap controls are tested and the owner wants fill for remaining gaps. Evaluate open-source software, model weights, licenses, and local resource use then.
 - **Closure condition:** If selected, verify that fill is confined to the selected gaps and its synthetic mask and provenance survive export. Scientific layer exports retain observed samples.
 
-### Q-015 - Offline solver coverage on the 40′ Orion field
-
-- **Status / priority:** Open / P2
-- **Opened / updated:** 2026-11-17 / 2026-11-18
-- **Affected phase:** Phase 3.6A fixtures and 3.6F real-field verification, following the coverage finding in 3.5C.
-- **Impact and evidence:** Portable Seiza 0.48.2 solved the 40′ ESO M42 cutout with hints. Its blind index exhausted 400 hypotheses. ASTAP 2026.11.01 with D05 reported an unsuccessful hinted fit and timed out blind. A 55′ M42 cutout solved blind with the same Seiza bundle. [M42 inputs and results](docs/phase-35.md#m42-offline-astrometry-and-documents-catalogs)
-- **Current assumption:** Use pointing and scale for the 40′ reference or the tested wider field for blind solving. The 3.6 source runs reproduced hinted 40′ and blind 55′ success. The 40′ blind Gaia retry reached the 30-second cap. [Updated measurements](docs/phase-36-results.md#real-field-source-checks)
-- **Next action / responsibility:** Benchmark the 40′ cutout and additional subdegree fields with denser installed ASTAP catalogs under the [Phase 3.6](docs/phase-36.md) priority, quality and total-budget policy. Record measured coverage or supported hint requirements; do not assume density alone fixes the case.
-- **Closure condition:** Record validated solutions and elapsed times across a named subdegree sample, or document the supported hint requirements for those fields.
-
 ### Q-016 - Plate solve quality, incorrect-scale recovery and distortion
 
 - **Status / priority:** Investigating / P1
 - **Opened / updated:** 2026-11-17 / 2026-11-18
 - **Affected phase:** Phase 3.6A quality/fixture freeze, 3.6D bad-scale recovery, 3.6E SIP/edge validation and 3.6F acceptance.
-- **Impact and evidence:** The [Mosaic Master comparison](docs/plate-solve-comparison.md) verified that the Seiza wrapper retains a supplied scale within 0.8–1.2 on blind retry and does not request SIP (`sip_order=0` in installed Seiza 0.48.2). Blind ASTAP retains a supplied vertical FOV. Existing geometry checks do not independently establish catalog accuracy at field edges. Q-015 separately tracks the real 40′ M42 blind coverage result.
-- **Current assumption:** The source uses the common 15-match and RMS gate, Gaia's confidence check, unrestricted Gaia 0.1–120 arcsec/pixel recovery and a spatial holdout for application SIP promotion. Real M13/M42 checks preserve the earlier supported envelopes. ASTAP-only local FOV recovery retains pointing when both hints were supplied. [Measurements](docs/phase-36-results.md)
-- **Next action / responsibility:** Broaden real sparse and dense-catalog coverage as separate datasets become available. Local source and portable results retain an explicit insufficient result for unsupported grid regions. [Windows acceptance](docs/phase-36-results.md#portable-windows-verification)
+- **Impact and evidence:** The [Mosaic Master comparison](docs/plate-solve-comparison.md) verified that the Seiza wrapper retains a supplied scale within 0.8–1.2 on blind retry and does not request SIP (`sip_order=0` in installed Seiza 0.48.2). The earlier ASTAP wrapper retained the supplied vertical FOV on blind retry. Geometry checks alone leave catalog accuracy at the edges unmeasured. Q-015 records the measured 40′ M42 blind limit.
+- **Current assumption:** The source uses the common 15-match and RMS gate, Gaia's confidence check, unrestricted Gaia 0.1–120 arcsec/pixel recovery and a spatial holdout for application SIP promotion. The rerun of the original D05 and Gaia cases met their archive envelopes. ASTAP-only local FOV recovery retains pointing when both hints were supplied. [Measurements](docs/phase-36-results.md)
+- **Next action / responsibility:** Broaden measured coverage with additional sparse fields. Review the D80 Orion candidate's 1.02 px held-out whole-field P95 and the D20 M13 archive comparison of 0.452″ against the 0.451″ reference envelope. Keep the frozen quality thresholds and assess whether Automatic can improve its recovery choice within the two-search limit. [Dense catalog results](docs/phase-36-results.md#dense-astap-catalog-verification)
 - **Closure condition:** The implemented match/RMS boundaries, bad-hint recovery, supported SIP/edge cases, legacy reuse and Windows source/portable regressions meet the frozen 3.6 gates with independently recorded errors. Planning alone does not resolve this topic.
-
-### Q-017 - Automatic ASTAP catalog selection and ASTAP-only quality evidence
-
-- **Status / priority:** Investigating / P1
-- **Opened / updated:** 2026-11-17 / 2026-11-18
-- **Affected phase:** Phase 3.6A capabilities, 3.6B catalog automation, 3.6D candidate validation and 3.6F settings/migration.
-- **Impact and evidence:** The earlier ASTAP CLI silently substituted D05 for a missing manual D20. The new adapter inventories tiles, checks actual native catalog identity and independently validates the selected catalog. Native D05 Auto passed M13 with 164 measured matches and 0.442″ RMS. Local catalog paths outside the Windows code page used a scratch alias. [Results](docs/phase-36-results.md)
-- **Current assumption:** Fresh settings use one Automatic mode; preserve manual choices. Prefer verified native auto with recorded selected data, otherwise resolve to an explicit installed catalog. Use the actual local command-line program. ASTAP-only operation must meet the 15-match/RMS contract without requiring Seiza or treating detections as matches.
-- **Next action / responsibility:** Exercise D20, D50 and D80 in real installations with one and several complete sets. Fixtures currently cover alternatives and truncated/moved tiles. Review actual alternate executable versions and catalog terms before adding their support claims.
-- **Closure condition:** Automatic/manual modes, actual catalog provenance and the ASTAP-only quality path pass real Windows native cases, including missing/partial catalogs and unknown/bad FOV. Preserve user ASTAP settings and original images; unsupported cases remain explicit.
 
 ### Q-020 - Additional XISF variants
 
@@ -207,6 +187,28 @@ This register tracks unresolved decisions, problems, and risks. It is not a work
 - **Next action / responsibility:** Rerun the recorded cases when changing refinement, masks, or WCS reuse.
 - **Closure condition:** The added regressions protect the frozen sample, geometry, and fitting criteria. The Windows source and bundled checks meet the recorded thresholds.
 - **Resolution:** 2026-11-17. The 88 source tests, identical masked CLI exports for common WCS inputs, and the real-field checks met their thresholds in 3.5C. [Windows verification](docs/phase-35.md#phase-35c-windows-verification)
+
+### Q-015 - Offline solver coverage on the 40′ Orion field
+
+- **Status / priority:** Resolved / P2
+- **Opened / updated:** 2026-11-17 / 2026-11-18
+- **Affected phase:** Phase 3.6A fixtures and 3.6F real-field verification, following the coverage finding in 3.5C.
+- **Impact and evidence:** Portable Seiza 0.48.2 solved the 40′ ESO M42 cutout with hints. Its blind index exhausted 400 hypotheses. ASTAP CLI-2026.11.01 with D05 failed hinted solving and timed out blind. Seiza solved the 55′ M42 cutout blind. [M42 inputs and results](docs/phase-35.md#m42-offline-astrometry-and-documents-catalogs)
+- **Current assumption:** The verified 40′ ASTAP-only Orion workflow uses CLI-2026.11.01, D20 or D50, and pointing and scale. The policy can recover locally from a wrong scale when pointing is usable.
+- **Next action / responsibility:** Retain the dense catalog matrix when checking future recovery policy changes. Q-016 tracks catalog-dependent quality and broader field coverage.
+- **Closure condition:** Record validated solutions and elapsed times across a named subdegree sample, or document the supported hint requirements for those fields.
+- **Resolution:** 2026-11-18. D20 and D50 qualified the 40′ Orion fixture with both hints. The three dense catalogs reached the 60-second cap in blind Orion trials. The named M31 40′ and M13 55′ controls recorded validated solutions and times. [Dense catalog results](docs/phase-36-results.md#dense-astap-catalog-verification)
+
+### Q-017 - Automatic ASTAP catalog selection and ASTAP-only quality evidence
+
+- **Status / priority:** Resolved / P1
+- **Opened / updated:** 2026-11-17 / 2026-11-18
+- **Affected phase:** Phase 3.6A capabilities, 3.6B catalog automation, 3.6D candidate validation and 3.6F settings/migration.
+- **Impact and evidence:** Earlier ASTAP silently substituted D05 for a missing manual D20. AstroMosaic now inventories tiles, checks the actual native catalog identity and verifies the selected catalog's solution. Verified D05 Auto and Unicode path coverage preceded the dense-catalog matrix. [Implementation results](docs/phase-36-results.md)
+- **Current assumption:** Fresh settings use Automatic. Use verified native selection or explicitly pass a complete supported D-series set. Keep manual choices pinned and qualify ASTAP-only results with independent local catalog matches under the common quality thresholds.
+- **Next action / responsibility:** Rerun selection and missing-tile controls on CLI or data updates. Q-016 tracks the Orion D80 quality rejection. Q-005 retains catalog redistribution review.
+- **Closure condition:** Automatic/manual modes, actual catalog provenance and the ASTAP-only quality path pass real Windows native cases, including missing/partial catalogs and unknown/bad FOV. Preserve user ASTAP settings and original images, and report unsupported cases.
+- **Resolution:** 2026-11-18. Real single and mixed D-series sets verified native Automatic and manual pinning. Automatic bypassed incomplete D80 and qualified with D50. Pinned incomplete and missing D80 produced diagnostics without sidecars. The alternate CLI used explicit D20. Source, copied console and native desktop checks verified catalog provenance, supported recovery, saved settings and unchanged source hashes. [Dense catalog results](docs/phase-36-results.md#dense-astap-catalog-verification)
 
 ### Q-018 - End-to-end solve deadlines and compatibility
 

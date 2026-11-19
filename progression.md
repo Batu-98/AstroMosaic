@@ -4,14 +4,14 @@ Use this file for concise development history and handoff state. Detailed techni
 
 ## Current State
 
-- **Last updated:** 2026-11-18
+- **Last updated:** 2026-11-19
 - **Active baseline:** Python-first architecture revision 3.10 covers [Phase 3.6 plate solve reliability](astro_mosaic_python_first_architecture_en.md#phase-36-plate-solve-reliability) and [Phase 4A–4C automation and scaling](astro_mosaic_python_first_architecture_en.md#102-phase-4-delivery-stages). [ADR-0017](docs/adr/0017-astap-first-validated-solving.md) records ASTAP priority, quality and budgets. See [ADR-0003](docs/adr/0003-windows-first-platform-scope.md) for Windows scope, [ADR-0006](docs/adr/0006-dual-fits-and-tiff-workflow.md) for formats, and [ADR-0007](docs/adr/0007-sky-and-foreground-mosaics.md) for mixed panels.
-- **Current stage:** Phase 5 meets the local Windows acceptance criteria for [per-band products](docs/phase-5c.md), [ZEA projection](docs/phase-5b.md) and [XISF interchange](docs/phase-5a.md). Full 3.6 acceptance tracks real dense ASTAP catalogs and the narrow blind M42 case. The separate clean-machine check remains open. Linux and macOS support is deferred.
-- **Available artifacts:** [Phase 5C band results](docs/phase-5c.md#local-windows-results), [Phase 5B projection results](docs/phase-5b.md#local-windows-results), [Phase 5A XISF results](docs/phase-5a.md#local-windows-results), [Phase 4C panel workflow](docs/phase-4c.md#desktop-workflow), and [Phase 3.6 evidence](docs/phase-36-results.md). The latest desktop and console bundles are in ignored `.tooling/panel-table-windows/dist/windows/`.
-- **Implementation / verification:** Automatic optical import passed for FITS, TIFF, and XISF. All 179 native Windows tests passed with OpenGL and test windows on the second display. The panel control table, edits and both themes passed the desktop checks. Copied desktop CPU/OpenGL and Qt-free console checks passed. Phase 5C also verified independent band exports and all four batch runs. Ruff, format, mypy, and the lock check passed.
+- **Current stage:** The 0.1.0 public source publication is prepared. The Windows builds are local release candidates. Phase 5 meets the local Windows acceptance criteria for [per-band products](docs/phase-5c.md), [ZEA projection](docs/phase-5b.md) and [XISF interchange](docs/phase-5a.md). The separate clean-machine check remains open. Linux and macOS support is deferred.
+- **Available artifacts:** The candidate Windows ZIPs and source snapshot are in ignored `.tooling/release-0.1.0/artifacts/`. See the [release guide](docs/windows-release.md), [Phase 5C results](docs/phase-5c.md#local-windows-results) and [Phase 3.6 evidence](docs/phase-36-results.md).
+- **Implementation / verification:** All 179 native Windows tests and the copied CPU/OpenGL desktop and console checks passed for the latest Phase 5 and desktop baseline. The [dense ASTAP follow-up](docs/phase-36-results.md#dense-astap-catalog-verification) verified catalog selection, local Orion recovery with D20/D50 from supplied pointing and scale, and the blind timeout. A native desktop solve with pinned D50 drove an independently reopened FITS export. The follow-up passed 42 targeted regression tests.
 - **Version control:** The Phase 5A–5C, optical metadata, and desktop table and theme follow-ups are consolidated on `main` after the Phase 4 baseline at `e0a3a39`. [AstroMosaic GitHub repository](https://github.com/Batu-98/AstroMosaic)
-- **Next action:** Run the separate clean-machine Windows launcher and export check when a fresh installation is available. Track release notices and the remaining real ASTAP catalog and narrow M42 measurements in their existing topics.
-- **Open dependencies:** Q-003 tracks the frozen criteria, Q-015 the 40′ M42 coverage, Q-016 extended quality coverage, and Q-017 the real dense ASTAP catalog matrix. Q-005, Q-009, Q-010, and Q-020 track distribution, formats and mixed-panel work. Q-008 tracks deferred platforms and Q-011 deferred visual fill. Q-004, Q-012, Q-018 and Q-019 record the verified resource, command panel, deadline and owner TIFF checks.
+- **Next action:** Finish the native corresponding-source and redistribution review under Q-005 before publishing Windows binaries. Run the clean-machine launcher and export check when a fresh Windows installation is available.
+- **Open dependencies:** Q-003 tracks the frozen criteria and Q-016 extended astrometry quality. Q-005, Q-009, Q-010 and Q-020 track distribution, formats and mixed-panel work. Q-008 tracks deferred platforms and Q-011 deferred visual fill. Q-015 and Q-017 record the verified narrow-field requirements and catalog matrix.
 
 ## Phase Overview
 
@@ -36,9 +36,9 @@ The table is a status summary, not a replacement for the full exit gates in Sect
 | 3.5B - Revision | Complete | Focused tests protect the frozen narrow-overlap, saturation, and masked WCS reuse cases on Windows. |
 | 3.5C - Verification | Complete | Windows source, portable CLI, and desktop results cover the frozen criteria, M42 plate solves, and the M31 20% overlap merge. |
 | 3.6A - Capabilities and contract freeze | Complete | Native D05 Auto/SIP/manual-fallback evidence, bounded ASTAP-only quality query, owner TIFF/EXIF checks, and frozen fixture/numerical/budget/schema contracts recorded. |
-| 3.6B - ASTAP priority and catalogs | Local checks passed | Real Auto/D05, pinning and fallback, complete/incomplete catalog fixtures, Unicode paths, source protection and the real ASTAP-only quality path. Real dense-catalog combinations remain open. |
+| 3.6B - ASTAP priority and catalogs | Complete | ASTAP priority, real single and mixed D-series sets, native Automatic and explicit resolution, manual pinning, missing/incomplete catalogs, Unicode paths and ASTAP-only qualification verified on Windows. |
 | 3.6C - Total solve deadlines | Local checks passed | Shared deadline, late rejection, source prep exhaustion, native worker and ASTAP cancellation/cleanup, and preserved partial results checked. |
-| 3.6D - Quality and scale recovery | Local checks passed | Match/RMS limits, Gaia confidence, false-match controls, ASTAP-only FOV recovery and Gaia recovery from wrong pointing and both scale factors. The narrow blind M42 limit is recorded. |
+| 3.6D - Quality and scale recovery | Local checks passed | Match/RMS limits, Gaia confidence, false-match controls, ASTAP-only FOV recovery and Gaia recovery from wrong pointing and both scale factors. The narrow blind M42 and cross-catalog quality results are recorded. |
 | 3.6E - SIP and full-field diagnostics | Local checks passed | Synthetic truth, TAN/SIP selection, map and support diagnostics, both real TIFFs and independent reopened export. |
 | 3.6F - Integration and acceptance | Local checks passed | Qt-free portable CLI, desktop CPU/OpenGL, settings and v1/v2 migration, cancellation/retry, preview and independent exports. Full external acceptance remains open. |
 | 4A - Headless project automation | Complete | Creation, sky preflight, saved-layer export, desktop parity and scripted FITS/TIFF batch, progress, failure and cancellation checks passed on Windows. |
@@ -647,6 +647,20 @@ The table is a status summary, not a replacement for the full exit gates in Sect
 - **Changed:** Consolidated XISF, ZEA, per-band exports, optical metadata import, the panel control table, and desktop themes into the next commit on `main`.
 - **Verified:** The remote contained one branch at the Phase 4 baseline. Ruff, mypy, and whitespace checks passed before publication. The preceding desktop verification recorded 179 passing native Windows tests.
 - **Next:** Run the outstanding clean-machine and catalog checks when their environments are available.
+
+### 2026-11-18 - Phase 3.6 - Verified real dense ASTAP catalogs on Windows
+
+- **Changed:** Recorded D20, D50 and D80 archive identities, real Windows selection and quality results, and the measured hint requirements for the 40′ Orion field.
+- **Verified:** Source and copied console runs confirmed D20/D50 successes, the D80 quality rejection, incomplete-catalog handling and blind timeout. A native desktop solve with D50 passed settings, save and independent FITS export checks with the window and dialog on the second display. All source and archive hashes matched and 42 targeted tests passed.
+- **Related:** Resolved Q-015 and Q-017. Q-016 retains the cross-catalog quality findings. [Dense catalog results](docs/phase-36-results.md#dense-astap-catalog-verification)
+- **Next:** Inventory Windows bundle notices. The separate clean-machine check awaits a fresh Windows environment. Windows Sandbox and Hyper-V remain disabled on the development host.
+
+### 2026-11-19 - Release - Prepared 0.1.0 source publication and Windows candidates
+
+- **Changed:** Added a public-facing release guide and generated component notices for the desktop and CLI. The bundles carry the application license, runtime notices, upstream supplements and a native-file inventory.
+- **Verified:** Both locked Windows x64 builds completed. Checked the two ZIP layouts and their 33 desktop and 31 CLI component entries, documentation links, Poetry lock and packaging code style. Application tests were deferred at the owner's request.
+- **Related:** Q-005 tracks remaining binary redistribution work. [Release guide](docs/windows-release.md) · [GitHub repository](https://github.com/Batu-98/AstroMosaic)
+- **Next:** Review native corresponding sources and redistribution terms before publishing the portable binaries. The clean-machine acceptance check remains open.
 
 ## Entry Template
 
