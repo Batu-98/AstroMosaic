@@ -34,11 +34,12 @@ try {
     New-Item -ItemType Directory -Force -Path $distPath, $workPath | Out-Null
     $env:Path = "$env:SystemRoot\System32;$env:SystemRoot"
     $env:PYINSTALLER_CONFIG_DIR = Join-Path $workPath 'cache'
+    $srgbProfile = Join-Path $projectRoot 'src/astromosaic/io/sRGB2014.icc'
     $common = @(
         '-m', 'PyInstaller', '--onedir', '--clean', '--noconfirm', '--noupx',
         '--distpath', $distPath, '--workpath', $workPath, '--specpath', $workPath,
         '--copy-metadata', 'astromosaic', '--copy-metadata', 'seiza',
-        '--add-data', 'src/astromosaic/io/sRGB2014.icc:astromosaic/io',
+        '--add-data', "${srgbProfile}:astromosaic/io",
         '--hidden-import', 'imagecodecs._imcd',
         '--hidden-import', 'imagecodecs._deflate',
         '--hidden-import', 'imagecodecs._shared',
