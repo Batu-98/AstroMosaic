@@ -54,6 +54,10 @@ The double-precision test covers both tone modes, weighted linear-light bilinear
 
 Source tests passed 231 cases with the previously measured OpenCV wheel available through the isolated Phase 7 test environment. Four native checks passed separately, including both opt-in OpenGL checks and the 630-pixel multi-band layout. The lockfile, Ruff and scoped mypy checks passed. [Numerical and failure checks](../tests/numerical/test_preview.py) · [Desktop and CLI parity test](../tests/integration/test_desktop_project.py) · [Native viewport checks](../tests/integration/test_sky_viewport.py)
 
+### 8B Adaptive preview follow-up
+
+The desktop overview now uses masked area subsampling. Zoom requests full-resolution detail from the visible grid region. The crop editor shows the full grid and lets the user apply a rectangle in output pixels. A version 9 project records per-field automatic framing locks or the automatic mono refinement choices when used. Earlier manifests retain their saved grid and numeric refinement settings. The fixed 512-edge point sample defines the photo tone on the active export grid in both the desktop and CLI. [Controls and persistence](phase-3c.md#adaptive-framing-and-interactive-crop) · [Preview decision](adr/0027-adaptive-sky-preview.md)
+
 ### 8B Local Windows package results
 
 The final beta 11 bundles were built with CPython 3.13.18 and the Poetry lock from clean commit `e644768177da5013d9aa909621bc38a3d45756ce`. The packaged desktop on the secondary display solved both original TIFFs with the local Gaia catalog. Each backend built a 445 × 512 visual preview and showed the complete export button text at the compact width. Cancelling after tile progress cleared the temporary TIFF and retained the preview. The CPU button workflow and the OpenGL `session export-photo` command both retried successfully at the original destination.

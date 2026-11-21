@@ -47,6 +47,15 @@ from astromosaic.storage.project import (
 )
 
 
+def test_automatic_match_radius_uses_qualified_wcs_uncertainty_with_a_cap() -> None:
+    settings = RefinementSpec(None, "auto")
+    assert settings.resolve_radius([0.3, 0.4], 1.0) == pytest.approx(1.5)
+    assert settings.resolve_radius([0.01, 0.1], 2.0) == 1
+    assert settings.resolve_radius([5.0, 4.0], 1.0) == 6
+    assert settings.resolve_radius([0.1, None], 1.0) == 6
+    assert RefinementSpec(8.0).resolve_radius([0.3, 0.4], 1.0) == 8
+
+
 def _profile(
     flux: NDArray[np.float64], x: NDArray[np.float64], y: NDArray[np.float64]
 ) -> tuple[NDArray[np.float64], float, float]:

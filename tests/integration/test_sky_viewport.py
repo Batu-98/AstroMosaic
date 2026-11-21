@@ -5,6 +5,7 @@ from typing import cast
 import numpy as np
 import pytest
 
+from astromosaic.core import Region
 from astromosaic.display import DisplayFrame, stretch_rgba
 
 
@@ -113,6 +114,17 @@ def test_sky_viewport_pixels_pan_zoom_and_stretch(
         assert viewport.frame is frame
         check_samples()
         np.testing.assert_array_equal(frame.rgba, rgba)
+
+        detail = DisplayFrame((3, 2), np.array([[[0, 1, 0, 1]]], dtype=np.float32), True)
+        viewport.set_detail(Region(1, 0, 1, 1), detail)
+        image = screenshot()
+        center = viewport.image_rect()
+        pixel = image.pixelColor(
+            int(center.center().x() * image.width() / viewport.canvas.width()),
+            int((center.y() + center.height() / 4) * image.height() / viewport.canvas.height()),
+        )
+        assert (pixel.red(), pixel.green(), pixel.blue()) == (0, 255, 0)
+        viewport.clear_detail()
 
         preserved = rgba.copy()
         preserved[..., :3] *= 0.5

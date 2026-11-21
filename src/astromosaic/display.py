@@ -34,15 +34,21 @@ class DisplayFrame:
     seam_width: float | None = None
     photo_levels: tuple[float, float] | None = None
     preserved_rgba: NDArray[np.float32] | None = None
+    tone_levels: tuple[float, float] | None = None
 
     @property
     def size(self) -> tuple[int, int]:
         return self.rgba.shape[1], self.rgba.shape[0]
 
 
-def normalize_preview(frame: PreviewFrame) -> DisplayFrame:
+def normalize_preview(
+    frame: PreviewFrame, *, levels: tuple[float, float] | None = None
+) -> DisplayFrame:
     return replace(
-        normalize_tile(frame.tile, frame.output_size, photo=frame.visual_only),
+        normalize_tile(
+            frame.tile, frame.output_size, photo=frame.visual_only,
+            levels=levels if levels is not None else frame.tone_levels,
+        ),
         common_coverage=frame.common_coverage,
         seam_width=frame.seam_width,
     )
@@ -58,16 +64,17 @@ def highlight_overlap(frame: DisplayFrame) -> DisplayFrame:
 
 
 def normalize_tile(
-    tile: Tile, output_size: tuple[int, int], *, photo: bool = False
+    tile: Tile, output_size: tuple[int, int], *, photo: bool = False,
+    levels: tuple[float, float] | None = None,
 ) -> DisplayFrame:
     """Set linked black and white points from valid samples only."""
     valid = tile.valid
     rgba = np.zeros((*valid.shape, 4), dtype=np.float32)
     samples = tile.pixels[valid].astype(np.float64)
     preserved = None
-    photo_levels = None
+    photo_levels = levels if photo else None
     if samples.size:
-        levels = preview_levels(samples)
+        levels = levels if levels is not None else preview_levels(samples)
         if photo:
             photo_levels = levels
             preserved = rgba.copy()
@@ -79,7 +86,8 @@ def normalize_tile(
         rgba[..., 3] = valid
     rgba.setflags(write=False)
     return DisplayFrame(
-        output_size, rgba, bool(samples.size), photo_levels=photo_levels, preserved_rgba=preserved
+        output_size, rgba, bool(samples.size), photo_levels=photo_levels, preserved_rgba=preserved,
+        tone_levels=levels,
     )
 
 

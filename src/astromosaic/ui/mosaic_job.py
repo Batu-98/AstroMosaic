@@ -12,7 +12,7 @@ from PySide6.QtCore import QObject, QThread, Signal
 
 from astromosaic.astrometry.solve import SolveOptions, SolveStep
 from astromosaic.astrometry.solve_budget import SolveBudget, SolveBudgetExceeded
-from astromosaic.core import Tile
+from astromosaic.core import Region, Tile
 from astromosaic.core.job import JobContext, MosaicCancelled
 from astromosaic.core.masks import MASK_EDGE, SKY, UNCLASSIFIED, SourceMask
 from astromosaic.display import DisplayFrame, normalize_preview, normalize_tile
@@ -265,12 +265,18 @@ class PreviewJob(_ProjectJob[DisplayFrame]):
         layer: Layer = "sky",
         *,
         band: str | None = None,
+        adaptive_edge: int | None = None,
+        crop_grid: RenderSpec | None = None,
     ) -> None:
         super().__init__(project, parent)
         self.layer = layer
         self.band = band
         self.fitted_grid: RenderSpec | None = None
         self.visual_only = False
+        self.adaptive_edge = adaptive_edge
+        self.crop_grid = crop_grid
+        self.suggested_crop: Region | None = None
+        self.suggested_rotation: float | None = None
 
     def _publish_proxy(self, preview: PreviewFrame) -> None:
         self.proxy_ready.emit(normalize_preview(preview), preview.visual_only)
@@ -278,18 +284,49 @@ class PreviewJob(_ProjectJob[DisplayFrame]):
     def perform(self, context: JobContext) -> DisplayFrame:
         preview = (
             preview_project(
-                self.project, context, self._publish_proxy, band=self.band, allow_visual=True
+                self.project, context, self._publish_proxy, band=self.band, allow_visual=True,
+                adaptive_edge=self.adaptive_edge,
+                grid=replace(self.crop_grid, crop=None) if self.crop_grid is not None else None,
+                inspect_crop=self.crop_grid is not None,
             )
             if self.layer == "sky"
             else preview_project_layer(
-                self.project, self.layer, context, self._publish_proxy, band=self.band
+                self.project, self.layer, context, self._publish_proxy, band=self.band,
+                adaptive_edge=self.adaptive_edge,
             )
         )
         frame = normalize_preview(preview)
         context.check_cancelled()
         self.fitted_grid = preview.fitted_grid
         self.visual_only = preview.visual_only
+        self.suggested_crop = preview.suggested_crop
+        self.suggested_rotation = preview.suggested_rotation
         return frame
+
+
+class PreviewDetailJob(_ProjectJob[DisplayFrame]):
+    def __init__(
+        self, project: MosaicProject, parent: QObject, layer: Layer, window: Region,
+        levels: tuple[float, float], *, band: str | None, grid: RenderSpec | None,
+    ) -> None:
+        super().__init__(project, parent)
+        self.layer = layer
+        self.window = window
+        self.levels = levels
+        self.band = band
+        self.grid = grid
+
+    def perform(self, context: JobContext) -> DisplayFrame:
+        if self.layer == "sky":
+            frame = preview_project(
+                self.project, context, band=self.band, grid=self.grid, window=self.window,
+                allow_visual=True,
+            )
+        else:
+            frame = preview_project_layer(self.project, self.layer, context, window=self.window)
+        display = normalize_preview(frame, levels=self.levels)
+        context.check_cancelled()
+        return display
 
 
 @dataclass(frozen=True, slots=True)

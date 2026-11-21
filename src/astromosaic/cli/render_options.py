@@ -7,7 +7,7 @@ from argparse import ArgumentParser, Namespace
 from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
     from astromosaic.core.job import JobContext
@@ -71,6 +71,10 @@ def panel_assignments(values: list[str], count: int, kind: str) -> dict[int, str
 
 def panel_files(values: list[str], count: int) -> dict[int, Path]:
     return {index: Path(value) for index, value in panel_assignments(values, count, "PATH").items()}
+
+
+def _match_radius(value: str) -> float | Literal["auto"]:
+    return "auto" if value == "auto" else float(value)
 
 
 def add_render_options(parser: ArgumentParser) -> None:
@@ -141,13 +145,13 @@ def add_render_options(parser: ArgumentParser) -> None:
     )
     parser.add_argument(
         "--match-radius",
-        type=float,
-        metavar="PIXELS",
-        help="Relative star matching radius in output pixels (6 with --refine).",
+        type=_match_radius,
+        metavar="PIXELS|auto",
+        help="Relative star matching radius in output pixels, or auto (default 6).",
     )
     parser.add_argument(
         "--background",
-        choices=("none", "offset", "plane"),
+        choices=("none", "offset", "plane", "auto"),
         help="Relative background model (offset with --refine).",
     )
     parser.add_argument(
@@ -173,7 +177,7 @@ def render_options(arguments: Namespace) -> tuple[RenderSpec, RefinementSpec | N
         MIB,
         RenderSpec,
     )
-    from astromosaic.pipeline.refinement import RefinementSpec
+    from astromosaic.pipeline.refinement import DEFAULT_MATCH_RADIUS, RefinementSpec
 
     spec = RenderSpec(
         center=tuple(arguments.center),
@@ -194,8 +198,11 @@ def render_options(arguments: Namespace) -> tuple[RenderSpec, RefinementSpec | N
     )
     refinement = None
     if arguments.refine:
+        radius = arguments.match_radius
         refinement = RefinementSpec(
-            max_shift_px=6.0 if arguments.match_radius is None else arguments.match_radius,
+            max_shift_px=(
+                DEFAULT_MATCH_RADIUS if radius is None else None if radius == "auto" else radius
+            ),
             background=arguments.background or "offset",
         )
     elif arguments.match_radius is not None or arguments.background is not None:

@@ -1121,6 +1121,13 @@ The table is a status summary, not a replacement for the full exit gates in Sect
 - **Related** Q-029 and [8B local Windows results](docs/phase-8.md#8b-local-windows-package-results).
 - **Next** Prepare independent profile and exposure references for 8C. Keep fresh Windows acceptance and redistribution review open.
 
+### 2026-11-22 - Phase 8B follow-up - Implemented adaptive framing and crop editing
+
+- **Changed** Added framing locks, automatic mono fit settings, live sky refresh, masked area subsampling, visible detail and a draggable crop. Manifest version 9 stores adaptive settings when selected. Assigned version `0.1.0b12` for the local Windows handoff.
+- **Verified** The focused numerical and native checks covered validity-weighted overview samples, exact detail, crop handles and OpenGL drawing. The existing scientific and project controls passed their focused runs.
+- **Related** Q-030 and [ADR-0027](docs/adr/0027-adaptive-sky-preview.md).
+- **Next** Verify the original TIFF pair, finish the source suite, and build and check the portable runtime from a clean commit.
+
 ## Entry Template
 
 Copy this format into a new entry immediately above this template, preserving chronological order:

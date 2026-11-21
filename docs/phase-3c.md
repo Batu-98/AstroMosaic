@@ -4,7 +4,7 @@
 
 1. Choose **Add Panels** to load supported FITS, TIFF, or XISF files.
 2. Choose **Plate Solve** for sky panels that need a WCS. Select a local solver under **Plate Solve Settings** during initial setup. If a panel contains foreground, apply a sky mask in **Panel Settings**.
-3. Choose **Build Preview**. With **Auto Frame** on, the selected sky panels determine the preview framing from their WCS. Drag to pan, use the wheel to zoom, and choose **Fit View** to restore the cached raster's framing. Adjust **Midtones** to see faint detail. [Sky projection](phase-5b.md)
+3. Choose **Build Preview**. With **Auto Frame** on, the selected sky panels determine the preview framing from their WCS. Drag to pan, use the wheel to zoom, and choose **Fit View** to restore the overview. Close zoom samples the visible region at full output resolution and shows **1:1** when it is ready. Adjust **Midtones** to see faint detail. [Sky projection](phase-5b.md)
 
 New desktop projects start with **Auto Frame** enabled. Existing projects use the saved grid until you enable **Auto Frame**. To render a scientific mosaic, choose **Use Preview Grid** after a fitted preview or set the export grid directly in **Mosaic Settings**. **Export Mosaic** writes float32 samples with WCS and coverage. FITS supports mono output. TIFF and XISF support mono and RGB output. [XISF workflow](phase-5a.md#use-the-format)
 
@@ -12,13 +12,21 @@ When every selected panel is an unsigned 16-bit RGB TIFF with a recognized sRGB 
 
 The app reports the panel and cause when a missing WCS, unusable mask or incompatible profile blocks a preview. Run Plate Solve, repair the mask, or choose compatible panels as indicated. The Command Panel equivalents are `session add <paths>`, `session solve` and `session preview`. Use `session preview --grid auto` to enable automatic framing or `session use-preview-grid` to adopt the fit. [Desktop commands](phase-4c.md#control-the-active-project-without-dialogs)
 
-Preview and export jobs run one at a time. **Cancel Job** stops at the next cancellation checkpoint. Editing the panels or mosaic settings clears the preview. Build it again after applying the edits. The app uses CPU raster display when OpenGL is unavailable. To choose CPU on startup, use `poetry run python -m astromosaic.ui --cpu-preview`.
+Preview and export jobs run one at a time. **Cancel Job** stops at the next cancellation checkpoint. The app uses CPU raster display when OpenGL is unavailable. To choose CPU on startup, use `poetry run python -m astromosaic.ui --cpu-preview`.
+
+### Adaptive framing and interactive crop
+
+**Mosaic Settings** shows the effective preview grid when one is available. Lock the center, projection, size, scale or crop to retain its entered value under Auto Frame. Editing a grid field locks its group. A fixed pixel crop retains its full grid size. Rotation remains explicit and **Use suggested rotation** can adopt an angle that reduces the footprint rectangle. **View → Live Sky Preview** refreshes an already opened sky preview after a panel, band, mask, WCS or setting change when the selected inputs are ready. The saved scientific grid is adopted explicitly.
+
+The crop outline marks the rendered rectangle. Choose **Edit Crop** to view the full grid with draggable edges, corners and interior. **Use Auto Crop** loads the projected sky footprint bounds. **Apply Crop** adopts the full grid and selected rectangle for the project and switches to a fixed grid. **Cancel** restores the previous preview and settings. The project can be saved and reopened with the selected crop. [Adaptive preview decision](adr/0027-adaptive-sky-preview.md)
+
+The selected band's available filter labels and brightness units appear in Mosaic Settings. Keep the common-scale checkbox for a verified user declaration. For compatible mono panels, choose **Auto** to test a supported background model against held-out samples. An automatic stellar radius uses the two largest qualified catalog RMS values in the selected band and is capped at six output pixels, with a one-pixel minimum and a six-pixel fallback when evidence is missing. A numeric radius remains available. [Mono refinement](phase-2.md#relative-refinement)
 
 ## Geometry and Display
 
-The final preview has a longest edge of up to 512 pixels. When a 160-pixel proxy is smaller and contains covered samples, it appears first. The final raster replaces it and keeps the current framing. For grids within the limit, the final preview has one sample per grid pixel. Each preview cell at column `i` and row `j` samples the chosen grid at `((i + 0.5) * output_width / preview_width - 0.5, (j + 0.5) * output_height / preview_height - 0.5)` in zero-based center coordinates. With Auto Frame disabled, the sky preview uses the same grid, masks, blend weights and optional mono refinement as export. Zoom magnifies the cached raster.
+The desktop first offers a 160-edge proxy, then a fixed reference preview and a viewport-sized overview within the job budget. When minifying, it averages a bounded grid of sub-samples per display cell in linear light and excludes invalid samples. At close zoom a cancellable worker reads an in-bounds visible rectangle, sampling the exact output pixel centers. The detail reuses the overview tone and is composited over the overview. Its maximum size is 1,048,576 output pixels. The original headless point-preview API remains available for coincident sample checks.
 
-Black and white display points use the 1st and 99.5th percentiles of valid samples and are linked across RGB channels. The midtone transfer runs on cached display buffers. Uncovered cells use the canvas background. OpenGL minification averages valid colors using coverage-premultiplied mip levels and checks the base coverage at the sampled position. The CPU surface uses nearest-neighbor raster display.
+Black and white display points use the 1st and 99.5th percentiles of valid samples from the fixed 512-edge reference and are linked across RGB channels. The midtone transfer runs on cached display buffers. Uncovered cells use the canvas background. OpenGL uses coverage-premultiplied mip levels for additional display minification. The CPU smooths the overview when shrinking it to the canvas. Both use the zoomed detail at the same output positions.
 
 ## Windows Verification
 

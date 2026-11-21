@@ -64,7 +64,9 @@ void main() {
 class OpenGLPreview(QOpenGLWidget):
     failed = Signal(str)
 
-    def __init__(self, image_rect: Callable[[], QRectF]) -> None:
+    def __init__(
+        self, image_rect: Callable[[], QRectF], paint_overlay: Callable[[], None] | None = None
+    ) -> None:
         super().__init__()
         format = QSurfaceFormat()
         format.setRenderableType(QSurfaceFormat.RenderableType.OpenGL)
@@ -72,6 +74,7 @@ class OpenGLPreview(QOpenGLWidget):
         format.setProfile(QSurfaceFormat.OpenGLContextProfile.CoreProfile)
         self.setFormat(format)
         self._image_rect = image_rect
+        self._paint_overlay = paint_overlay
         self._program: QOpenGLShaderProgram | None = None
         self._texture: QOpenGLTexture | None = None
         self._vao: QOpenGLVertexArrayObject | None = None
@@ -186,6 +189,8 @@ class OpenGLPreview(QOpenGLWidget):
         vao.release()
         texture.release(0)
         program.release()
+        if self._paint_overlay is not None:
+            self._paint_overlay()
 
     def _fail(self, reason: str) -> None:
         self._failed = True

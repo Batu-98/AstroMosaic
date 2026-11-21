@@ -3,7 +3,7 @@
 from dataclasses import replace
 from math import isfinite
 from pathlib import Path
-from typing import Literal, cast
+from typing import cast
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
@@ -25,7 +25,9 @@ from astromosaic.core import Region
 from astromosaic.core.masks import ForegroundTag
 from astromosaic.geometry import SkyProjection
 from astromosaic.geometry.image import CompositionSpec, LayerPlacement
-from astromosaic.pipeline.mosaic import DEFAULT_SKY_BAND
+from astromosaic.photometry.background import BackgroundMode
+from astromosaic.pipeline.framing import FrameLock
+from astromosaic.pipeline.mosaic import DEFAULT_SKY_BAND, RenderSpec
 from astromosaic.pipeline.refinement import RefinementSpec
 from astromosaic.storage.project import (
     FileReference,
@@ -60,10 +62,18 @@ class _SettingsDialog(QDialog):
 
 
 class ProjectSettings(_SettingsDialog):
-    def __init__(self, project: MosaicProject, parent: QWidget) -> None:
+    def __init__(
+        self, project: MosaicProject, parent: QWidget, *,
+        preview_grid: RenderSpec | None = None,
+        suggested_rotation: float | None = None,
+        input_metadata: str = "",
+    ) -> None:
         super().__init__("Mosaic settings", parent)
         self.project = project
-        spec = project.render
+        self.visible_grid = spec = preview_grid or project.render
+        self.auto_frame = QCheckBox("Auto Frame")
+        self.auto_frame.setChecked(project.auto_frame_preview)
+        self.form.addRow(self.auto_frame)
         self.ra = self.field("Right ascension (°)", spec.center[0])
         self.dec = self.field("Declination (°)", spec.center[1])
         self.projection = QComboBox()
@@ -75,29 +85,66 @@ class ProjectSettings(_SettingsDialog):
         self.output_height = self.field("Height (px)", spec.size[1])
         self.scale = self.field("Pixel scale (arcsec/px)", spec.scale_arcsec)
         self.rotation = self.field("Rotation (°)", spec.rotation_deg)
+        if suggested_rotation is not None:
+            suggestion = QPushButton(f"Use suggested rotation ({suggested_rotation:.1f}°)")
+            suggestion.setToolTip("Use a rotation that reduces the fitted footprint's rectangle.")
+            suggestion.clicked.connect(lambda: self.rotation.setText(f"{suggested_rotation:g}"))
+            self.form.addRow(suggestion)
         crop = spec.crop
         self.crop = self.field(
             "Crop (x, y, width, height)",
             f"{crop.x}, {crop.y}, {crop.width}, {crop.height}" if crop else "",
         )
+        locks = QHBoxLayout()
+        self.locks: dict[FrameLock, QCheckBox] = {}
+        fields: tuple[FrameLock, ...] = ("center", "projection", "size", "scale", "crop")
+        for field in fields:
+            lock = QCheckBox(field.capitalize())
+            lock.setAccessibleName(f"Lock {field} for Auto Frame")
+            if field == "crop":
+                lock.setToolTip("A fixed pixel crop also keeps its full grid size.")
+            lock.setChecked(field in project.frame_locks)
+            self.locks[field] = lock
+            locks.addWidget(lock)
+        self.form.addRow("Auto Frame locks", locks)
+        self.auto_frame.toggled.connect(self._update_locks)
+        self._update_locks(project.auto_frame_preview)
         self.filter = self.field("Common filter", project.filter_name or "")
         self.filter.setPlaceholderText(DEFAULT_SKY_BAND)
         self.filter.setToolTip("Assign a known label to panels without a filter or band override.")
         self.assume = QCheckBox("Declare a common surface-brightness scale")
         self.assume.setToolTip("Use this for already-linear panels that share a brightness scale.")
         self.assume.setChecked(project.assume_surface_brightness)
+        if input_metadata:
+            metadata = QLabel(input_metadata)
+            metadata.setTextFormat(Qt.TextFormat.PlainText)
+            metadata.setWordWrap(True)
+            self.form.addRow("Selected sky inputs", metadata)
         self.form.addRow(self.assume)
         self.background = QComboBox()
-        self.background.addItems(["Disabled", "None", "Offset", "Plane"])
+        self.background.addItems(["Disabled", "Auto", "None", "Offset", "Plane"])
+        self.background.setToolTip(
+            "Auto selects a supported background model using independent overlap samples."
+        )
         self.background.setCurrentText(
             project.refinement.background.title() if project.refinement else "Disabled"
         )
         self.form.addRow("Mono refinement background", self.background)
         self.match = self.field(
             "Stellar match radius (px)",
-            project.refinement.max_shift_px if project.refinement else 6.0,
+            "Auto" if project.refinement is None or project.refinement.max_shift_px is None
+            else project.refinement.max_shift_px,
+        )
+        self.match.setToolTip("Auto uses qualified WCS errors with a 1–6 output pixel limit.")
+        self.match.setEnabled(project.refinement is not None)
+        self.background.currentTextChanged.connect(
+            lambda value: self.match.setEnabled(value != "Disabled")
         )
         self.buttons()
+
+    def _update_locks(self, auto_frame: bool) -> None:
+        for lock in self.locks.values():
+            lock.setEnabled(auto_frame)
 
     def settings(self) -> MosaicProject:
         crop = None
@@ -108,7 +155,7 @@ class ProjectSettings(_SettingsDialog):
             crop = Region(*(int(field) for field in fields))
         previous = self.project.render
         projection = cast(SkyProjection, self.projection.currentData())
-        spec = replace(
+        entered = replace(
             previous,
             center=(float(self.ra.text()), float(self.dec.text())),
             size=(int(self.output_width.text()), int(self.output_height.text())),
@@ -117,22 +164,50 @@ class ProjectSettings(_SettingsDialog):
             crop=crop,
             projection=projection,
         )
+        auto_frame = self.auto_frame.isChecked()
+        locks: set[FrameLock] = {field for field, box in self.locks.items() if box.isChecked()}
+        entered_fields = {
+            field for field in self.locks
+            if getattr(entered, field if field != "scale" else "scale_arcsec")
+            != getattr(self.visible_grid, field if field != "scale" else "scale_arcsec")
+        }
+        if auto_frame:
+            locks.update(entered_fields)
+        spec = entered
+        if auto_frame:
+            spec = replace(
+                previous,
+                center=entered.center if "center" in locks else previous.center,
+                projection=entered.projection if "projection" in locks else previous.projection,
+                size=entered.size if "size" in locks or "crop" in locks else previous.size,
+                scale_arcsec=entered.scale_arcsec if "scale" in locks else previous.scale_arcsec,
+                crop=entered.crop if "crop" in locks else previous.crop,
+                rotation_deg=entered.rotation_deg,
+            )
+            if (
+                "crop" not in locks and spec.crop is not None
+                and not Region(0, 0, *spec.size).contains(spec.crop)
+            ):
+                spec = replace(spec, crop=None)
         background = self.background.currentText().lower()
+        radius = self.match.text().strip()
         refinement = (
             None
             if background == "disabled"
             else RefinementSpec(
-                float(self.match.text()), cast(Literal["none", "offset", "plane"], background)
+                None if radius.lower() in ("", "auto") else float(radius),
+                cast(BackgroundMode, background),
             )
         )
         project = replace(
             self.project,
             render=spec,
-            auto_frame_preview=self.project.auto_frame_preview and spec == previous,
+            auto_frame_preview=auto_frame,
+            frame_locks=frozenset(locks),
             filter_name=self.filter.text().strip() or None,
             assume_surface_brightness=self.assume.isChecked(),
             refinement=refinement,
-            composition=self.project.composition if projection == previous.projection else None,
+            composition=self.project.composition if spec == previous else None,
         )
         project.validate()
         return project

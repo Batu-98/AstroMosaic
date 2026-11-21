@@ -2,6 +2,7 @@ import json
 import subprocess
 import sys
 from collections.abc import Callable
+from dataclasses import replace
 from importlib.metadata import version
 from importlib.resources import files
 from pathlib import Path
@@ -44,7 +45,8 @@ def test_photo_desktop_session_and_cli_share_the_fitted_grid_and_tone(
     import os
 
     pytest.importorskip("PySide6")
-    from PySide6.QtCore import QEvent, QSettings
+    from PySide6.QtCore import QEvent, QPointF, QSettings, Qt
+    from PySide6.QtTest import QTest
     from PySide6.QtWidgets import QApplication, QFileDialog
 
     from astromosaic.ui.project_window import ProjectWindow
@@ -132,9 +134,54 @@ def test_photo_desktop_session_and_cli_share_the_fitted_grid_and_tone(
             assert reader.header["PHOTOTON"] == "preserve"
         assert manifest.read_bytes() == initial
         assert window.project.render == project.render and window.project.auto_frame_preview
+
+        window._update_panel(0, replace(window.project.panels[0], weight=1.25))
+        assert window.viewport.frame is None
+        deadline = monotonic() + 12
+        while window.viewport.frame is None or window.job is not None:
+            assert monotonic() < deadline, window.status.text()
+            app.processEvents()
+            sleep(0.005)
+        assert window._preview_project == window.project
+        current = window.project
+        window.edit_crop_button.click()
+        wait_idle()
+        assert window.viewport.crop is not None and window._crop_draft is not None
+        window.cancel_crop_button.click()
+        assert window.project == current and window._crop_draft is None
+        window.edit_crop_button.click()
+        wait_idle()
+        assert window.auto_crop_button.isEnabled() and not window.start_button.isEnabled()
+        window.auto_crop_button.click()
+        crop = window.viewport.crop
+        display = window.viewport.frame
+        assert crop is not None and display is not None
+        rect = window.viewport.image_rect()
+        start = rect.topLeft()
+        start.setX(start.x() + rect.width() * (crop.x + crop.width) / display.output_size[0])
+        start.setY(start.y() + rect.height() * (crop.y + crop.height) / display.output_size[1])
+        start -= QPointF(1, 1)
+        end = start - QPointF(rect.width() * 0.13, rect.height() * 0.13)
+        canvas = window.viewport.canvas
+        QTest.mousePress(canvas, Qt.MouseButton.LeftButton, pos=start.toPoint())
+        QTest.mouseMove(canvas, end.toPoint())
+        QTest.mouseRelease(canvas, Qt.MouseButton.LeftButton, pos=end.toPoint())
+        edited = window.viewport.crop
+        assert edited is not None and edited.width < crop.width and edited.height < crop.height
+        window.apply_crop_button.click()
+        wait_idle()
+        assert window.project.render.crop == edited and "crop" in window.project.frame_locks
+        frame = window.viewport.frame
+        assert frame is not None and frame.output_size == (edited.width, edited.height)
+        cropped = tmp_path / "cropped.astromosaic"
+        save_project(cropped, window.project)
+        assert load_project(cropped) == window.project
+        assert json.loads(cropped.read_bytes())["version"] == 9
+
         window.band_box.setCurrentIndex(window.band_box.findData("L"))
         assert window.start_button.text() == "Export Mosaic…" and window.viewport.frame is None
     finally:
+        window._saved = window.project
         window.close()
         wait_idle()
         window.deleteLater()
@@ -246,14 +293,19 @@ def test_desktop_project_roundtrip_progress_cancel_and_retry(
         *,
         band: str | None,
         allow_visual: bool,
+        adaptive_edge: int | None,
+        grid: RenderSpec | None,
+        inspect_crop: bool,
     ) -> PreviewFrame:
         return preview_project(
-            project, pause_on_progress(context), on_proxy, band=band, allow_visual=allow_visual
+            project, pause_on_progress(context), on_proxy, band=band, allow_visual=allow_visual,
+            adaptive_edge=adaptive_edge, grid=grid, inspect_crop=inspect_crop,
         )
 
     def set_geometry() -> None:
         dialog = QApplication.activeModalWidget()
         assert isinstance(dialog, ProjectSettings)
+        dialog.auto_frame.setChecked(False)
         dialog.ra.setText(str(center[0]))
         dialog.dec.setText(str(center[1]))
         dialog.scale.setText("7.2")

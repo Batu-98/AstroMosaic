@@ -22,7 +22,7 @@ from astromosaic.io import PanelSource
 from astromosaic.photometry import normalized_pixel
 from astromosaic.resampling import sample, source_window
 
-BackgroundMode = Literal["none", "offset", "plane"]
+BackgroundMode = Literal["none", "offset", "plane", "auto"]
 _GRID_SIDE = 26
 _MIN_PAIR_SAMPLES = 32
 
@@ -226,7 +226,7 @@ def fit_background(
     if error < 0.95 * best:
         coefficients, best, model, detail = values, error, "offset", "Held-out offset improvement."
 
-    if mode == "plane":
+    if mode in ("plane", "auto"):
         context.check_cancelled()
         plane = _fit_model(samples, count, 3, budget)
         if plane is not None and plane[2] < 0.85 * best:

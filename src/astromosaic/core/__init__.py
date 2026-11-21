@@ -46,6 +46,12 @@ class Region:
     def slices(self) -> tuple[slice, slice]:
         return slice(self.y, self.y + self.height), slice(self.x, self.x + self.width)
 
+    def contains(self, other: Region) -> bool:
+        return (
+            self.x <= other.x < other.x + other.width <= self.x + self.width
+            and self.y <= other.y < other.y + other.height <= self.y + self.height
+        )
+
     def with_halo(self, width: int, height: int, halo: int) -> Region:
         right = self.x + self.width
         bottom = self.y + self.height

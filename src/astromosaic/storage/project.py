@@ -60,6 +60,7 @@ from astromosaic.pipeline.foreground import (
     GroundPanel,
     align_foreground,
 )
+from astromosaic.pipeline.framing import FRAME_LOCKS, FrameLock
 from astromosaic.pipeline.ground_features import GroundFeatureFit, fit_ground_features
 from astromosaic.pipeline.layers import (
     ForegroundLayer,
@@ -73,6 +74,7 @@ from astromosaic.pipeline.mosaic import (
     PreviewFrame,
     RenderSpec,
     _prepare_mosaic,
+    _preview_detail,
     _preview_raster,
     _RasterPlan,
     _write_raster,
@@ -87,6 +89,7 @@ _PROJECTION_SCHEMA_VERSION = 5
 _BAND_SCHEMA_VERSION = 6
 _TERRAIN_SCHEMA_VERSION = 7
 _POINT_REVIEW_SCHEMA_VERSION = 8
+_ADAPTIVE_SCHEMA_VERSION = 9
 _MAX_MANIFEST_BYTES = 4 * 1024**2
 type Layer = Literal["sky", "foreground", "composition"]
 type _GroundInputs = tuple[tuple[int, SourceMask], ...]
@@ -221,11 +224,14 @@ class MosaicProject:
     foreground: SavedForeground | None = None
     composition: CompositionSpec | None = None
     auto_frame_preview: bool = False
+    frame_locks: frozenset[FrameLock] = frozenset()
 
     def validate(self) -> None:
         spec = self.render
         region = spec.output_region()
         spec.output_wcs()
+        if not self.frame_locks <= FRAME_LOCKS:
+            raise ValueError("Unknown automatic framing lock.")
         if any(not isfinite(panel.weight) or panel.weight <= 0 for panel in self.panels):
             raise ValueError("Panel weights must be positive and finite.")
         if self.composition is not None and self.composition.sky_crop_bottom >= region.height:
@@ -616,7 +622,10 @@ def render_project_photo(
         destination=destination,
         spec=grid if grid is not None else project.render,
         context=context,
-        photo=PhotoExport(tone, auto_frame=grid is None and project.auto_frame_preview),
+        photo=PhotoExport(
+            tone, auto_frame=grid is None and project.auto_frame_preview,
+            frame_locks=project.frame_locks,
+        ),
         **_verified_inputs(project, context, band),
     )
 
@@ -628,13 +637,21 @@ def preview_project(
     *,
     band: str | None = None,
     allow_visual: bool = False,
+    adaptive_edge: int | None = None,
+    grid: RenderSpec | None = None,
+    window: Region | None = None,
+    inspect_crop: bool = False,
 ) -> PreviewFrame:
     return preview_mosaic(
-        spec=project.render,
+        spec=grid if grid is not None else project.render,
         context=context,
         on_proxy=on_proxy,
-        auto_frame=project.auto_frame_preview,
+        auto_frame=grid is None and project.auto_frame_preview,
         allow_visual=allow_visual,
+        frame_locks=project.frame_locks,
+        adaptive_edge=adaptive_edge,
+        window=window,
+        inspect_crop=inspect_crop,
         **_verified_inputs(project, context, band),
     )
 
@@ -888,13 +905,19 @@ def preview_project_layer(
     on_proxy: Callable[[PreviewFrame], None] | None = None,
     *,
     band: str | None = None,
+    adaptive_edge: int | None = None,
+    window: Region | None = None,
 ) -> PreviewFrame:
     if layer == "sky":
-        return preview_project(project, context, on_proxy, band=band)
+        return preview_project(
+            project, context, on_proxy, band=band, adaptive_edge=adaptive_edge, window=window
+        )
     if band is not None:
         raise ValueError("A band selection requires the sky layer.")
     with _project_layer(project, layer, context) as raster:
-        return _preview_raster(raster, context, on_proxy)
+        if window is not None:
+            return _preview_detail(raster, window, context)
+        return _preview_raster(raster, context, on_proxy, adaptive_edge=adaptive_edge)
 
 
 def render_project_layer(
@@ -971,12 +994,18 @@ def save_project(
                     del point["enabled"]
                 else:
                     schema_version = _POINT_REVIEW_SCHEMA_VERSION
+    if project.frame_locks or (
+        project.refinement is not None
+        and (project.refinement.max_shift_px is None or project.refinement.background == "auto")
+    ):
+        schema_version = _ADAPTIVE_SCHEMA_VERSION
     if schema_version == _TAN_SCHEMA_VERSION:
         del render["projection"]
     data = {
         "version": schema_version,
         "application_version": version("astromosaic"),
         **({"auto_frame_preview": True} if project.auto_frame_preview else {}),
+        **({"frame_locks": sorted(project.frame_locks)} if project.frame_locks else {}),
         "render": render,
         "filter_name": project.filter_name,
         "assume_surface_brightness": project.assume_surface_brightness,
@@ -1203,14 +1232,27 @@ def _decode_composition(value: object) -> CompositionSpec | None:
     )
 
 
-def _decode_refinement(value: object) -> RefinementSpec | None:
+def _decode_refinement(value: object, schema_version: int) -> RefinementSpec | None:
     if value is None:
         return None
     record = _object(value)
     background = record["background"]
-    if background not in ("none", "offset", "plane"):
+    if background not in ("none", "offset", "plane", "auto"):
         raise ValueError("Unknown refinement background model.")
-    return RefinementSpec(_number(record["max_shift_px"]), background)
+    radius = record["max_shift_px"]
+    if schema_version < _ADAPTIVE_SCHEMA_VERSION and (radius is None or background == "auto"):
+        raise ValueError("Automatic stellar refinement requires a version 9 manifest.")
+    return RefinementSpec(None if radius is None else _number(radius), background)
+
+
+def _decode_frame_locks(value: object, schema_version: int) -> frozenset[FrameLock]:
+    if not isinstance(value, list) or any(
+        not isinstance(field, str) or field not in FRAME_LOCKS for field in value
+    ):
+        raise ValueError("Invalid automatic framing locks.")
+    if value and schema_version < _ADAPTIVE_SCHEMA_VERSION:
+        raise ValueError("Automatic framing locks require a version 9 manifest.")
+    return frozenset(value)
 
 
 def _decode_mask(value: object) -> SourceMask | None:
@@ -1276,7 +1318,7 @@ def load_project(path: Path) -> MosaicProject:
     try:
         data = _object(json.loads(payload.decode("utf-8")))
         schema_version = _integer(data["version"])
-        if not 1 <= schema_version <= _POINT_REVIEW_SCHEMA_VERSION:
+        if not 1 <= schema_version <= _ADAPTIVE_SCHEMA_VERSION:
             raise ValueError("Unsupported project manifest version.")
         if not isinstance(data["panels"], list):
             raise ValueError("Expected an ordered panel list.")
@@ -1296,10 +1338,11 @@ def load_project(path: Path) -> MosaicProject:
             _decode_render(data["render"], schema_version),
             filter_name,
             assume,
-            _decode_refinement(data["refinement"]),
+            _decode_refinement(data["refinement"], schema_version),
             _decode_foreground(data["foreground"], schema_version) if schema_version >= 3 else None,
             _decode_composition(data["composition"]) if schema_version >= 3 else None,
             auto_frame_preview=auto_frame,
+            frame_locks=_decode_frame_locks(data.get("frame_locks", []), schema_version),
         )
         project.validate()
         return project

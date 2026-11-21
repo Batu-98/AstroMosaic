@@ -4,7 +4,7 @@ from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass, replace
 from importlib.metadata import version
-from math import isfinite
+from math import isfinite, isqrt
 from pathlib import Path
 from typing import Literal, Protocol
 
@@ -33,7 +33,7 @@ from astromosaic.io import TIFF_SUFFIXES, XISF_SUFFIX, PanelSource, SkyMask, ope
 from astromosaic.io.fits_export import open_fits_mosaic
 from astromosaic.photometry import PanelCorrection
 from astromosaic.photometry.photo import PhotoTone, encode_photo_tile, preview_levels
-from astromosaic.pipeline.framing import fit_preview_grid
+from astromosaic.pipeline.framing import FRAME_LOCKS, FrameLock, fit_preview_grid
 from astromosaic.pipeline.refinement import RefinementReport, RefinementSpec, refine_panels
 from astromosaic.pipeline.srgb import SrgbTileSource
 from astromosaic.resampling import sample, source_window
@@ -49,6 +49,9 @@ _TILE_FIXED_BYTES = 64 * 1024
 _FOOTPRINT_BYTES_PER_PANEL = 256
 _PROXY_EDGE = 160
 _PREVIEW_EDGE = 512
+MAX_OVERVIEW_EDGE = 1536
+_OVERVIEW_SAMPLES = 1024**2
+MAX_DETAIL_PIXELS = 1024**2
 
 
 type SkyCalibrationRequirement = Literal["filter", "brightness"]
@@ -115,6 +118,7 @@ class MosaicResult:
 class PhotoExport:
     tone: PhotoTone | None
     auto_frame: bool = False
+    frame_locks: frozenset[FrameLock] = frozenset()
 
 
 @dataclass(frozen=True, slots=True, eq=False)
@@ -129,6 +133,9 @@ class PreviewFrame:
     seam_width: float | None = None
     fitted_grid: RenderSpec | None = None
     visual_only: bool = False
+    suggested_crop: Region | None = None
+    suggested_rotation: float | None = None
+    tone_levels: tuple[float, float] | None = None
 
 
 class _RasterPanel(Protocol):
@@ -155,6 +162,7 @@ class _Panel:
     wcs_origin: str = "primary WCS"
     correction: PanelCorrection | None = None
     footprint: PixelBounds | None = None
+    rms_arcsec: float | None = None
 
 
 def _footprint_reservation(panels: int, working_bytes: int) -> int:
@@ -427,17 +435,20 @@ class _RasterPlan:
     footprint_bytes: int = 0
 
     def tiles(
-        self, width: int, height: int, budget: _WorkingBudget, context: JobContext
+        self, width: int, height: int, budget: _WorkingBudget, context: JobContext,
+        *, window: Region | None = None,
     ) -> Iterator[_RenderedTile]:
         if not budget.reserve(self.footprint_bytes):
             raise ValueError("The working byte budget cannot fit the panel footprints.")
         tile_budget = _WorkingBudget(budget.limit - self.footprint_bytes)
-        scale = (self.size[0] / width, self.size[1] / height)
+        bounds = Region(0, 0, width, height) if window is None else window
+        scale = (self.size[0] / width, self.size[1] / height) if window is None else (1.0, 1.0)
         step = self.spec.tile_size
+        right, bottom = bounds.x + bounds.width, bounds.y + bounds.height
         try:
-            for y in range(0, height, step):
-                for x in range(0, width, step):
-                    region = Region(x, y, min(step, width - x), min(step, height - y))
+            for y in range(bounds.y, bottom, step):
+                for x in range(bounds.x, right, step):
+                    region = Region(x, y, min(step, right - x), min(step, bottom - y))
                     yield from _fit_tile(region, self.render_tile, tile_budget, context, scale)
         finally:
             budget.reserve(self.footprint_bytes + tile_budget.peak)
@@ -454,6 +465,8 @@ class _PreparedMosaic:
     refinement: RefinementReport | None
     footprint_bytes: int
     visual_only: bool = False
+    suggested_crop: Region | None = None
+    suggested_rotation: float | None = None
 
     def try_tile(
         self,
@@ -538,6 +551,8 @@ def _prepare_mosaic(
     filter_overrides: Mapping[int, str] | None = None,
     auto_frame: bool = False,
     intent: Literal["scientific", "preview", "photo"] = "scientific",
+    frame_locks: frozenset[FrameLock] = frozenset(),
+    inspect_crop: bool = False,
 ) -> Iterator[_PreparedMosaic]:
     if not paths:
         raise ValueError("Supply at least one FITS, TIFF, or XISF panel.")
@@ -569,6 +584,7 @@ def _prepare_mosaic(
         for index, (path, weight) in enumerate(zip(paths, weights, strict=True)):
             context.check_cancelled()
             detail = ""
+            rms_arcsec = None
             try:
                 source = inputs.enter_context(
                     open_panel(
@@ -587,9 +603,19 @@ def _prepare_mosaic(
                 if visual_allowed:
                     detail = " Run Plate Solve for this panel."
                 if index in wcs_sidecars:
-                    from astromosaic.astrometry.solve import load_solution
+                    from astromosaic.astrometry.solve import load_solution, read_solution_quality
 
-                    geometry, provenance = load_solution(wcs_sidecars[index], source)
+                    sidecar = wcs_sidecars[index]
+                    geometry, provenance = load_solution(sidecar, source)
+                    if refinement is not None and refinement.max_shift_px is None:
+                        quality = read_solution_quality(sidecar)
+                        rms = quality.get("rms_arcsec")
+                        if (
+                            quality.get("grade") == "catalog-validated"
+                            and isinstance(rms, int | float) and not isinstance(rms, bool)
+                            and isfinite(rms) and rms >= 0
+                        ):
+                            rms_arcsec = float(rms)
                 else:
                     geometry = read_panel_geometry(
                         source.header, descriptor.width, descriptor.height
@@ -597,7 +623,9 @@ def _prepare_mosaic(
             except ValueError as error:
                 name = f" ({path.name})" if visual_allowed or auto_frame else ""
                 raise ValueError(f"Input panel {index + 1}{name}: {error}{detail}") from error
-            panels.append(_Panel(path.name, source, geometry, weight, provenance))
+            panels.append(
+                _Panel(path.name, source, geometry, weight, provenance, rms_arcsec=rms_arcsec)
+            )
 
         encodings = [panel.source.descriptor.icc_encoding for panel in panels]
         visual = photo or (visual_allowed and "srgb" in encodings)
@@ -635,7 +663,8 @@ def _prepare_mosaic(
                     f"The {format_name} mosaic exceeds the configured output byte limit."
                 )
 
-        if auto_frame:
+        framing = None
+        if auto_frame or inspect_crop:
             regions = []
             for index, (path, panel) in enumerate(zip(paths, panels, strict=True)):
                 context.check_cancelled()
@@ -651,7 +680,10 @@ def _prepare_mosaic(
                         f"{path.name} has no sky in its saved mask. Edit the sky mask."
                     )
                 regions.append((path, panel.geometry, region))
-            spec = fit_preview_grid(spec, regions, context)
+            locks = FRAME_LOCKS - {"crop"} if inspect_crop else frame_locks
+            framing = fit_preview_grid(spec, regions, context, locks=locks)
+            if auto_frame:
+                spec = framing.grid
             crop = spec.output_region()
         target = PanelGeometry(spec.output_wcs(), ICRS())
 
@@ -679,10 +711,13 @@ def _prepare_mosaic(
                 for panel in panels
             ]
         if refinement is not None:
+            radius = refinement.resolve_radius(
+                [panel.rms_arcsec for panel in panels], spec.scale_arcsec
+            )
             report = refine_panels(
                 [(panel.source, panel.geometry) for panel in panels],
                 target,
-                refinement,
+                replace(refinement, max_shift_px=radius),
                 spec.max_working_bytes,
                 context,
             )
@@ -697,6 +732,8 @@ def _prepare_mosaic(
                 header.add_history(
                     f"Anchored relative refinement: {report.background.model} background."
                 )
+            if refinement.max_shift_px is None:
+                header.add_history(f"Automatic stellar match radius {radius:.6g} output pixels.")
         size = crop.width, crop.height
         footprint_bytes = 0
         if _footprint_reservation(len(panels), spec.max_working_bytes):
@@ -712,7 +749,9 @@ def _prepare_mosaic(
                     footprint_bytes += _FOOTPRINT_BYTES_PER_PANEL
                     panels[index] = replace(panel, footprint=footprint)
         yield _PreparedMosaic(
-            target, panels, channels, header, size, spec, report, footprint_bytes, visual
+            target, panels, channels, header, size, spec, report, footprint_bytes, visual,
+            framing.suggested_crop if framing is not None else None,
+            framing.suggested_rotation if framing is not None else None,
         )
 
 
@@ -746,6 +785,7 @@ def render_mosaic(
         filter_overrides=filter_overrides,
         auto_frame=photo.auto_frame if photo is not None else False,
         intent="photo" if photo is not None else "scientific",
+        frame_locks=photo.frame_locks if photo is not None else frozenset(),
     ) as mosaic:
         raster = mosaic.raster()
         if photo is not None:
@@ -867,36 +907,57 @@ def _bounded_size(size: tuple[int, int], edge: int) -> tuple[int, int]:
 
 
 def _preview_frame(
-    mosaic: _RasterPlan, size: tuple[int, int], context: JobContext, completed: int, total: int
+    mosaic: _RasterPlan, size: tuple[int, int], context: JobContext, completed: int, total: int,
+    *, samples: int = 1, window: Region | None = None,
 ) -> PreviewFrame:
     width, height = size
     has_layers = mosaic.seam_width is not None
-    frame_bytes = width * height * (4 * mosaic.channels + 1 + int(has_layers))
+    frame_bytes = width * height * (4 * mosaic.channels + 1 + int(has_layers) + int(samples > 1))
     budget = _WorkingBudget(mosaic.spec.max_working_bytes - frame_bytes)
     if budget.limit < _TILE_FIXED_BYTES:
         raise ValueError("The working byte budget cannot fit the preview and its render tiles.")
     context.check_cancelled()
     shape = (height, width)
-    pixels = np.empty(shape if mosaic.channels == 1 else (*shape, mosaic.channels), np.float32)
+    pixel_shape = shape if mosaic.channels == 1 else (*shape, mosaic.channels)
+    pixels = np.zeros(pixel_shape, np.float32) if samples > 1 else np.empty(pixel_shape, np.float32)
+    counts = np.zeros(shape, np.uint8) if samples > 1 else None
     valid = np.empty(shape, np.bool_)
-    common = np.empty(shape, np.bool_) if has_layers else None
-    for rendered in mosaic.tiles(width, height, budget, context):
+    common = np.zeros(shape, np.bool_) if has_layers else None
+    origin = window or Region(0, 0, width, height)
+    for rendered in mosaic.tiles(width * samples, height * samples, budget, context, window=window):
         tile = rendered.tile
-        pixels[tile.region.slices] = tile.pixels
-        valid[tile.region.slices] = tile.valid
-        if common is not None and rendered.common_coverage is not None:
-            common[tile.region.slices] = rendered.common_coverage
+        region = tile.region
+        if counts is None:
+            where = Region(region.x - origin.x, region.y - origin.y, region.width, region.height)
+            pixels[where.slices] = tile.pixels
+            valid[where.slices] = tile.valid
+            if common is not None and rendered.common_coverage is not None:
+                common[where.slices] = rendered.common_coverage
+        else:
+            y, x = np.nonzero(tile.valid)
+            bins = ((y + region.y) // samples, (x + region.x) // samples)
+            np.add.at(counts, bins, 1)
+            np.add.at(pixels, bins, tile.pixels[y, x])
+            if common is not None and rendered.common_coverage is not None:
+                np.logical_or.at(common, bins, rendered.common_coverage[y, x])
+            del y, x, bins
         completed += tile.region.width * tile.region.height
         del rendered, tile
         if context.on_progress is not None:
             context.on_progress(completed, total)
     context.check_cancelled()
+    if counts is not None:
+        np.greater(counts, 0, out=valid)
+        divisor = counts if mosaic.channels == 1 else counts[..., None]
+        where_valid = valid if mosaic.channels == 1 else valid[..., None]
+        np.divide(pixels, divisor, out=pixels, where=where_valid)
+        pixels[~valid] = np.nan
     pixels.setflags(write=False)
     valid.setflags(write=False)
     if common is not None:
         common.setflags(write=False)
     return PreviewFrame(
-        Tile(Region(0, 0, width, height), pixels, valid),
+        Tile(origin, pixels, valid),
         mosaic.size,
         mosaic.output_wcs.deepcopy() if mosaic.output_wcs is not None else None,
         frame_bytes + budget.peak,
@@ -912,20 +973,70 @@ def _preview_raster(
     *,
     fitted_grid: RenderSpec | None = None,
     visual_only: bool = False,
+    adaptive_edge: int | None = None,
 ) -> PreviewFrame:
     coarse = _bounded_size(mosaic.size, _PROXY_EDGE)
-    size = _bounded_size(mosaic.size, _PREVIEW_EDGE)
+    reference = _bounded_size(mosaic.size, _PREVIEW_EDGE)
+    size, samples = (
+        (reference, 1) if adaptive_edge is None
+        else _overview_sampling(mosaic.size, adaptive_edge, mosaic.spec.max_working_bytes)
+    )
+    separate_reference = size != reference or samples != 1
     completed = coarse[0] * coarse[1] if on_proxy is not None and coarse != size else 0
-    total = completed + size[0] * size[1]
+    total = completed + size[0] * size[1] * samples**2
+    if separate_reference:
+        total += reference[0] * reference[1]
     if on_proxy is not None and completed:
         proxy = _preview_frame(mosaic, coarse, context, 0, total)
         if proxy.tile.valid.any():
             on_proxy(replace(proxy, fitted_grid=fitted_grid, visual_only=visual_only))
         del proxy
+    levels = None
+    if separate_reference:
+        baseline = _preview_frame(mosaic, reference, context, completed, total)
+        tile = baseline.tile
+        if tile.valid.any():
+            levels = preview_levels(tile.pixels[tile.valid].astype(np.float64))
+            if on_proxy is not None and reference != coarse:
+                on_proxy(replace(
+                    baseline, fitted_grid=fitted_grid, visual_only=visual_only, tone_levels=levels
+                ))
+        del baseline, tile
+        completed += reference[0] * reference[1]
     return replace(
-        _preview_frame(mosaic, size, context, completed, total),
+        _preview_frame(mosaic, size, context, completed, total, samples=samples),
         fitted_grid=fitted_grid,
         visual_only=visual_only,
+        tone_levels=levels,
+    )
+
+
+def _overview_sampling(
+    size: tuple[int, int], edge: int, working_bytes: int
+) -> tuple[tuple[int, int], int]:
+    edge = max(_PREVIEW_EDGE, min(edge, MAX_OVERVIEW_EDGE))
+    width, height = _bounded_size(size, edge)
+    if width * height <= _OVERVIEW_SAMPLES and (width, height) == size:
+        return (width, height), 1
+    # Reserve at most a quarter of the job's bytes for the overview raster.
+    sample_budget = min(4 * _OVERVIEW_SAMPLES, max(_OVERVIEW_SAMPLES, 2 * edge**2))
+    capacity = max(1, min(sample_budget // 4, working_bytes // 60))
+    if width * height > capacity:
+        edge = max(1, int(max(width, height) * (capacity / (width * height)) ** 0.5))
+        width, height = _bounded_size(size, edge)
+    factor = min(4, isqrt(sample_budget // (width * height)))
+    factor = min(factor, max(2, round(max(size[0] / width, size[1] / height))))
+    return (width, height), factor
+
+
+def _preview_detail(raster: _RasterPlan, window: Region, context: JobContext) -> PreviewFrame:
+    if not Region(0, 0, *raster.size).contains(window):
+        raise ValueError("The detail window must be inside the preview grid.")
+    if window.width * window.height > MAX_DETAIL_PIXELS:
+        raise ValueError("Zoom closer to render full-resolution detail.")
+    return _preview_frame(
+        raster, (window.width, window.height), context, 0, window.width * window.height,
+        window=window,
     )
 
 
@@ -944,6 +1055,10 @@ def preview_mosaic(
     filter_overrides: Mapping[int, str] | None = None,
     auto_frame: bool = False,
     allow_visual: bool = False,
+    frame_locks: frozenset[FrameLock] = frozenset(),
+    adaptive_edge: int | None = None,
+    window: Region | None = None,
+    inspect_crop: bool = False,
 ) -> PreviewFrame:
     """Sample the saved or fitted sky grid without opening an output file."""
     with _prepare_mosaic(
@@ -960,11 +1075,17 @@ def preview_mosaic(
         filter_overrides=filter_overrides,
         auto_frame=auto_frame,
         intent="preview" if allow_visual else "scientific",
+        frame_locks=frame_locks,
+        inspect_crop=inspect_crop,
     ) as mosaic:
-        return _preview_raster(
-            mosaic.raster(),
+        raster = mosaic.raster()
+        if window is not None:
+            return replace(_preview_detail(raster, window, context), visual_only=mosaic.visual_only)
+        return replace(_preview_raster(
+            raster,
             context,
             on_proxy,
             fitted_grid=mosaic.spec if auto_frame else None,
             visual_only=mosaic.visual_only,
-        )
+            adaptive_edge=adaptive_edge,
+        ), suggested_crop=mosaic.suggested_crop, suggested_rotation=mosaic.suggested_rotation)

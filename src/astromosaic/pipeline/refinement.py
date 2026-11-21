@@ -2,7 +2,7 @@
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from math import isfinite
+from math import hypot, isfinite
 from typing import Literal
 
 from astromosaic.astrometry.registration import EdgeReport, Residuals, project_field, register
@@ -18,17 +18,30 @@ from astromosaic.photometry.background import (
     fit_background,
 )
 
+DEFAULT_MATCH_RADIUS = 6.0
+
 
 @dataclass(frozen=True, slots=True)
 class RefinementSpec:
-    max_shift_px: float = 6.0
+    max_shift_px: float | None = DEFAULT_MATCH_RADIUS
     background: BackgroundMode = "offset"
 
     def __post_init__(self) -> None:
-        if not isfinite(self.max_shift_px) or self.max_shift_px <= 0:
+        if self.max_shift_px is not None and (
+            not isfinite(self.max_shift_px) or self.max_shift_px <= 0
+        ):
             raise ValueError("Expected a positive finite registration search radius.")
-        if self.background not in ("none", "offset", "plane"):
-            raise ValueError("Expected background mode none, offset, or plane.")
+        if self.background not in ("none", "offset", "plane", "auto"):
+            raise ValueError("Expected background mode none, offset, plane, or auto.")
+
+    def resolve_radius(self, rms_arcsec: Sequence[float | None], scale_arcsec: float) -> float:
+        if self.max_shift_px is not None:
+            return self.max_shift_px
+        valid = sorted((rms for rms in rms_arcsec if rms is not None), reverse=True)
+        if len(valid) < 2 or len(valid) != len(rms_arcsec):
+            return DEFAULT_MATCH_RADIUS
+        paired = 3 * hypot(valid[0], valid[1]) / scale_arcsec
+        return min(DEFAULT_MATCH_RADIUS, max(1.0, paired))
 
 
 @dataclass(frozen=True, slots=True)
@@ -41,6 +54,7 @@ class RefinementReport:
     held_out_gain_error: float | None
     background: BackgroundReport | None = None
     corrections: tuple[PanelCorrection, ...] = ()
+    match_radius_px: float | None = None
 
 
 class RefinementRejected(ValueError):
@@ -78,7 +92,8 @@ def refine_panels(
         star_counts.append(len(field.stars))
         fields.append(projected)
         reserved += projected.positions.nbytes + projected.fluxes.nbytes + field.exclusions.nbytes
-    registration = register(fields, spec.max_shift_px, context)
+    radius = spec.max_shift_px if spec.max_shift_px is not None else DEFAULT_MATCH_RADIUS
+    registration = register(fields, radius, context)
     components = tuple(tuple(index + 1 for index in group) for group in registration.components)
     counts = tuple(star_counts)
     edges = tuple(
@@ -93,7 +108,10 @@ def refine_panels(
     alignment, flux_error = registration.held_out, registration.held_out_gain_error
     if registration.status != "ready":
         raise RefinementRejected(
-            RefinementReport(registration.status, components, counts, edges, alignment, flux_error)
+            RefinementReport(
+                registration.status, components, counts, edges, alignment, flux_error,
+                match_radius_px=radius,
+            )
         )
 
     background_inputs = []
@@ -117,5 +135,5 @@ def refine_panels(
         for panel, row in zip(background_inputs, coefficients, strict=True)
     )
     return RefinementReport(
-        "ready", components, counts, edges, alignment, flux_error, background, corrections
+        "ready", components, counts, edges, alignment, flux_error, background, corrections, radius
     )

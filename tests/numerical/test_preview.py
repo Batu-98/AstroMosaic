@@ -242,6 +242,63 @@ def test_desktop_preview_names_the_panel_that_needs_a_wcs(tmp_path: Path) -> Non
         preview_mosaic([source], spec, auto_frame=True, allow_visual=True)
 
 
+def test_adaptive_preview_averages_valid_subsamples_and_reuses_tone(tmp_path: Path) -> None:
+    width, height = 2048, 12
+    spec = RenderSpec(CENTER, (width, height), SCALE_ARCSEC, tile_size=127)
+    pattern = np.array([
+        [8, 0, 0, np.nan],
+        [0, 0, 0, 0],
+        [0, 0, 0, 0],
+        [0, 0, 0, 4],
+    ], np.float32)
+    source = tmp_path / "area.fits"
+    values = np.tile(pattern, (height // 4, width // 4))
+    values[:, :4] = np.nan
+    header = spec.output_wcs().to_header()
+    header["BUNIT"] = "MJy/sr"
+    fits.writeto(source, values, header)
+    reference = preview_mosaic([source], spec)
+    filtered = preview_mosaic([source], spec, adaptive_edge=512)
+    assert filtered.output_size == (width, height)
+    assert filtered.tile.valid.shape == (3, 512)
+    assert not filtered.tile.valid[:, 0].any() and filtered.tile.valid[:, 1:].all()
+    np.testing.assert_allclose(filtered.tile.pixels[:, 1:], 12 / 15, atol=1e-5)
+    assert reference.tile.pixels[1, 2] == pytest.approx(0)
+    assert filtered.tone_levels == (0.0, 0.0)
+    assert filtered.peak_reserved_bytes <= spec.max_working_bytes
+
+    window = Region(899, 2, 13, 7)
+    detail = preview_mosaic([source], spec, window=window)
+    export = tmp_path / "detail.fits"
+    cropped = replace(spec, crop=window)
+    render_mosaic([source], export, cropped)
+    with fitsio.FITS(export) as reopened:
+        np.testing.assert_array_equal(detail.tile.pixels, reopened[0].read())
+        np.testing.assert_array_equal(detail.tile.valid, reopened["COVERAGE"].read())
+    assert detail.tile.region == window and detail.output_size == spec.size
+
+
+def test_auto_framing_respects_partial_locks_and_recommends_a_crop(tmp_path: Path) -> None:
+    source = tmp_path / "inclined.fits"
+    _write_sky_panel(source, RenderSpec(CENTER, (56, 18), SCALE_ARCSEC, 25))
+    region = Region(18, 13, 90, 26)
+    spec = RenderSpec(CENTER, (124, 62), SCALE_ARCSEC, crop=region, projection="ZEA")
+    automatic = preview_mosaic([source], spec, auto_frame=True)
+    locked = preview_mosaic(
+        [source], spec, auto_frame=True,
+        frame_locks=frozenset(("center", "projection", "size", "scale", "crop")),
+    )
+    assert locked.fitted_grid == spec
+    assert locked.fitted_grid.output_region() == region
+    assert locked.suggested_crop is not None and locked.suggested_crop != region
+    assert Region(0, 0, *spec.size).contains(locked.suggested_crop)
+    assert locked.suggested_rotation is not None
+    assert abs(locked.suggested_rotation - 25) <= 3
+    assert automatic.fitted_grid is not None and automatic.fitted_grid.size != spec.size
+    uncropped = preview_mosaic([source], replace(spec, crop=None), inspect_crop=True)
+    assert uncropped.output_size == spec.size and uncropped.suggested_crop == locked.suggested_crop
+
+
 @pytest.mark.parametrize("preserve", [False, True], ids=["preview-tone", "preserve-tone"])
 def test_photo_encodes_the_full_weighted_grid_and_preserves_coverage(
     tmp_path: Path, preserve: bool

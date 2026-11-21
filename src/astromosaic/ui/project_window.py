@@ -3,7 +3,7 @@
 import json
 import re
 from argparse import Namespace
-from dataclasses import asdict, replace
+from dataclasses import asdict, dataclass, replace
 from importlib.metadata import version
 from pathlib import Path
 from time import monotonic
@@ -12,6 +12,7 @@ from typing import cast
 from PySide6.QtCore import QSettings, QSignalBlocker, QStandardPaths, Qt, QTimer, Slot
 from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import (
+    QApplication,
     QCheckBox,
     QComboBox,
     QDockWidget,
@@ -31,8 +32,9 @@ from PySide6.QtWidgets import (
 
 from astromosaic.astrometry.hints import PanelOptics
 from astromosaic.astrometry.solve import read_solution_diagnostics
+from astromosaic.core import Region
 from astromosaic.display import DisplayFrame, highlight_overlap
-from astromosaic.pipeline.mosaic import RenderSpec, SkyCalibrationRequirement
+from astromosaic.pipeline.mosaic import MAX_DETAIL_PIXELS, RenderSpec, SkyCalibrationRequirement
 from astromosaic.storage.project import (
     FileReference,
     Layer,
@@ -56,6 +58,7 @@ from astromosaic.ui.mosaic_job import (
     MosaicJob,
     PanelInspectionJob,
     PlateSolveJob,
+    PreviewDetailJob,
     PreviewJob,
 )
 from astromosaic.ui.panel_table import VIEWS, PanelTable, panel_row
@@ -93,6 +96,15 @@ _CALIBRATION_GUIDANCE: dict[SkyCalibrationRequirement, str] = {
 }
 
 
+@dataclass(slots=True)
+class _CropDraft:
+    grid: RenderSpec
+    frame: DisplayFrame
+    fitted_grid: RenderSpec | None
+    rotation: float | None
+    suggested: Region | None = None
+
+
 class ProjectWindow(QMainWindow):
     def __init__(self, *, use_gpu: bool = True, preferences: QSettings | None = None) -> None:
         super().__init__()
@@ -114,6 +126,21 @@ class ProjectWindow(QMainWindow):
         self._preview_project: MosaicProject | None = None
         self._preview_grid: RenderSpec | None = None
         self._display_frame: DisplayFrame | None = None
+        self._suggested_rotation: float | None = None
+        self._crop_draft: _CropDraft | None = None
+        self._detail_job: PreviewDetailJob | None = None
+        self._detail_base: DisplayFrame | None = None
+        self._live_ready = False
+        self._live_pending = False
+        self._overview_edge = 0
+        self._preview_timer = QTimer(self)
+        self._preview_timer.setSingleShot(True)
+        self._preview_timer.setInterval(350)
+        self._preview_timer.timeout.connect(self._live_preview)
+        self._detail_timer = QTimer(self)
+        self._detail_timer.setSingleShot(True)
+        self._detail_timer.setInterval(160)
+        self._detail_timer.timeout.connect(self._request_detail)
         self._close_after_job = False
         self.resize(1140, 780)
         self.setMinimumWidth(630)
@@ -130,10 +157,19 @@ class ProjectWindow(QMainWindow):
             "Export Scientific Mosaic…", self._start_scientific
         )
         view_menu = self.menuBar().addMenu("&View")
-        add_theme_menu(
-            view_menu,
-            preferences if preferences is not None else QSettings("AstroMosaic", "AstroMosaic"),
+        application_preferences = (
+            preferences if preferences is not None else QSettings("AstroMosaic", "AstroMosaic")
         )
+        self.live_preview_action = view_menu.addAction("Live Sky Preview")
+        self.live_preview_action.setCheckable(True)
+        self.live_preview_action.setChecked(bool(
+            application_preferences.value("view/liveSkyPreview", True, type=bool)
+        ))
+        self.live_preview_action.toggled.connect(self._toggle_live_preview)
+        self.live_preview_action.toggled.connect(
+            lambda enabled: application_preferences.setValue("view/liveSkyPreview", enabled)
+        )
+        add_theme_menu(view_menu, application_preferences)
         panel_menu = self.menuBar().addMenu("&Panel")
         self.check_foreground = panel_menu.addAction("Check Foreground", self._check_foreground)
         self.propose_mask = panel_menu.addAction("Propose Sky Mask…", self._propose_mask)
@@ -177,6 +213,8 @@ class ProjectWindow(QMainWindow):
         splitter = QSplitter(Qt.Orientation.Vertical)
         splitter.setChildrenCollapsible(False)
         self.viewport = SkyViewport(use_gpu=use_gpu)
+        self.viewport.view_changed.connect(self._view_changed)
+        self.viewport.crop_changed.connect(self._show_crop_bounds)
         self._editor = QWidget(body)
         controls = QVBoxLayout(self._editor)
         controls.setContentsMargins(0, 0, 0, 6)
@@ -251,7 +289,28 @@ class ProjectWindow(QMainWindow):
         self.grid_summary = QLabel()
         self.grid_summary.setTextFormat(Qt.TextFormat.PlainText)
         self.grid_summary.setWordWrap(True)
-        preview_layout.addWidget(self.grid_summary)
+        grid_controls = QHBoxLayout()
+        grid_controls.addWidget(self.grid_summary, 1)
+        self.edit_crop_button = QPushButton("Edit Crop…")
+        self.edit_crop_button.clicked.connect(self._start_crop)
+        grid_controls.addWidget(self.edit_crop_button)
+        preview_layout.addLayout(grid_controls)
+        self.crop_controls = QWidget(preview)
+        crop_row = QHBoxLayout(self.crop_controls)
+        crop_row.setContentsMargins(0, 0, 0, 0)
+        self.crop_bounds = QLabel()
+        self.crop_bounds.setWordWrap(True)
+        crop_row.addWidget(self.crop_bounds, 1)
+        self.auto_crop_button = QPushButton("Use Auto Crop")
+        self.auto_crop_button.clicked.connect(self._reset_crop)
+        crop_row.addWidget(self.auto_crop_button)
+        self.apply_crop_button = QPushButton("Apply Crop")
+        self.apply_crop_button.clicked.connect(self._apply_crop)
+        crop_row.addWidget(self.apply_crop_button)
+        self.cancel_crop_button = QPushButton("Cancel")
+        self.cancel_crop_button.clicked.connect(self._restore_crop_preview)
+        crop_row.addWidget(self.cancel_crop_button)
+        preview_layout.addWidget(self.crop_controls)
         preview_layout.addWidget(self.viewport, 1)
         splitter.addWidget(preview)
         splitter.setStretchFactor(0, 2)
@@ -351,6 +410,7 @@ class ProjectWindow(QMainWindow):
             self._preview_project != self.project or not linked
         ):
             self._clear_preview()
+            self._queue_live_preview()
         self._selection_changed()
         name = self.project_path.name if self.project_path else "Untitled"
         marker = "*" if self.project != self._saved else ""
@@ -360,6 +420,8 @@ class ProjectWindow(QMainWindow):
         self._layer_controls()
         self.cancel_button.setEnabled(self.job is not None)
         self._start_panel_inspection()
+        if self._live_pending and not self._is_running():
+            self._preview_timer.start()
 
     def _panel_inspection(self, index: int) -> PanelInspection | None:
         if self._inspected_panels is self.project.panels and 0 <= index < len(self._inspections):
@@ -428,7 +490,8 @@ class ProjectWindow(QMainWindow):
             self.band_box.setCurrentIndex(max(0, self.band_box.findData(selected)))
 
     def _layer_controls(self) -> None:
-        idle = not self._is_running()
+        cropping = self._crop_draft is not None
+        idle = not self._is_running() and not cropping
         layer = self._layer()
         ground = self.project.current_foreground()
         sky = bool(self.project.sky_indices())
@@ -458,11 +521,26 @@ class ProjectWindow(QMainWindow):
         can_adopt = layer == "sky" and self._preview_grid is not None
         self.use_preview_grid_button.setVisible(can_adopt)
         self.use_preview_grid_button.setEnabled(idle and can_adopt)
+        self.edit_crop_button.setVisible(layer == "sky" and not cropping)
+        self.edit_crop_button.setEnabled(
+            idle and self._preview_project == self.project
+            and self._display_frame is not None and self._display_frame.has_coverage
+        )
+        self.crop_controls.setVisible(cropping)
+        crop_ready = cropping and self.job is None
+        self.apply_crop_button.setEnabled(crop_ready and self.viewport.crop is not None)
+        self.auto_crop_button.setEnabled(
+            crop_ready and self._crop_draft is not None and self._crop_draft.suggested is not None
+        )
+        self.cancel_crop_button.setEnabled(crop_ready)
         spec = self.project.render
         region = spec.output_region()
         ready = False
         if layer == "sky":
-            if self.project.auto_frame_preview and self._preview_grid is None:
+            if self._crop_draft is not None:
+                width, height = self._crop_draft.grid.size
+                summary = f"Full sky grid · {width:,} × {height:,} px"
+            elif self.project.auto_frame_preview and self._preview_grid is None:
                 summary = "Fit to solved sky panels"
             else:
                 preview_spec = self._preview_grid or spec
@@ -506,6 +584,7 @@ class ProjectWindow(QMainWindow):
     @Slot()
     def _layer_changed(self) -> None:
         self._clear_preview()
+        self._queue_live_preview()
         self._layer_controls()
         self.progress.setValue(0)
         if self.job is None:
@@ -549,6 +628,8 @@ class ProjectWindow(QMainWindow):
         return response == _Button.Discard or (response == _Button.Save and self._save())
 
     def _set_project(self, project: MosaicProject, path: Path | None) -> None:
+        self._preview_timer.stop()
+        self._live_ready = self._live_pending = False
         self._clear_preview()
         self._foreground_report = None
         self._foreground_panels = None
@@ -828,7 +909,26 @@ class ProjectWindow(QMainWindow):
             )
 
     def _settings(self) -> None:
-        dialog = ProjectSettings(self.project, self)
+        selected_band = self._sky_band()
+        inputs = set()
+        for index in self.project.sky_indices():
+            inspection = self._panel_inspection(index)
+            if inspection is None or inspection.descriptor is None:
+                continue
+            band = self.project.panels[index].sky_band(
+                inspection.filter_name, self.project.filter_name
+            )
+            if selected_band is None or band == selected_band:
+                descriptor = inspection.descriptor
+                unit = (
+                    "sRGB" if descriptor.icc_encoding == "srgb"
+                    else descriptor.unit or "no brightness unit"
+                )
+                inputs.add(f"{band} · {unit}")
+        dialog = ProjectSettings(
+            self.project, self, preview_grid=self._preview_grid,
+            suggested_rotation=self._suggested_rotation, input_metadata=", ".join(sorted(inputs)),
+        )
         try:
             while dialog.exec():
                 try:
@@ -840,7 +940,7 @@ class ProjectWindow(QMainWindow):
                 self._refresh(self.panels.currentIndex().row())
                 summary = "Mosaic settings applied."
                 if previous.composition is not None and self.project.composition is None:
-                    summary += " Set the composition placement for the new sky projection."
+                    summary += " Set the composition placement for the new sky grid."
                 self._report_operation(summary)
                 break
         finally:
@@ -931,6 +1031,8 @@ class ProjectWindow(QMainWindow):
             self._layer() == "sky"
             and self._preview_project == self.project
             and self._display_frame is not None
+            and self._display_frame.has_coverage
+            and self._crop_draft is None
             and self._display_frame.photo_levels is not None
         )
 
@@ -984,12 +1086,116 @@ class ProjectWindow(QMainWindow):
         )
 
     def _clear_preview(self) -> None:
+        self._detail_timer.stop()
+        if self._detail_job is not None:
+            self._detail_job.cancel()
+        self._crop_draft = None
+        self._suggested_rotation = None
         self._preview_project = None
         self._preview_grid = None
         self.preview_title.setText("Preview")
         self._display_frame = None
         self.overlap_check.setEnabled(False)
+        self.viewport.set_crop(None)
         self.viewport.set_frame(None)
+
+    @Slot(bool)
+    def _toggle_live_preview(self, enabled: bool) -> None:
+        if enabled and self._preview_project != self.project:
+            self._queue_live_preview()
+        elif not enabled:
+            self._preview_timer.stop()
+            self._live_pending = False
+
+    def _queue_live_preview(self) -> None:
+        if self._live_ready and self.live_preview_action.isChecked() and self._layer() == "sky":
+            self._live_pending = True
+            self._preview_timer.start()
+
+    @Slot()
+    def _live_preview(self) -> None:
+        if not self._live_pending or self._close_after_job or self._crop_draft is not None:
+            return
+        if self._is_running() or self._inspection_job is not None or QApplication.activeModalWidget():
+            self._preview_timer.start()
+            return
+        selected = self._sky_band()
+        if self._layer() != "sky" or (self.band_box.count() > 2 and selected is None):
+            return
+        ready = False
+        for index in self.project.sky_indices():
+            info = self._panel_inspection(index)
+            if info is None:
+                return
+            band = self.project.panels[index].sky_band(info.filter_name, self.project.filter_name)
+            if selected is None or selected == band:
+                if info.wcs_status not in ("Embedded", "Sidecar"):
+                    return
+                ready = True
+        if ready:
+            self._preview()
+
+    @Slot()
+    def _view_changed(self) -> None:
+        if self._display_frame is None or self.job is not None or self._close_after_job:
+            return
+        edge = self.viewport.overview_edge()
+        if self.viewport.visible_detail() is None and self._overview_edge and (
+            abs(edge - self._overview_edge) >= 256
+        ):
+            self._queue_live_preview()
+        self._detail_timer.start()
+
+    @Slot()
+    def _request_detail(self) -> None:
+        frame = self._display_frame
+        window = self.viewport.visible_detail()
+        if window is None:
+            self.viewport.clear_detail()
+            if self._detail_job is not None:
+                self._detail_job.cancel()
+            return
+        if frame is None or frame.tone_levels is None or self._is_running() or self._close_after_job:
+            return
+        if self.viewport.detail is not None and self.viewport.detail.contains(window):
+            return
+        if self._detail_job is not None:
+            if not self._detail_job.window.contains(window):
+                self._detail_job.cancel()
+            return
+        padded = window.with_halo(*frame.output_size, 48)
+        if padded.width * padded.height <= MAX_DETAIL_PIXELS:
+            window = padded
+        grid = (
+            replace(self._crop_draft.grid, crop=None) if self._crop_draft is not None
+            else self._preview_grid or self.project.render
+        )
+        job = PreviewDetailJob(
+            self.project, self, self._layer(), window, frame.tone_levels,
+            band=self._sky_band(), grid=grid,
+        )
+        self._detail_base, self._detail_job = frame, job
+        job.finished.connect(self._finish_detail)
+        job.start()
+
+    @Slot()
+    def _finish_detail(self) -> None:
+        job, self._detail_job = self._detail_job, None
+        assert job is not None
+        request = self.viewport.visible_detail()
+        if self.job is not None:
+            self.job.start()
+        elif not self._close_after_job and request is not None and (
+            self._detail_base is self._display_frame and job.project == self.project
+        ):
+            if job.result is not None and job.window.contains(request):
+                detail = highlight_overlap(job.result) if self.overlap_check.isChecked() else job.result
+                self.viewport.set_detail(job.window, detail)
+            elif job.error is None:
+                self._detail_timer.start()
+        self._detail_base = None
+        job.deleteLater()
+        self._finish_close_if_ready()
 
     @Slot(bool)
     def _set_auto_frame(self, enabled: bool) -> None:
@@ -1018,11 +1224,74 @@ class ProjectWindow(QMainWindow):
     def _preview(self) -> None:
         if self._is_running() or not self.project.panels:
             return
+        edge = self.viewport.overview_edge()
         self._clear_preview()
+        self._live_pending = False
+        self._preview_timer.stop()
         layer = self._layer()
-        job = PreviewJob(self.project, self, layer, band=self._sky_band())
+        self._live_ready = self._live_ready or layer == "sky"
+        job = PreviewJob(
+            self.project, self, layer, band=self._sky_band(),
+            adaptive_edge=edge,
+        )
         job.proxy_ready.connect(self._show_proxy)
         self._launch_job(job, f"Preparing {layer} preview…")
+
+    @Slot()
+    def _start_crop(self) -> None:
+        if self._is_running() or self._display_frame is None or self._preview_project != self.project:
+            return
+        grid = self._preview_grid or self.project.render
+        draft = _CropDraft(grid, self._display_frame, self._preview_grid, self._suggested_rotation)
+        self._clear_preview()
+        self._crop_draft = draft
+        self._show_crop_bounds(grid.output_region())
+        job = PreviewJob(
+            self.project, self, band=self._sky_band(),
+            adaptive_edge=self.viewport.overview_edge(), crop_grid=grid,
+        )
+        job.proxy_ready.connect(self._show_proxy)
+        self._launch_job(job, "Preparing the full sky grid for crop editing…")
+
+    @Slot(object)
+    def _show_crop_bounds(self, crop: Region) -> None:
+        self.crop_bounds.setText(f"Crop {crop.x}, {crop.y} · {crop.width} × {crop.height} px")
+
+    @Slot()
+    def _reset_crop(self) -> None:
+        if self._crop_draft is not None and (crop := self._crop_draft.suggested) is not None:
+            self.viewport.set_crop(crop, editing=True)
+            self._show_crop_bounds(crop)
+
+    @Slot()
+    def _apply_crop(self) -> None:
+        draft, crop = self._crop_draft, self.viewport.crop
+        if self._is_running() or draft is None or crop is None:
+            return
+        grid = replace(draft.grid, crop=None if crop == Region(0, 0, *draft.grid.size) else crop)
+        previous = self.project
+        self.project = replace(
+            previous, render=grid, auto_frame_preview=False,
+            frame_locks=previous.frame_locks | {"crop"},
+            composition=previous.composition if grid == previous.render else None,
+        )
+        self._clear_preview()
+        self._refresh(self.panels.currentIndex().row())
+        self._preview()
+
+    @Slot()
+    def _restore_crop_preview(self) -> None:
+        if self._crop_draft is None:
+            return
+        draft = self._crop_draft
+        self._clear_preview()
+        self._preview_project = self.project
+        self._preview_grid = draft.fitted_grid
+        self._suggested_rotation = draft.rotation
+        self.preview_title.setText("Visual Preview" if draft.frame.photo_levels else "Preview")
+        self._set_display_frame(draft.frame)
+        self._set_running()
+        self._report_operation("Crop changes discarded.")
 
     @Slot(object, bool)
     def _show_proxy(self, frame: DisplayFrame, visual_only: bool) -> None:
@@ -1034,6 +1303,10 @@ class ProjectWindow(QMainWindow):
         self._display_frame = frame
         self.overlap_check.setEnabled(frame.common_coverage is not None)
         self._paint_display()
+        if self._layer() == "sky":
+            draft = self._crop_draft
+            crop = Region(0, 0, *frame.output_size) if draft is None else draft.grid.output_region()
+            self.viewport.set_crop(crop, editing=draft is not None and self.job is None)
 
     @Slot()
     def _paint_display(self) -> None:
@@ -1116,6 +1389,7 @@ class ProjectWindow(QMainWindow):
             dialog.deleteLater()
 
     def _launch_job(self, job: _Job, message: str) -> None:
+        self._detail_timer.stop()
         self.job = job
         if isinstance(job, PlateSolveJob):
             job.solve_progress.connect(self._plate_solve_progress)
@@ -1130,7 +1404,10 @@ class ProjectWindow(QMainWindow):
         self.status.setToolTip("")
         self._set_running()
         self._report_operation(message)
-        job.start()
+        if self._detail_job is None:
+            job.start()
+        else:
+            self._detail_job.cancel()
 
     def _show_job_progress(self, visible: bool, *, timed: bool = False) -> None:
         self.progress.setVisible(visible)
@@ -1157,21 +1434,24 @@ class ProjectWindow(QMainWindow):
 
     @Slot()
     def _command_running_changed(self) -> None:
+        if self.command_panel.is_running and self._detail_job is not None:
+            self._detail_job.cancel()
         self._set_running()
         self._finish_close_if_ready()
 
     def _set_running(self) -> None:
         running = self._is_running()
+        can_edit = not running and self._crop_draft is None
         self._show_job_progress(self.job is not None, timed=isinstance(self.job, PlateSolveJob))
         self.cancel_button.setVisible(self.job is not None)
         for action in self._file_actions:
-            action.setEnabled(not running)
-        self.plate_solve_settings_action.setEnabled(not running)
-        self._editor.setEnabled(not running)
-        self.settings_button.setEnabled(not running)
+            action.setEnabled(can_edit)
+        self.plate_solve_settings_action.setEnabled(can_edit)
+        self._editor.setEnabled(can_edit)
+        self.settings_button.setEnabled(can_edit)
         self._layer_controls()
         self.cancel_button.setEnabled(self.job is not None)
-        self.command_panel.set_available(self.job is None)
+        self.command_panel.set_available(self.job is None and self._crop_draft is None)
         self._selection_changed()
 
     @Slot(object, object)
@@ -1251,8 +1531,27 @@ class ProjectWindow(QMainWindow):
         self._show_job_progress(True, timed=True)
 
     def _finish_preview(self, job: PreviewJob) -> None:
+        if job.crop_grid is not None:
+            draft = self._crop_draft
+            assert draft is not None
+            if job.result is None:
+                self._restore_crop_preview()
+                if job.cancelled:
+                    self._report_operation("Crop preview cancelled.")
+                else:
+                    self._report_render_failure("Crop preview failed.", job)
+                return
+            draft.suggested = job.suggested_crop
+            self._overview_edge = job.adaptive_edge or 0
+            self.preview_title.setText("Crop Preview")
+            self._set_display_frame(job.result)
+            self._set_running()
+            self._report_operation("Drag the crop edges or handles, then apply the selection.")
+            return
         if job.result is not None:
             self._preview_project = job.project
+            self._overview_edge = job.adaptive_edge or 0
+            self._suggested_rotation = job.suggested_rotation
             if job.result.has_coverage:
                 self._preview_grid = job.fitted_grid
             self.preview_title.setText("Visual Preview" if job.visual_only else "Preview")
@@ -1280,6 +1579,7 @@ class ProjectWindow(QMainWindow):
                     f" Both layers cover {int(job.result.common_coverage.sum()):,} preview samples."
                 )
             self._report_operation(text)
+            self._view_changed()
         else:
             self._clear_preview()
             self.progress.setValue(0)
@@ -1415,17 +1715,24 @@ class ProjectWindow(QMainWindow):
         box.deleteLater()
 
     def _finish_close_if_ready(self) -> None:
-        if self._close_after_job and not self._is_running() and self._inspection_job is None:
+        if (
+            self._close_after_job and not self._is_running()
+            and self._inspection_job is None and self._detail_job is None
+        ):
             self._close_after_job = False
             QTimer.singleShot(0, self.close)
 
     def closeEvent(self, event: QCloseEvent) -> None:
-        if self._is_running() or self._inspection_job is not None:
+        if self._is_running() or self._inspection_job is not None or self._detail_job is not None:
             self._close_after_job = True
+            self._preview_timer.stop()
+            self._detail_timer.stop()
             self._cancel()
             self.command_panel.cancel()
             if self._inspection_job is not None:
                 self._inspection_job.cancel()
+            if self._detail_job is not None:
+                self._detail_job.cancel()
             event.ignore()
         elif self._confirm_discard():
             self.viewport.release_opengl()
