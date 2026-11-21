@@ -78,9 +78,9 @@ def _load_points(path: Path, context: JobContext, budget: int) -> tuple[GroundCo
             or any(type(panel) is not int or panel < 1 for panel in panels)
         ):
             raise ValueError(f"Expected two one-based panel numbers for control point {name!r}.")
-        held_out = row.get("held_out", False)
-        if not isinstance(held_out, bool):
-            raise ValueError(f"Expected a boolean held_out flag for control point {name!r}.")
+        held_out, enabled = row.get("held_out", False), row.get("enabled", True)
+        if not isinstance(held_out, bool) or not isinstance(enabled, bool):
+            raise ValueError(f"Expected boolean held_out and enabled flags for point {name!r}.")
         points.append(
             GroundControlPoint(
                 name,
@@ -88,6 +88,7 @@ def _load_points(path: Path, context: JobContext, budget: int) -> tuple[GroundCo
                 _position(row.get("left_xy"), f"control point {name!r} on the left panel"),
                 _position(row.get("right_xy"), f"control point {name!r} on the right panel"),
                 held_out,
+                enabled,
             )
         )
     return tuple(points)
@@ -139,7 +140,14 @@ def fit_project_points(arguments: Namespace, result: dict[str, object], context:
                 asdict(row) | {"panels": [p + 1 for p in row.panels]} for row in automatic.pairs
             ],
             "points": [
-                asdict(row) | {"panels": [p + 1 for p in row.panels]} for row in automatic.points
+                {
+                    "id": row.id,
+                    "panels": [p + 1 for p in row.panels],
+                    "left_xy": row.left_xy,
+                    "right_xy": row.right_xy,
+                    "held_out": row.held_out,
+                }
+                for row in automatic.points
             ],
         }
         fit = automatic.fit

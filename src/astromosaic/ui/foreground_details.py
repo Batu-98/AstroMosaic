@@ -94,6 +94,7 @@ class ForegroundAlignmentDetails(QDialog):
         self.setWindowTitle("Foreground Alignment Details")
         self.resize(950, 450)
         self.selected_panel: int | None = None
+        self.review_requested = False
         self.model = _PairTable(report, names, self)
         self.table = QTableView(self)
         self.table.setModel(self.model)
@@ -123,11 +124,17 @@ class ForegroundAlignmentDetails(QDialog):
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
         self.mask_a = buttons.addButton("Inspect Mask A…", QDialogButtonBox.ButtonRole.ActionRole)
         self.mask_b = buttons.addButton("Inspect Mask B…", QDialogButtonBox.ButtonRole.ActionRole)
+        review = buttons.addButton("Review Control Points…", QDialogButtonBox.ButtonRole.ActionRole)
         self.mask_a.clicked.connect(lambda: self._inspect(0))
         self.mask_b.clicked.connect(lambda: self._inspect(1))
+        review.clicked.connect(self._review_points)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
         self.table.selectRow(0)
+
+    def _review_points(self) -> None:
+        self.review_requested = True
+        self.accept()
 
     def _update_selection(self, current: QModelIndex) -> None:
         self.mask_a.setEnabled(current.isValid())

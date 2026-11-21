@@ -38,6 +38,7 @@ class GroundControlPoint:
     left_xy: XY
     right_xy: XY
     held_out: bool = False
+    enabled: bool = True
 
 
 @dataclass(frozen=True, slots=True)
@@ -153,7 +154,9 @@ def _prepare(
     for index, point in enumerate(points):
         context.check_cancelled()
         a, b = point.panels
-        if a == b:
+        if not point.enabled:
+            status = "disabled"
+        elif a == b:
             status = "same-panel"
         elif a not in sources or b not in sources:
             status = "panel-without-active-ground"

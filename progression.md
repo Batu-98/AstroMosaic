@@ -10,7 +10,7 @@ Use this file for concise development history and handoff state. Detailed techni
 - **Available artifacts:** The verified beta 8 desktop and console are in `dist/AstroMosaic-0.1.0b8-windows-x64/` and `dist/astromosaic-cli-0.1.0b8-windows-x64/` with their build records. Earlier local betas remain in their versioned folders. The [application test guide](docs/application-tests.md) and [extended cases](docs/application-tests-extension.md) describe the ignored real-observation fixtures. [Release guide](docs/windows-release.md#verification-status)
 - **Implementation / verification:** Beta 8 source and portable CLI and desktop produced identical Oxford Boat foreground FITS exports. The legacy ALPACA export, separate Paranal sky and composition, and real rejection checks passed. Source passed 220 offscreen and two native OpenGL tests. Ruff, scoped mypy and the Poetry lock check passed. [7E evidence](docs/phase-7.md#7e-local-windows-package-results)
 - **Version control:** The current development version on `main` is `0.1.0b8`. The first published source beta uses the annotated Git tag `v0.1.0b1`. [AstroMosaic GitHub repository](https://github.com/Batu-98/AstroMosaic)
-- **Next action:** Add 7F desktop control-point review and editing, then repeat the real validation matrix. Keep the 7C SIFT provider optional pending clean-machine checks and native distribution review under Q-005. Tagged release packaging and fresh Windows acceptance remain open. [7F plan](docs/phase-7.md#7f-ship-the-review-workflow-and-verify-windows)
+- **Next action:** Run the 7F desktop review, lifecycle and export workflows in locked beta 9 bundles. Keep the 7C SIFT provider optional pending clean-machine checks and native distribution review under Q-005. Tagged release packaging and fresh Windows acceptance remain open. [7F plan](docs/phase-7.md#7f-ship-the-review-workflow-and-verify-windows)
 - **Proposed follow-up** [Phase 8](docs/phase-8.md) covers full-resolution photo export and selectable color, brightness, lens and vignetting methods. Q-029 tracks the proposed acceptance data and backend choices.
 - **Open dependencies:** Q-003 tracks reference data and frozen criteria. Q-010 tracks real-scene diagnostics and the proposed terrain models. Q-016 tracks astrometry. Q-005, Q-009 and Q-020 track distribution and format work. Q-008 tracks deferred platforms and Q-011 deferred visual fill. Resolved Q-022 and Q-023 record the Windows lifecycle and ZEA results.
 
@@ -1055,6 +1055,13 @@ The table is a status summary, not a replacement for the full exit gates in Sect
 - **Verified** The console saved and exported Oxford and ALPACA, rejected the Adirondack fit, and reopened the Paranal composition with sky bytes preserved. The bundled desktop on the secondary display matched the Oxford console export with both CPU and OpenGL. Source passed 220 offscreen and two native tests. The isolated SIFT save, Ruff, scoped mypy and Poetry lock checks passed. Full-tree mypy still reports an existing missing return annotation in the real ZEA regression.
 - **Related** Q-003, Q-005, Q-010 and [beta 8 package results](docs/phase-7.md#7e-local-windows-package-results).
 - **Next** Add the 7F desktop point-review workflow and run the remaining clean-machine checks on its candidate.
+
+### 2026-11-21 - Phase 7F - Implemented desktop terrain point review
+
+- **Changed** Added masked panel comparisons, original-pixel detail, point editing and fit diagnostics to the Align Foreground submenu. Accepted fits are applied separately from the draft. Manifest version 8 preserves disabled points. Assigned version `0.1.0b9` for the local Windows handoff.
+- **Verified** Nine native tests passed with the second display and OpenGL, including the six editor regressions. Oxford passed manual edits and retry. ALPACA and La Silla passed the fit gates. Adirondack and PA4 remained disconnected. Paranal composition and sky parity passed. Ruff, scoped mypy and the lock check passed.
+- **Related** Q-003, Q-010 and [desktop point review](docs/phase-7.md#review-and-edit-control-points-in-the-desktop).
+- **Next** Build the locked beta and repeat the desktop lifecycle, exports and frozen CLI controls in the copied Windows runtimes.
 
 ## Entry Template
 

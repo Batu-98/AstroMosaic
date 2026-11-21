@@ -351,6 +351,7 @@ def fit_ground_features(
         raise ValueError("The anchor panel must have an active foreground mask.")
     if model not in ("auto", "translation", "similarity"):
         raise ValueError("Unknown ground control point model.")
+    holdouts = tuple(point for point in holdouts if point.enabled)
     if len(holdouts) > _MAX_HOLDOUTS:
         raise ValueError(f"Supply at most {_MAX_HOLDOUTS} independent audit points.")
     exclusions: dict[int, list[complex]] = defaultdict(list)

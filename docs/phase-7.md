@@ -1,6 +1,6 @@
 # Phase 7 Terrain Panorama Registration
 
-**Status** Phases 7A–7E passed the applicable local checks on Windows 11 x64. Beta 8 renders saved translation and similarity fits. The 7D camera-rotation experiments remain outside the frozen tolerance. Phase 7F covers desktop point review and fresh Windows acceptance. [Phase 6 handoff](phase-6.md#handoff-to-phase-7a) · [Geometry decision](adr/0023-terrain-control-point-registration.md)
+**Status** Phases 7A–7E passed the applicable local checks on Windows 11 x64. Phase 7F adds desktop review for translation and similarity fits. The 7D camera-rotation experiments remain outside the frozen tolerance. Fresh Windows acceptance remains open. [Phase 6 handoff](phase-6.md#handoff-to-phase-7a) · [Geometry decision](adr/0023-terrain-control-point-registration.md)
 
 ## Research Findings
 
@@ -182,7 +182,7 @@ A version 1 document contains a `points` array. This row comes from the ALPACA c
 }
 ```
 
-Panel numbers follow the saved project and start at one. Positions use zero-based source pixel centers in `[x, y]` order. Use unique string IDs and use `held_out: true` for independent validation points. The command verifies the referenced source and checks valid ground at the sampled position. The lowest active ground panel is the default anchor. Automatic selection tries translation before similarity. An explicit `--model` runs that model alone.
+Panel numbers follow the saved project and start at one. Positions use zero-based source pixel centers in `[x, y]` order. Use unique string IDs and use `held_out: true` for independent validation points. An optional `enabled: false` flag retains an observation without using it in the fit or audit. The command verifies the referenced source and checks valid ground at the sampled position. The lowest active ground panel is the default anchor. Automatic selection tries translation before similarity. An explicit `--model` runs that model alone.
 
 Pair initialization uses median translation or a bounded, deterministic similarity search. A pair needs at least 75% of its training points within 2 source px in both directions. Similarity requires at least 8 px RMS spread along the narrower dimension of both point sets. The accepted scale range is 0.5 to 2 for a pair and for each pose relative to the anchor. The fit initializes the graph from those edges and robustly refines the panel poses together. Each edge reports the P95 of the larger of the two directional point errors. Held-out points never enter the solve. Each pose applies `scale × rotation × source position + shift`. Positive angles turn clockwise with image Y increasing downward.
 
@@ -334,3 +334,16 @@ The production desktop title reported beta 8. The packaged desktop workflow on t
 3. Verify portable console and desktop packages built with the Phase 7 changes. Apply the 6E procedure to the new geometry and reuse the legacy translation references. Check CPU and OpenGL preview, independently reopen exports, and record the actual display configuration. Use the shared clean-machine session when both phases ship in the same candidate. Follow the existing clean-machine and distribution requirements for the intended public binaries. [Windows packaging](windows-release.md) · [Phase 6E Windows checks](phase-6.md#6e-verify-native-lifecycle-and-windows-packages)
 
 **Phase exit** At least one real capture sequence with verified shared terrain that the old translation approach could not align meets its frozen bounds with the new workflow. The independent nightscape, legacy translation and real rejection controls pass. PA4 has recorded outcomes by verified overlap, with unsupported panels identified. Publish reproducible evidence summaries and record remaining geometry limits and release checks in the progress log.
+
+### Review and edit control points in the desktop
+
+1. Apply saved foreground masks to the participating panels. Open **Layers → Align Foreground → Review Control Points**. Choose the two panels to compare, a model and an anchor. The same submenu offers **Match Translations** for the existing correlation workflow.
+2. Choose **Add Pair** and click the same terrain landmark in both previews. Wheel zoom and drag to pan between edits. Right-click a region for original-pixel detail and click **Overview** to return. Select an existing pair and choose **Move Point** to place one endpoint again, clear **Use** to disable it, or choose **Remove Pair** to delete it from the draft. Use **Held Out** for independent validation points.
+3. Choose **Fit Points** to update residuals and review **Panel Links**. Double-click a measured link to open that comparison. When the fit reports disconnected groups, review the ground masks and add well-spread pairs on terrain visible in both groups. The editor keeps the draft available after rejection or cancellation.
+4. Choose **Apply Alignment** for an accepted fit. Save the project and select **Foreground** to preview or export. If the fit changes the geometry of a mixed project, propose or set the composition placement again.
+
+The project stores disabled observations in manifest version 8. Readers of version 7 and earlier remain supported in the current build. The editor can recover saved control points after mask edits when the referenced ground panels still match their source fingerprints. The fit still requires validation against the updated masks. The desktop opens observations saved by the optional CLI matcher through the same editor.
+
+### 7F source replay
+
+Run `python -m pytest -q tests/integration/test_terrain_editor.py tests/integration/test_ground_control_points.py` with the real fixtures prepared in [7A](#frozen-7a-references) and [7B](#7b-real-observation-results). The Oxford test drives source-pixel clicks, draft edits, rejection, cancellation, retry, save and reopen. ALPACA and La Silla verify translation and shared terrain. Adirondack and PA4 verify real rejected links and disconnected groups. Paranal verifies independent sky and composition from the known crop offset. Set `QT_QPA_PLATFORM=windows` and `ASTROMOSAIC_TEST_OPENGL=1` for native OpenGL. The native tests select the second monitor when it is available.

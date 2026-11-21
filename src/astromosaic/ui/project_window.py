@@ -67,6 +67,7 @@ from astromosaic.ui.project_settings import (
     ProjectSettings,
 )
 from astromosaic.ui.sky_viewport import SkyViewport
+from astromosaic.ui.terrain_editor import TerrainPointEditor
 
 _PROJECT_FILTER = "AstroMosaic project (*.astromosaic)"
 _TIFF_FILTER = "TIFF mosaic (*.tiff *.tif)"
@@ -132,7 +133,11 @@ class ProjectWindow(QMainWindow):
         self.check_foreground = panel_menu.addAction("Check Foreground", self._check_foreground)
         self.propose_mask = panel_menu.addAction("Propose Sky Mask…", self._propose_mask)
         layers_menu = self.menuBar().addMenu("&Layers")
-        self.align_action = layers_menu.addAction("Align Foreground", self._align_foreground)
+        self.align_menu = layers_menu.addMenu("Align Foreground")
+        self.review_points_action = self.align_menu.addAction(
+            "Review Control Points…", self._review_terrain_points
+        )
+        self.align_action = self.align_menu.addAction("Match Translations", self._align_foreground)
         self.foreground_details_action = layers_menu.addAction(
             "Foreground Alignment Details…", self._foreground_alignment_details
         )
@@ -397,7 +402,10 @@ class ProjectWindow(QMainWindow):
         layer = self._layer()
         ground = self.project.current_foreground()
         sky = bool(self.project.sky_indices())
-        self.align_action.setEnabled(idle and bool(self.project.foreground_inputs()))
+        ground_count = len(self.project.foreground_inputs())
+        self.align_menu.setEnabled(idle and ground_count > 0)
+        self.align_action.setEnabled(idle and ground_count > 0)
+        self.review_points_action.setEnabled(idle and ground_count > 1)
         if self._foreground_panels is not self.project.panels:
             self._foreground_report = None
             self._foreground_panels = None
@@ -972,6 +980,29 @@ class ProjectWindow(QMainWindow):
                 ForegroundAlignmentJob(self.project, self), "Preparing foreground alignment…"
             )
 
+    def _review_terrain_points(self) -> None:
+        if self._is_running() or len(self.project.foreground_inputs()) < 2:
+            return
+        dialog = TerrainPointEditor(self.project, self)
+        try:
+            if not dialog.exec() or dialog.aligned_project is None:
+                return
+            previous = self.project
+            self.project = dialog.aligned_project
+        finally:
+            dialog.deleteLater()
+        self._foreground_report = None
+        self._foreground_panels = None
+        self._refresh(self.panels.currentIndex().row())
+        self.layer_box.setCurrentIndex(_LAYERS.index("foreground"))
+        assert self.project.foreground is not None
+        terrain = self.project.foreground.terrain
+        assert terrain is not None
+        summary = f"Applied foreground {terrain.model} alignment."
+        if previous.composition is not None and self.project.composition is None:
+            summary += " Set the composition placement for the new alignment."
+        self._report_operation(summary)
+
     def _foreground_alignment_details(self) -> None:
         report = self._foreground_report
         if (
@@ -987,6 +1018,8 @@ class ProjectWindow(QMainWindow):
             if dialog.selected_panel is not None:
                 self.panels.selectRow(dialog.selected_panel)
                 self._open_mask_editor(propose=False)
+            elif dialog.review_requested:
+                self._review_terrain_points()
         finally:
             dialog.deleteLater()
 

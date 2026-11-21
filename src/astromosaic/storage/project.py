@@ -83,6 +83,7 @@ _TAN_SCHEMA_VERSION = 4
 _PROJECTION_SCHEMA_VERSION = 5
 _BAND_SCHEMA_VERSION = 6
 _TERRAIN_SCHEMA_VERSION = 7
+_POINT_REVIEW_SCHEMA_VERSION = 8
 _MAX_MANIFEST_BYTES = 4 * 1024**2
 type Layer = Literal["sky", "foreground", "composition"]
 type _GroundInputs = tuple[tuple[int, SourceMask], ...]
@@ -178,6 +179,7 @@ class TerrainFitEvidence:
     points: tuple[GroundControlPoint, ...]
     held_out_p95_px: float | None
     status: Literal["accepted"] = "accepted"
+    sources_key: str | None = None
 
     def __post_init__(self) -> None:
         if self.model not in ("translation", "similarity") or self.status != "accepted":
@@ -185,6 +187,9 @@ class TerrainFitEvidence:
         error = self.held_out_p95_px
         if not self.provider or (error is not None and (not isfinite(error) or error < 0)):
             raise ValueError("Invalid saved terrain fit evidence.")
+        key = self.sources_key
+        if key is not None and (len(key) != 64 or any(c not in "0123456789abcdef" for c in key)):
+            raise ValueError("Invalid terrain point source fingerprint.")
 
 
 @dataclass(frozen=True, slots=True)
@@ -232,6 +237,16 @@ class MosaicProject:
             and FOREGROUND in panel.source_mask.labels
         )
 
+    def foreground_sources_key(self, inputs: _GroundInputs) -> str:
+        """Bind point coordinates to their panels independently of terrain mask edits."""
+        digest = sha256(b"astromosaic-terrain-point-sources-v1\n")
+        for index, mask in inputs:
+            fp = self.panels[index].source.fingerprint
+            digest.update(
+                f"{index}:{fp.size_bytes}:{fp.modified_ns}:{mask.source_size}\n".encode("ascii")
+            )
+        return digest.hexdigest()
+
     def foreground_key(
         self, inputs: _GroundInputs, terrain: TerrainFitEvidence | None = None
     ) -> str:
@@ -240,13 +255,15 @@ class MosaicProject:
         else:
             digest = sha256(b"astromosaic-foreground-control-points-v1\n")
             for point in terrain.points:
-                row = (
+                row: tuple[object, ...] = (
                     point.id,
                     point.panels,
                     tuple(map(float, point.left_xy)),
                     tuple(map(float, point.right_xy)),
                     point.held_out,
                 )
+                if not point.enabled:
+                    row += (False,)
                 digest.update(json.dumps(row, allow_nan=False).encode("ascii"))
         for index, mask in inputs:
             fp = self.panels[index].source.fingerprint
@@ -267,6 +284,17 @@ class MosaicProject:
                 i for i, _ in inputs
             ):
                 return self.foreground.alignment
+        return None
+
+    def reviewable_terrain(self) -> TerrainFitEvidence | None:
+        if self.foreground is None or self.foreground.terrain is None:
+            return None
+        terrain = self.foreground.terrain
+        if (
+            terrain.sources_key == self.foreground_sources_key(self.foreground_inputs())
+            or self.current_foreground() is not None
+        ):
+            return terrain
         return None
 
     def sky_indices(self) -> tuple[int, ...]:
@@ -573,25 +601,20 @@ def preview_project(
     )
 
 
-def _open_ground_source(
-    project: MosaicProject,
-    index: int,
+@contextmanager
+def open_project_ground_panel(
+    panel: ProjectPanel,
     mask: SourceMask,
+    max_working_bytes: int,
     context: JobContext,
-    stack: ExitStack,
-) -> PanelSource:
-    panel = project.panels[index]
+) -> Iterator[PanelSource]:
     _check_reference("Source", panel.source, context)
-    source = stack.enter_context(
-        open_panel(
-            panel.source.path,
-            max_tile_bytes=project.render.max_working_bytes,
-            foreground_mask=mask,
-        )
-    )
-    if source.descriptor.fingerprint != panel.source.fingerprint:
-        raise ValueError(f"Source file changed: {panel.source.path.name}")
-    return source
+    with open_panel(
+        panel.source.path, max_tile_bytes=max_working_bytes, foreground_mask=mask
+    ) as source:
+        if source.descriptor.fingerprint != panel.source.fingerprint:
+            raise ValueError(f"Source file changed: {panel.source.path.name}")
+        yield source
 
 
 def align_project_foreground(
@@ -602,16 +625,17 @@ def align_project_foreground(
 ) -> MosaicProject:
     """Align the masked ground sources and optionally report each completed pair."""
     inputs = project.foreground_inputs()
+    budget = project.render.max_working_bytes
     with ExitStack() as stack:
         candidates = []
         for index, mask in inputs:
             bounds = mask.bounds(FOREGROUND)
             assert bounds is not None
-            source = _open_ground_source(project, index, mask, context, stack)
+            source = stack.enter_context(
+                open_project_ground_panel(project.panels[index], mask, budget, context)
+            )
             candidates.append((index, source, bounds))
-        aligned = align_foreground(
-            candidates, project.render.max_working_bytes, context, on_pair=on_pair
-        )
+        aligned = align_foreground(candidates, budget, context, on_pair=on_pair)
     keep_placement = project.foreground is not None and project.foreground.alignment == aligned
     return replace(
         project,
@@ -623,9 +647,12 @@ def align_project_foreground(
 @contextmanager
 def _point_sources(project: MosaicProject, context: JobContext) -> Iterator[dict[int, PanelSource]]:
     inputs = project.foreground_inputs()
+    budget = project.render.max_working_bytes
     with ExitStack() as stack:
         yield {
-            index: _open_ground_source(project, index, mask, context, stack)
+            index: stack.enter_context(
+                open_project_ground_panel(project.panels[index], mask, budget, context)
+            )
             for index, mask in inputs
         }
     for index, _ in inputs:
@@ -710,7 +737,13 @@ def apply_project_ground_fit(
         for edge in fit.edges
         if edge.status == "accepted" and edge.held_out_p95_px is not None
     ]
-    terrain = TerrainFitEvidence(fit.model, provider, tuple(points), max(errors, default=None))
+    terrain = TerrainFitEvidence(
+        fit.model,
+        provider,
+        tuple(points),
+        max(errors, default=None),
+        sources_key=project.foreground_sources_key(inputs),
+    )
     saved = SavedForeground(project.foreground_key(inputs, terrain), alignment, terrain)
     context.check_cancelled()
     return replace(
@@ -729,7 +762,14 @@ def _project_foreground(project: MosaicProject, context: JobContext) -> Iterator
     with ExitStack() as stack:
         panels = [
             ForegroundSource(
-                _open_ground_source(project, item.index, masks[item.index], context, stack),
+                stack.enter_context(
+                    open_project_ground_panel(
+                        project.panels[item.index],
+                        masks[item.index],
+                        project.render.max_working_bytes,
+                        context,
+                    )
+                ),
                 project.panels[item.index].weight,
                 masks[item.index],
                 item,
@@ -888,6 +928,11 @@ def save_project(
                 del panel["scale"], panel["rotation_deg"]
         else:
             schema_version = _TERRAIN_SCHEMA_VERSION
+            for point in foreground["terrain"]["points"]:
+                if point["enabled"]:
+                    del point["enabled"]
+                else:
+                    schema_version = _POINT_REVIEW_SCHEMA_VERSION
     if schema_version == _TAN_SCHEMA_VERSION:
         del render["projection"]
     data = {
@@ -1004,7 +1049,7 @@ def _decode_region(value: object) -> Region:
     return Region(*(_integer(fields[key]) for key in ("x", "y", "width", "height")))
 
 
-def _decode_terrain(value: object) -> TerrainFitEvidence:
+def _decode_terrain(value: object, schema_version: int) -> TerrainFitEvidence:
     data = _object(value)
     model, status, provider = data["model"], data["status"], data["provider"]
     if model not in ("translation", "similarity") or status != "accepted":
@@ -1014,9 +1059,11 @@ def _decode_terrain(value: object) -> TerrainFitEvidence:
     points = []
     for record in data["points"]:
         row = _object(record)
-        name, held = row["id"], row["held_out"]
-        if not isinstance(name, str) or not isinstance(held, bool):
-            raise ValueError("Invalid terrain point ID or held-out flag.")
+        name, held, enabled = row["id"], row["held_out"], row.get("enabled", True)
+        if not isinstance(name, str) or not isinstance(held, bool) or not isinstance(enabled, bool):
+            raise ValueError("Invalid terrain point ID or flags.")
+        if not enabled and schema_version < _POINT_REVIEW_SCHEMA_VERSION:
+            raise ValueError("Disabled terrain points require project manifest version 8.")
         left, right = _pair(row["panels"])
         lx, ly = _pair(row["left_xy"])
         rx, ry = _pair(row["right_xy"])
@@ -1027,11 +1074,19 @@ def _decode_terrain(value: object) -> TerrainFitEvidence:
                 (_number(lx), _number(ly)),
                 (_number(rx), _number(ry)),
                 held,
+                enabled,
             )
         )
     error = data["held_out_p95_px"]
+    sources_key = data.get("sources_key")
+    if sources_key is not None and not isinstance(sources_key, str):
+        raise ValueError("Invalid terrain point source fingerprint.")
     return TerrainFitEvidence(
-        model, provider, tuple(points), None if error is None else _number(error)
+        model,
+        provider,
+        tuple(points),
+        None if error is None else _number(error),
+        sources_key=sources_key,
     )
 
 
@@ -1045,7 +1100,7 @@ def _decode_foreground(value: object, schema_version: int) -> SavedForeground | 
     if data.get("terrain") is not None:
         if schema_version < _TERRAIN_SCHEMA_VERSION:
             raise ValueError("Control-point terrain fits require project manifest version 7.")
-        terrain = _decode_terrain(data["terrain"])
+        terrain = _decode_terrain(data["terrain"], schema_version)
         anchor = _integer(alignment["anchor"])
     input_key = data["input_key"]
     if (
@@ -1183,7 +1238,7 @@ def load_project(path: Path) -> MosaicProject:
     try:
         data = _object(json.loads(payload.decode("utf-8")))
         schema_version = _integer(data["version"])
-        if not 1 <= schema_version <= _TERRAIN_SCHEMA_VERSION:
+        if not 1 <= schema_version <= _POINT_REVIEW_SCHEMA_VERSION:
             raise ValueError("Unsupported project manifest version.")
         if not isinstance(data["panels"], list):
             raise ValueError("Expected an ordered panel list.")

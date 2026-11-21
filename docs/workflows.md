@@ -240,11 +240,15 @@ The CPU renderer uses float64 coordinate math and bounded source windows. It map
 
 ```mermaid
 flowchart TD
-    masks["Select valid foreground pixels from editable masks"] --> align["Align Foreground in image space"]
-    align -->|Accepted| poses["Attach anchored translations and overlap evidence"]
-    align -->|Rejected| details["Report pair support, ambiguity or disconnected groups"]
+    masks["Select valid foreground pixels from editable masks"] --> align{"Alignment method"}
+    align -->|Match Translations| correlate["Compare masked ground texture"]
+    align -->|Review Control Points| points["Edit landmarks and fit translation or similarity"]
+    correlate -->|Accepted| poses["Attach anchored foreground transforms"]
+    points -->|Accepted and applied| poses
+    correlate -->|Rejected| details["Review overlap, residuals or disconnected groups"]
+    points -->|Rejected| details
     poses --> layer{"Requested layer?"}
-    layer -->|Foreground| ground["Prepare the translated ground canvas"]
+    layer -->|Foreground| ground["Prepare the anchored ground canvas"]
     layer -->|Composition| sky["Prepare the sky grid and a current foreground alignment"]
     sky --> ready{"Composition placement present?"}
     ready -->|Yes| combine["Place, crop and blend within the seam band"]
@@ -263,13 +267,14 @@ flowchart TD
 | --- | --- |
 | One masked ground panel | The accepted ground layer uses the panel as its anchor in image space. A WCS is unnecessary for this route. |
 | Multiple comparable ground panels | The translation matcher uses bounded thumbnails and full-resolution verification where needed. It fits accepted links into a common anchored canvas. The renderer uses matching source dimensions and a shared ground scale and orientation. |
+| Manual point review | **Review Control Points** shows two ground previews with point overlays. Edit pairs, choose the anchor and model, and fit again to inspect residuals and connected groups. Apply an accepted fit to preview and export the anchored canvas. |
 | Weak, ambiguous or disconnected ground overlaps | Alignment reports the available pair evidence and rejection. **Foreground Alignment Details** can show support, correlation, competing peaks, graph residuals and access to the selected masks. A rejected update leaves the previous project state available. |
 | Alignment becomes stale | Ground rendering requires the saved participant order, fingerprints and foreground mask selection to agree with the current inputs. A successful alignment with changed geometry clears the composition placement. |
 | Shared horizon available | **Propose Placement** evaluates horizon points in both the sky grid and foreground canvas. It chooses a supported mixed reference panel by fit error and stores its similarity placement and residual. |
 | Shared horizon missing or weak | The proposal reports the support failure. **Composition Settings** or `project set-placement` takes a numeric offset, rotation, scale, seam row, overlap and sky bottom crop. The placement must retain at least one sky row and fit the supported canvas. |
 | Composition rendering | The program prepares both layers, checks compatible channels, filters and brightness, and fits their union canvas. One-layer samples retain their value. Where both layers cover a sample, a horizontal seam selects or blends them. A zero-width seam is a hard switch. A positive width uses the saved overlap percentage of the shorter effective layer height. |
 
-Foreground stitching stores translations. The composition similarity transform places the **whole** aligned ground canvas against the sky grid. Its coordinates are zero-based with positive Y downward. The overlap display marks samples where the sky and ground both have validity. A sky projection change clears the saved composition placement. [Mixed-layer workflow](phase-3e.md#desktop-workflow) · [Layer renderer](../src/astromosaic/pipeline/layers.py)
+Foreground stitching stores per-panel translations or similarities. The composition similarity transform places the **whole** aligned ground canvas against the sky grid. Its coordinates are zero-based with positive Y downward. The overlap display marks samples where the sky and ground both have validity. A sky projection change clears the saved composition placement. [Control point editing](phase-7.md#review-and-edit-control-points-in-the-desktop) · [Mixed-layer workflow](phase-3e.md#desktop-workflow) · [Layer renderer](../src/astromosaic/pipeline/layers.py)
 
 ### Terrain control-point diagnostics
 

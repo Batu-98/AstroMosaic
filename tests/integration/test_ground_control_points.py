@@ -355,6 +355,33 @@ def test_depth_change_rejects_far_only_fit_and_reports_the_held_out_errors(
     assert _ADIRONDACK.read_bytes() == original
 
 
+def test_disabled_terrain_observation_is_preserved_without_influencing_the_fit(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _require(_BOAT)
+    rows = _rows("boat")
+    wrong = rows[0] | {
+        "id": "disabled mismatched landmark",
+        "right_xy": rows[1]["right_xy"],
+        "enabled": False,
+    }
+    evidence = _write_points(tmp_path / "points.json", rows)
+    args = [*_args(_BOAT, evidence), "--anchor", "2"]
+    assert main(args) == 0
+    original = json.loads(capsys.readouterr().out)["fit"]
+    _write_points(evidence, [*rows, wrong])
+    output = tmp_path / "reviewed.astromosaic"
+    assert main([*args, "-o", str(output)]) == 0
+    edited = json.loads(capsys.readouterr().out)["fit"]
+    assert edited["poses"] == original["poses"] and edited["edges"] == original["edges"]
+    assert edited["points"][-1]["status"] == "disabled"
+    assert json.loads(output.read_bytes())["version"] == 8
+    project = load_project(output)
+    assert project.current_foreground() is not None
+    terrain = project.reviewable_terrain()
+    assert terrain is not None and not terrain.points[-1].enabled
+
+
 def test_three_real_boat_views_refine_a_redundant_graph_with_an_explicit_anchor(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
