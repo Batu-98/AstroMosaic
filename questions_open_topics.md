@@ -17,21 +17,21 @@ This register tracks unresolved decisions, problems, and risks. It is not a work
 ### Q-003 - Reference datasets and frozen acceptance thresholds
 
 - **Status / priority:** Investigating / P1
-- **Opened / updated:** 2026-11-15 / 2026-11-19
+- **Opened / updated:** 2026-11-15 / 2026-11-21
 - **Affected phase:** Phase 0 fixture design and the numerical gates in phases 1, 2, 3.5, 3.6, 4, 6 and 7.
 - **Impact and evidence:** The [Phase 1 fixtures](docs/phase-1.md) verify independent FITS export truth. [Phase 2](docs/phase-2.md#acceptance-fixtures) fixes and verifies held-out alignment, stellar flux and profile, injected extended signal, masks, and weak or disconnected inputs. [Phase 3A fixtures](docs/phase-3a.md#acceptance-fixtures) fix sample, channel, coverage, and WCS tolerances for linear TIFF. [Phase 3C](docs/phase-3c.md#windows-verification) confirms preview and export agreement at coincident sample positions. [Phase 3.5A](docs/phase-35.md#frozen-supplementary-fixtures) reran the baseline and froze cases for narrow support, saturation, and explicit DSS crops. The [sidecar check](docs/phase-35.md#masked-wcs-sidecar-reuse) uses the existing bilinear and WCS bounds.
 - **Current assumption:** Phases 6 and 7 use real observations with recorded provenance and independent measurements. The [3.6A manifest](tests/fixtures/plate_solve_v36.json) identifies the established catalog-quality and timing contracts.
-- **Next action / responsibility:** Carry the frozen PA4, 2MASS, solve and ALPACA controls into 6E. Use the 6A–6B terrain evidence to extend landmark annotations and freeze the model comparison and held-out cases in 7A. [Phase 6A measurements](docs/phase-6.md#local-baseline-measurements) · [Calibrated ALPACA control](docs/phase-6.md#calibrated-alpaca-mixed-reference) · [Phase 7A](docs/phase-7.md#7a-freeze-the-reference-and-diagnose-pa4)
+- **Next action / responsibility:** Use the verified ALPACA translation and Oxford similarity references to check 7E rendering and model persistence. Retain La Silla for independent nightscape coverage, PASSTA's 4.13 px rotation result and Adirondack's depth rejection. A new camera-rotation reference should supply a controlled lens entrance-pupil pivot and independent near/far landmarks before reopening model admission. [Reference cases](docs/phase-7.md#frozen-7a-references) · [7D results](docs/phase-7.md#7d-real-observation-results)
 - **Closure condition:** Record dataset-specific tolerances and reference results before algorithm tuning. Include the applicable Phase 4 large-mosaic, RGB photometry and mixed-scene measurements. Link the Phase 6 and 7 reference inventories and independent measurements of the real cases.
 
 ### Q-005 - Application licensing and distribution model
 
 - **Status / priority:** Investigating / P1
-- **Opened / updated:** 2026-11-15 / 2026-11-19
+- **Opened / updated:** 2026-11-15 / 2026-11-21
 - **Affected phase:** Public source publication and Windows binary distribution.
 - **Impact and evidence:** AstroMosaic source uses `GPL-3.0-only`. The portable builder collects wheel notices, the CPython runtime license, upstream supplements for selected dependencies and the native file inventory. The local 6E candidate recorded 223 desktop and 178 CLI native files and the exact source and binary archive hashes. [License decision](docs/adr/0009-gpl-v3-application-license.md) · [Windows release preparation](docs/windows-release.md) · [6E candidate evidence](docs/phase-6.md#local-windows-lifecycle-and-package-results)
 - **Current assumption:** Publish the source on GitHub. Keep portable ZIP builds local until the remaining binary distribution review passes. Obtain external ASTAP binaries, solver catalogs and archive FITS references from upstream.
-- **Next action / responsibility:** Match the binary inventory to the exact native corresponding sources and confirm Microsoft runtime redistribution terms before publishing Windows downloads. The clean-machine check remains a separate acceptance step.
+- **Next action / responsibility:** Match the binary inventory to the exact native corresponding sources and confirm Microsoft runtime redistribution terms before publishing Windows downloads. Before adopting the optional 7C wheel for distribution, review the pinned OpenCV and FFmpeg native contents, corresponding sources and notices, and verify that exact package on clean Windows. [7C wheel inventory](docs/phase-7.md#7c-real-observation-results)
 - **Closure condition:** Record the applicable notices, matching source and redistribution terms for publicly distributed artifacts. Keep separately obtained data subject to its upstream terms.
 
 ### Q-008 - Linux and macOS support
@@ -57,11 +57,11 @@ This register tracks unresolved decisions, problems, and risks. It is not a work
 ### Q-010 - Foreground recognition, masks, and composition
 
 - **Status / priority:** Investigating / P1
-- **Opened / updated:** 2026-11-15 / 2026-11-19
+- **Opened / updated:** 2026-11-15 / 2026-11-21
 - **Affected phase:** Phase 2 masked sky processing, Phase 3D mask editing, Phase 3E foreground alignment and composition, Phase 3F packaged acceptance, Phase 4 resource validation, Phase 6B real-scene validation, and Phase 7 panorama registration.
 - **Impact and evidence:** [Phase 3D](docs/phase-3d.md#windows-verification) verifies local suggestions, manual overrides and masks, and exclusion of foreground from sky fitting. [Phase 3E](docs/phase-3e.md#windows-verification) verifies WCS-free alignment and exports, shared-reference placement, saved edits, and seams with partial and zero common coverage. [Phase 4A](docs/phase-4a.md#local-windows-results) reproduced all three desktop layers from a saved mixed project in the portable CLI. Small, rotated, and ambiguous terrain still needs manual review.
 - **Current assumption:** Use the saved three-label mask for same-size, same-scale foreground translations. Use similarity placement between layers and restrict seam blending to valid common coverage.
-- **Next action / responsibility:** Review shared terrain landmarks in the PA4 pairs during 7A. The 6B details reproduced the 15 original rejections and the six singleton groups in a reduced-mask variant. The independent ESO translation and disconnection checks and mixed exports passed. Identify any omitted terrain, degree of depth-dependent motion and model support before selecting a more flexible fit. [Phase 6B results](docs/phase-6.md#local-foreground-diagnostics-results) · [Phase 6B handoff](docs/phase-6.md#handoff-to-phase-7a) · [Phase 7 design and acceptance](docs/phase-7.md)
+- **Next action / responsibility:** Integrate the verified translation and similarity geometry in 7E. PA4 metadata rotation improves the visible overlap but gives 8.34 and 3.07 px P95 and leaves the saved mask issues open. The PASSTA candidates also exceed the frozen tolerance. Revisit calibration, viewpoint shift and the omitted ground support before admitting these models or links. [PA4 pair review](docs/phase-7.md#initial-7a-measurements) · [7D results](docs/phase-7.md#7d-real-observation-results)
 - **Closure condition:** Verify separate layer exports, saved edits and measured resource limits. Pass the Phase 6B diagnostics and the Phase 7 positive, held-out, negative and legacy checks on real captures. Account for the PA4 pair outcomes and document unsupported geometry.
 
 ### Q-011 - Optional generative fill for a visual seam
@@ -264,6 +264,17 @@ This register tracks unresolved decisions, problems, and risks. It is not a work
 - **Next action / responsibility:** Retain the real PA4 replay and timing baseline for future geometry and scheduler changes. Carry the qualified outputs into 6E.
 - **Closure condition:** Explain or handle the warning's confirmed cause, retain geometry and coverage checks, and record a repeatable timing comparison on a fixed project.
 - **Resolution:** 2026-11-19. The real replay, native previews and full source export no longer emit the warning. The 6A reference and both guarded full ZEA paths match for samples, coverage and WCS. Candidate selection reduced the full-render mapping count from 4,335 to 1,086. TIFF reads account for the largest remaining preview cost. [6D measurements](docs/phase-6.md#local-zea-geometry-and-performance-results) · [ADR-0024](docs/adr/0024-conservative-zea-footprints.md)
+
+### Q-024 - Preview of solved RGB TIFF panels
+
+- **Status / priority:** Resolved / P1
+- **Opened / updated:** 2026-11-21 / 2026-11-21
+- **Affected phase:** Phase 3C desktop preview and export setup.
+- **Impact and evidence:** Two verified WCS sidecars reopened successfully. The saved project lacked filter and brightness declarations, and its default sky grid sampled only one panel. The original desktop failure gave a CLI flag instead of the corresponding setting.
+- **Current assumption:** Use a grid that covers both panels and supply a common label and scale for compatible linear samples. Linearized sRGB derivatives can be used for a relative visual preview. [Desktop workflow](docs/phase-3c.md#desktop-workflow)
+- **Next action / responsibility:** Retain the desktop calibration diagnostic regression when verifying the next Windows build.
+- **Closure condition:** Explain the failure in the desktop log and verify a reopened preview that includes each panel and their common coverage.
+- **Resolution:** 2026-11-21. The Command Panel identifies the missing settings. A separate project with linear-light visual copies and a fitted grid previewed both panels on native CPU and OpenGL. The source and portable CLI validated the project. The original file hashes matched.
 
 ## New Entry Template
 

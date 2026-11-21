@@ -4,13 +4,13 @@ Use this file for concise development history and handoff state. Detailed techni
 
 ## Current State
 
-- **Last updated:** 2026-11-19
+- **Last updated:** 2026-11-21
 - **Active baseline:** Python-first architecture revision 3.12 adds [Phase 7 delivery stages](astro_mosaic_python_first_architecture_en.md#105-phase-7-delivery-stages). [ADR-0023](docs/adr/0023-terrain-control-point-registration.md) proposes a terrain control-point fit. [ADR-0017](docs/adr/0017-astap-first-validated-solving.md) records the solver policy. See [ADR-0003](docs/adr/0003-windows-first-platform-scope.md) for Windows scope, [ADR-0006](docs/adr/0006-dual-fits-and-tiff-workflow.md) for formats, and [ADR-0007](docs/adr/0007-sky-and-foreground-mosaics.md) for mixed panels.
-- **Current stage:** [Phases 6A–6D](docs/phase-6.md) and [local 6E](docs/phase-6.md#local-windows-lifecycle-and-package-results) passed on Windows. The calibrated ESO control, PA4 foreground comparisons, masked solve outcomes, and ZEA replay remain the real-observation references. The terrain evidence is ready for [Phase 7A](docs/phase-7.md#7a-freeze-the-reference-and-diagnose-pa4). The first source beta is `0.1.0b1`. Clean-machine acceptance for the packaged 6E candidate and review of the native distribution remain open. Linux and macOS support is deferred.
-- **Available artifacts:** The [application test guide](docs/application-tests.md) and [extended cases](docs/application-tests-extension.md) cover the fixtures in ignored `data/application-tests/`. The [test findings](docs/application-test-findings.md) also cover the local owner sequence. The 6E Windows ZIPs, matching source snapshot, SHA-256 list and build record are in `.tooling/phase6e-20261119/artifacts/`. The verification evidence is in `output/application-tests/phase6e/`. [Release guide](docs/windows-release.md)
+- **Current stage:** [Phases 6A–6D](docs/phase-6.md) and [local 6E](docs/phase-6.md#local-windows-lifecycle-and-package-results) passed on Windows. [Phases 7A–7C](docs/phase-7.md#7c-real-observation-results) froze the real controls and verified the manual fit and optional matching. [Phase 7D](docs/phase-7.md#7d-real-observation-results) completed the calibrated comparison. The camera-rotation candidates miss the held-out target, so translation and similarity remain the supported terrain models. Clean-machine acceptance and review of the native distribution remain open. Linux and macOS support is deferred.
+- **Available artifacts:** The local 0.1.0b2 desktop, standard CLI and experimental SIFT CLI ZIPs and checksums are in `.tooling/plate-solve-phase7-20261121/artifacts/`. The 0.1.0b1 Phase 6E archives remain in `.tooling/phase6e-20261119/artifacts/`. The [application test guide](docs/application-tests.md) and [extended cases](docs/application-tests-extension.md) describe the ignored real-observation fixtures. [Release guide](docs/windows-release.md#verification-status)
 - **Implementation / verification:** Eight corrected lifecycle sequences and 54 scientific outputs passed across source and portable CPU and OpenGL desktop and CLI. The regular packaged launcher opened and exported M17. Both CLIs repeated the 14 real solve cases. Twenty real-observation tests, Ruff and mypy passed. The preceding Phase 5 Windows baseline passed 179 tests, and the [dense ASTAP follow-up](docs/phase-36-results.md#dense-astap-catalog-verification) passed 42 targeted regressions.
 - **Version control:** The current development version on `main` is `0.1.0b2`. The first published source beta uses the annotated Git tag `v0.1.0b1`. [AstroMosaic GitHub repository](https://github.com/Batu-98/AstroMosaic)
-- **Next action:** Build the `0.1.0b2` portable packages from matching source and verify them on a fresh Windows installation when one is available. Continue the corresponding-source and redistribution review under Q-005. Use the [6A–6B terrain results](docs/phase-6.md#handoff-to-phase-7a) for the 7A landmark and geometry comparison. [Release verification status](docs/windows-release.md#verification-status)
+- **Next action:** Start 7E with validated translation and similarity geometry, tile sampling, and compatibility for saved translations. Keep the 7C SIFT provider optional pending clean-machine checks and native distribution review under Q-005. The tagged `0.1.0b2` release build and fresh Windows acceptance remain open. [Release verification status](docs/windows-release.md#verification-status)
 - **Open dependencies:** Q-003 tracks reference data and frozen criteria. Q-010 tracks real-scene diagnostics and the proposed terrain models. Q-016 tracks astrometry. Q-005, Q-009 and Q-020 track distribution and format work. Q-008 tracks deferred platforms and Q-011 deferred visual fill. Resolved Q-022 and Q-023 record the Windows lifecycle and ZEA results.
 
 ## Phase Overview
@@ -48,7 +48,7 @@ The table is a status summary, not a replacement for the full exit gates in Sect
 | 5B - ZEA sky projection | Complete | Saved projection, longitude wrap, projection domain, preview and export agreement, and copied Windows workflows passed. |
 | 5C - Per-band output | Complete | Saved membership, band-local units and channels, common geometry, independent exports, and Windows desktop, CLI and batch checks passed. |
 | 6 - Real-observation reliability | Local 6A–6E checks passed | The real references, native lifecycle, and source and portable product comparison are recorded. Fresh Windows acceptance remains open for the named 6E build. |
-| 7 - Terrain panorama registration | Planned | Show improved held-out geometry on independently captured terrain, retain negative and legacy acceptance, and verify saved model, sky independence, and Windows exports. |
+| 7 - Terrain panorama registration | 7A–7D evaluated locally | Integrate the verified translation and similarity geometry. Retain the negative and legacy controls and verify saved model, sky independence, and Windows exports. |
 
 ## Journal Rules
 
@@ -859,6 +859,82 @@ The table is a status summary, not a replacement for the full exit gates in Sect
 - **Verified** `poetry check --lock`, the wheel metadata, CLI version, and desktop title passed. The real M17 project validated and reopened after saving with the new application version.
 - **Related** [Version control and releases](AGENTS.md#10-version-control-and-releases) and [Phase 6E evidence](docs/phase-6.md#local-windows-lifecycle-and-package-results).
 - **Next** Build matching `0.1.0b2` Windows packages and complete the fresh-installation checks for that build.
+
+### 2026-11-20 - Phase 7A - Measured the first PA4 terrain overlap
+
+- **Changed** Reviewed 15 PA4 pair outcomes against both saved mask variants. Measured corresponding branches on 04–05 and compared translation and similarity on the same held-out landmarks. Extended the ALPACA translation reference and inventoried three real PASSTA panning captures.
+- **Verified** Six PA4 source hashes and both sets of mask labels matched the Phase 6 inventory. PA4 held-out forward P95 fell from 306.08 to 72.11 px on visible terrain. Only two of ten quality-checked landmarks had joint ground support in the original masks. ALPACA translation reached 1.43 px held-out P95. Four foreground regressions passed, both local reports replayed byte-for-byte, and the PASSTA archive passed ZIP integrity and three image opens.
+- **Related** Q-003 and Q-010. The [7A measurements](docs/phase-7.md#initial-7a-measurements) describe the open pair diagnoses and replay procedure.
+- **Next** Independently re-mark the plausible overlaps and review the ground masks. Resolve the PASSTA calibration orientation and qualify the independent nightscape and depth-change cases.
+
+### 2026-11-20 - Phase 7A - Froze the real reference set
+
+- **Changed** Measured PA4-02/03 and 05/06 and reverse-refined the 04/05 points. Added Oxford Boat, La Silla, PASSTA and Adirondack controls with recorded source identity and fit/held-out assignments.
+- **Verified** Boat similarity reached 1.02/1.16 px forward/reverse held-out P95 and La Silla translation reached 0.94 px in both directions. PASSTA's clockwise sensor orientation won on all three edges and the pairwise rotation loop closed to 0.0041°. Adirondack had about 122 px difference between near and far shifts. The six follow-up reports replayed byte-for-byte and four foreground tests passed.
+- **Related** Q-003 and Q-010. [Frozen 7A references](docs/phase-7.md#frozen-7a-references)
+- **Next** Implement and verify 7B with the fixed ALPACA and Oxford point cases. Keep PA4 ground-mask and depth hypotheses for terrain review and further model validation.
+
+### 2026-11-20 - Phase 7B - Verified the headless manual terrain fit
+
+- **Changed** Added the Qt-free manual control-point fit and `project fit-foreground`. It reports validation, anchored translation or similarity, per-point errors and rejected links. Project geometry persistence remains scheduled for 7E.
+- **Verified** ALPACA, the two- and three-view Oxford cases, and La Silla passed the held-out limit. Adirondack, an inconsistent real-data cycle and underconstrained inputs returned rejection diagnostics. Cancellation and retry preserved the previous saved alignment. The full suite passed 199 tests with two opt-in OpenGL skips. The final focused replay passed 26 tests with the same skips. Five CLI control replays, Ruff and mypy passed.
+- **Related** Q-003, Q-010 and ADR-0023. [7B command and results](docs/phase-7.md#run-a-manual-terrain-fit)
+- **Next** Start the 7C bounded feature matching comparison with the 7B point sets and preserve the public negative controls.
+
+### 2026-11-21 - Phase 7C - Evaluated bounded automatic terrain matching
+
+- **Changed** Added optional SIFT point proposals and independent audits to the read-only foreground CLI. Added full-support thumbnails, mutual feature checks, source-patch refinement and spatial inlier requirements to the shared anchored fit.
+- **Verified** The audited three-view Oxford graph reached 0.97 px maximum edge P95 and La Silla reached 0.98 px. The disconnected ALPACA group and Adirondack produced zero false links. Manual points recovered sparse ALPACA mask support at 1.43 px. The automatic ALPACA translation missed its frozen tolerance. Both PA4 mask variants and PASSTA remained disconnected. The full suite passed 204 tests with two opt-in OpenGL skips. Seven manual and missing-backend checks passed separately without OpenCV on the Python path. Ruff, mypy and the documentation link checks passed.
+- **Related** Q-003, Q-005, Q-010 and [7C results](docs/phase-7.md#7c-real-observation-results). Ten Qt-free CLI reports repeated byte-for-byte with matching project hashes. Oxford and PA4 reservations peaked at 63.4 and 112.1 MiB respectively.
+- **Next** Carry the frozen PASSTA calibration and landmarks into 7D. Review the local wheel inventory before any portable adoption.
+
+### 2026-11-21 - Phase 7D - Evaluated rotation and retained translation and similarity
+
+- **Changed** Added an offline replay for anchored rotation, one shared focal adjustment, one shared radial adjustment and the planar baselines. The replay uses the frozen observations and verifies calibration, crops, pixel scale, inverse maps and boundary samples.
+- **Verified** PASSTA's independent loop closed to 0.0041°. The worst held-out P95 was 6.90 px with fixed calibration and 4.13 px with the best radial candidate. Adirondack rejected both a global pose and the far subset. The PA4 metadata estimate reached 8.34 and 3.07 px on visible terrain and kept the masked links unsupported. The report replayed byte-for-byte and the NumPy geometry agreed with the separate OpenCV probe. The full suite passed 205 tests with two opt-in OpenGL skips. Seven focused tests passed without OpenCV on the Python path. Ruff, mypy and the documentation link checks passed.
+- **Related** ADR-0023, Q-003, Q-010 and [7D measurements](docs/phase-7.md#7d-real-observation-results).
+- **Next** Integrate the verified translation and similarity models in 7E and check legacy saved translations, tile sampling, and scientific sky independence.
+
+### 2026-11-21 - Desktop Plate Solve - Start directly in untitled projects
+
+- **Changed** Removed the sidecar folder prompt from Plate Solve and Revalidate Plate Solution. Untitled projects use the local application data directory. Saved projects use their sibling WCS directory.
+- **Verified** Five native Windows desktop tests passed. An untitled real M13 panel solved from the Plate Solve button with ASTAP D05 and zero folder requests. The saved project reopened with the generated sidecar and its input hash was preserved. The new 0.1.0b2 desktop executable started and closed cleanly.
+- **Related** [Desktop plate solving](docs/phase-3b.md#desktop-plate-solving).
+- **Next** Verify the packaged Phase 7 CLI and inventory the local development bundles.
+
+### 2026-11-21 - Windows - Built local 0.1.0b2 with the Phase 7 CLI
+
+- **Changed** Built the desktop and CLI from a hashed working-tree snapshot and the Poetry lock. Built a separate optional SIFT CLI with the measured OpenCV wheel. Archived the complete bundles with their notices and SHA-256 hashes.
+- **Verified** The desktop reported 0.1.0b2, contained the corrected Plate Solve handler, and exited cleanly. Both CLIs reported 0.1.0b2. The standard CLI fit Oxford's three-view manual control at 1.10 px P95. The SIFT CLI reached 0.97 px on Oxford and 0.98 px on La Silla and rejected the disconnected ALPACA, Adirondack and PA4 controls. The suite passed 205 tests with two opt-in OpenGL skips. Ruff, mypy and documentation link checks passed.
+- **Related** [Local release verification](docs/windows-release.md#verification-status), Q-005 and [Phase 7 commands](docs/phase-7.md#run-the-automatic-terrain-fit). Local replay reports are stored in `output/application-tests/plate-solve-phase7-20261121/`.
+- **Next** Integrate Phase 7 geometry into rendering and project persistence. Use the local bundles for development, and verify an exact tagged build on a fresh Windows host before public distribution.
+
+### 2026-11-21 - Phase 7 - Reviewed readiness for 7E
+
+- Reviewed the working tree against the 7A–7F gates. The headless fit reports candidate poses. The foreground tile sampler and its footprint calculation still use saved panel shifts.
+- Reran the 12 focused real-observation regressions for control points, automatic matching and the camera-model comparison. All 12 passed with the isolated OpenCV provider. In the standard environment, eight passed and the four provider-dependent checks skipped.
+- Start 7E by saving and reopening Oxford's three-panel similarity fit and checking rendered samples and coverage. Keep ALPACA as the saved-translation control and verify sky-only samples, coverage and WCS for a mixed scene. [7E criteria](docs/phase-7.md#7e-integrate-geometry-rendering-and-persistence)
+
+### 2026-11-21 - Desktop command panel - Opened at startup and recorded operation summaries
+
+- **Changed** Opened the Command Panel at startup at its minimum dock height. Added project, panel and settings summaries and desktop job outcomes to the bounded session log, including while hidden.
+- **Verified** All 207 tests passed on native Windows with OpenGL and the optional SIFT provider. Six focused desktop tests passed on native Windows and with Qt offscreen. Ruff, mypy, the Poetry lock check and the documentation link review passed.
+- **Related** Q-012 and the [command panel workflow](docs/phase-4c.md#desktop-workflow).
+- **Next** Include the updated command panel checks in the next Windows package verification.
+
+### 2026-11-21 - Desktop sky preview - Recovered the two-panel TIFF project
+
+- **Changed** Added desktop and Command Panel guidance for missing sky metadata and empty sky previews. Prepared a separate project with relative linear sRGB copies, the verified WCS and a TAN grid that encloses both panels.
+- **Verified** The original project reproduced the missing filter and brightness diagnostics. The old grid covered one panel. The reopened preview covered 120,324 samples, including 25,786 shared by both panels. Native Windows CPU and OpenGL previewed it on the second display. Both CLIs validated the project, all 28 focused tests passed, and Ruff and mypy passed. The original project, images and sidecar hashes matched.
+- **Related** Q-024 and [sky preview setup](docs/phase-3c.md#desktop-workflow).
+- **Next** Carry the diagnostic checks into the next desktop package verification.
+
+### 2026-11-21 - Source integration - Verified terrain and desktop changes for main
+
+- **Changed** Prepared the Phase 7 terrain work, desktop solving, command panel, sky preview diagnostics and their records as separate source commits for `main`.
+- **Verified** All 207 tests passed on native Windows with OpenGL and the isolated SIFT provider. The desktop checks used the second display. The standard environment passed seven terrain checks with four optional provider checks skipped. Ruff, mypy, the Poetry lock check and local documentation link checks passed.
+- **Related** Q-003, Q-010, Q-012 and Q-024.
+- **Next** Use the verified translation and similarity controls for Phase 7E. Include the desktop diagnostic checks in the next Windows package verification.
 
 ## Entry Template
 
