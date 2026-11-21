@@ -53,7 +53,9 @@ Download public DSS reference images from their archives for optional reproducti
 
 ## Verification status
 
-The initial source beta is tagged `v0.1.0b1`. The current development version on `main` is `0.1.0b4`. The Phase 6E local verification record and ZIPs in `.tooling/phase6e-20261119/artifacts/` identify the tested `0.1.0b1` build and its SHA-256 hashes. [Phase 6E evidence](phase-6.md#local-windows-lifecycle-and-package-results) · [GitHub releases](https://github.com/Batu-98/AstroMosaic/releases)
+The initial source beta is tagged `v0.1.0b1`. The current development version on `main` is `0.1.0b5`. The Phase 6E local verification record and ZIPs in `.tooling/phase6e-20261119/artifacts/` identify the tested `0.1.0b1` build and its SHA-256 hashes. [Phase 6E evidence](phase-6.md#local-windows-lifecycle-and-package-results) · [GitHub releases](https://github.com/Batu-98/AstroMosaic/releases)
+
+The verified local beta 5 desktop is in `dist/AstroMosaic-0.1.0b5-windows-x64/` with its `BUILD-INFO.json`. The title shows `AstroMosaic 0.1.0b5 (Beta)`. The packaged runtime animated the bar during real M13 solves with ASTAP D05. The batch status advanced to the next panel, cancellation retained the first solution, and retry solved the remaining panel. Revalidation showed the animation with both CPU and OpenGL previews. [Desktop plate solving](phase-3b.md#desktop-plate-solving)
 
 The verified local beta 4 desktop is in `dist/AstroMosaic-0.1.0b4-windows-x64/` with its `BUILD-INFO.json`. The title shows `AstroMosaic 0.1.0b4 (Beta)`. Both Windows preview backends rendered the two linear TIFF panels in the automatic `Unspecified` band. The bundled CLI listed the same band for the saved project. [Per-band workflow](phase-5c.md)
 

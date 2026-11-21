@@ -290,13 +290,14 @@ This register tracks unresolved decisions, problems, and risks. It is not a work
 
 ### Q-026 - Plate Solve activity before the first panel finishes
 
-- **Status / priority:** Investigating / P2
+- **Status / priority:** Resolved / P2
 - **Opened / updated:** 2026-11-21 / 2026-11-21
 - **Affected phase:** Phase 3.1C desktop plate solving.
 - **Impact and evidence:** The desktop bar showed 0% until the first panel produced an outcome. A single-panel solve could look idle throughout its search. The desktop regression reproduced this display while the worker was active.
-- **Current assumption:** Animate the bar during preparation and solves and report the active panel's position in the eligible batch. The solver does not report a within-panel completion fraction.
-- **Next action / responsibility:** Verify the updated widget with real offline solves in the Windows bundle.
+- **Current assumption:** Animate the bar during preparation and solves and report the active panel's position in the eligible batch. The desktop job reports completion at panel boundaries.
+- **Next action / responsibility:** Retain the desktop regression and the real M13 Windows verification for later builds.
 - **Closure condition:** Single-panel and batch solves show activity. The batch labels advance and cancellation preserves completed outcomes.
+- **Resolution:** 2026-11-21. Beta 5 rendered distinct animation frames during real single-panel and batch M13 solves in the packaged runtime. Cancellation preserved the first WCS, retry solved the remaining panel, and revalidation animated with CPU and OpenGL previews active. [Windows build verification](docs/windows-release.md#verification-status)
 
 ## New Entry Template
 
