@@ -6,6 +6,7 @@ from argparse import Namespace
 from dataclasses import asdict, replace
 from importlib.metadata import version
 from pathlib import Path
+from time import monotonic
 from typing import cast
 
 from PySide6.QtCore import QSettings, QSignalBlocker, QStandardPaths, Qt, QTimer, Slot
@@ -275,20 +276,41 @@ class ProjectWindow(QMainWindow):
         actions.addWidget(self.band_box)
         actions.addWidget(self.preview_button)
         actions.addWidget(self.start_button)
-        actions.addWidget(self.cancel_button)
         layout.addLayout(actions)
 
         self.progress = QProgressBar()
+        self.progress.setObjectName("workspaceProgress")
+        self.progress.setAccessibleName("Job progress")
         self.progress.setRange(0, 100)
         self.progress.setValue(0)
-        self.progress.setMaximumWidth(185)
-        self.progress.hide()
+        self.progress.setTextVisible(False)
+        self.progress.setMinimumHeight(24)
+        self.progress_percent = QLabel("0%")
+        self.progress_percent.setObjectName("jobPercentage")
+        self.progress_percent.setAlignment(
+            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+        )
+        self.progress.valueChanged.connect(self._show_job_percentage)
+        self.progress_elapsed = QLabel()
+        self.progress_elapsed.setToolTip("Time since Plate Solve started.")
+        self._solve_timer = QTimer(self)
+        self._solve_timer.setInterval(1000)
+        self._solve_timer.timeout.connect(self._update_solve_elapsed)
         self.status = QLabel("Add linear FITS, TIFF, or XISF panels to begin.")
         self.status.setTextFormat(Qt.TextFormat.PlainText)
         self.status.setWordWrap(True)
-        footer = QHBoxLayout()
-        footer.addWidget(self.status, 1)
-        footer.addWidget(self.progress)
+        footer = QVBoxLayout()
+        footer.setSpacing(6)
+        status_row = QHBoxLayout()
+        status_row.addWidget(self.status, 1)
+        status_row.addWidget(self.progress_elapsed)
+        status_row.addWidget(self.cancel_button)
+        footer.addLayout(status_row)
+        progress_row = QHBoxLayout()
+        progress_row.addWidget(self.progress, 1)
+        progress_row.addWidget(self.progress_percent)
+        footer.addLayout(progress_row)
+        self._show_job_progress(False)
         layout.addLayout(footer)
         self.panels.properties.invalidEdit.connect(self._invalid_panel_edit)
         self._refresh()
@@ -475,6 +497,8 @@ class ProjectWindow(QMainWindow):
         self._clear_preview()
         self._layer_controls()
         self.progress.setValue(0)
+        if self.job is None:
+            self._show_job_progress(False)
         self.status.setText("")
 
     def _selection_changed(self) -> None:
@@ -522,6 +546,7 @@ class ProjectWindow(QMainWindow):
         self.project = self._saved = project
         self.project_path = path
         self.progress.setValue(0)
+        self._show_job_progress(False)
         self._refresh()
 
     def _new(self) -> None:
@@ -1048,14 +1073,38 @@ class ProjectWindow(QMainWindow):
 
     def _launch_job(self, job: _Job, message: str) -> None:
         self.job = job
-        job.progress.connect(self._progress)
-        job.finished.connect(self._finished)
-        self._set_running()
-        self.progress.setValue(0)
         if isinstance(job, PlateSolveJob):
-            self.progress.setRange(0, 0)
+            job.solve_progress.connect(self._plate_solve_progress)
+            self._set_solve_elapsed(0)
+            self.progress.setToolTip("Plate Solve progress is based on completed steps.")
+            self._solve_timer.start()
+        else:
+            job.progress.connect(self._progress)
+            self.progress.setToolTip("")
+        job.finished.connect(self._finished)
+        self.progress.setValue(0)
+        self.status.setToolTip("")
+        self._set_running()
         self._report_operation(message)
         job.start()
+
+    def _show_job_progress(self, visible: bool, *, timed: bool = False) -> None:
+        self.progress.setVisible(visible)
+        self.progress_percent.setVisible(visible)
+        self.progress_elapsed.setVisible(visible and timed)
+
+    @Slot(int)
+    def _show_job_percentage(self, percentage: int) -> None:
+        self.progress_percent.setText(f"{percentage}%")
+
+    def _set_solve_elapsed(self, seconds: float) -> None:
+        minutes, seconds_int = divmod(int(seconds), 60)
+        self.progress_elapsed.setText(f"Elapsed {minutes}:{seconds_int:02d}")
+
+    @Slot()
+    def _update_solve_elapsed(self) -> None:
+        if isinstance(self.job, PlateSolveJob):
+            self._set_solve_elapsed(monotonic() - self.job.queued_at)
 
     @Slot(bool)
     def _focus_command_panel(self, visible: bool) -> None:
@@ -1069,7 +1118,7 @@ class ProjectWindow(QMainWindow):
 
     def _set_running(self) -> None:
         running = self._is_running()
-        self.progress.setVisible(self.job is not None)
+        self._show_job_progress(self.job is not None, timed=isinstance(self.job, PlateSolveJob))
         self.cancel_button.setVisible(self.job is not None)
         for action in self._file_actions:
             action.setEnabled(not running)
@@ -1084,13 +1133,15 @@ class ProjectWindow(QMainWindow):
     @Slot(object, object)
     def _progress(self, done: int, total: int) -> None:
         job = self.job
-        if isinstance(job, PlateSolveJob):
-            if done < total and self.cancel_button.isEnabled():
-                self.status.setText(f"Solving panel {done + 1:,} of {total:,}…")
-            return
         self.progress.setValue((100 * done) // total)
         if job is not None and self.cancel_button.isEnabled():
             self.status.setText(f"{job.progress_label} {done:,} / {total:,} {job.progress_units}.")
+
+    @Slot(int, str)
+    def _plate_solve_progress(self, percentage: int, status: str) -> None:
+        if isinstance(self.job, PlateSolveJob) and self.cancel_button.isEnabled():
+            self.status.setText(status)
+            self.progress.setValue(percentage)
 
     @Slot()
     def _finished(self) -> None:
@@ -1124,6 +1175,7 @@ class ProjectWindow(QMainWindow):
         self._finish_close_if_ready()
 
     def _finish_plate_solve(self, job: PlateSolveJob) -> None:
+        self._solve_timer.stop()
         panels = list(self.project.panels)
         solved = 0
         for outcome in job.outcomes:
@@ -1136,9 +1188,8 @@ class ProjectWindow(QMainWindow):
         self._solve_outcomes = {outcome.index: outcome for outcome in job.outcomes}
         self._refresh(self.panels.currentIndex().row())
         completed = len(job.outcomes)
-        self.progress.setRange(0, 100)
-        if job.total:
-            self.progress.setValue(100 * completed // job.total)
+        if not job.cancelled and job.error is None:
+            self.progress.setValue(100)
         summary = f"{solved} solved, {completed - solved} failed."
         self.status.setToolTip(
             f"Batch elapsed {job.elapsed_seconds:.2f} s. Queue {job.queue_seconds:.2f} s. "
@@ -1152,6 +1203,8 @@ class ProjectWindow(QMainWindow):
             self._report_operation("All sky panels already have a usable WCS.")
         else:
             self._report_operation(f"Plate solve finished. {summary}")
+        self._set_solve_elapsed(job.elapsed_seconds)
+        self._show_job_progress(True, timed=True)
 
     def _finish_preview(self, job: PreviewJob) -> None:
         if job.result is not None:
@@ -1294,6 +1347,8 @@ class ProjectWindow(QMainWindow):
             self.status.setText(f"Cancelling {self.job.label}…")
 
     def _report_operation(self, summary: str, *, detail: str = "") -> None:
+        if self.job is None:
+            self._show_job_progress(False)
         self.status.setText(f"{summary} {detail}" if detail else summary)
         self.command_panel.append_summary(summary)
 

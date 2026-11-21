@@ -128,6 +128,9 @@ def test_desktop_plate_solve_skips_reusable_wcs_and_retries_unsolved_panels(
     ) -> AstapCandidate:
         assert executable == astap_executable and catalog == tmp_path
         assert callable(stage)
+        search_seconds = kwargs["search_seconds"]
+        assert callable(search_seconds)
+        search_seconds()
         calls.append((-1, "astap"))
         if not retry.is_set():
             raise ValueError("ASTAP found no match.")
@@ -164,6 +167,11 @@ def test_desktop_plate_solve_skips_reusable_wcs_and_retries_unsolved_panels(
     )
 
     window = project_window.ProjectWindow(use_gpu=False)
+    secondary = next((screen for screen in app.screens() if screen != app.primaryScreen()), None)
+    if secondary is not None:
+        window.move(secondary.availableGeometry().center() - window.rect().center())
+    percentages: list[int] = []
+    window.progress.valueChanged.connect(percentages.append)
 
     def wait_for(condition: Callable[[], bool]) -> None:
         if condition():
@@ -185,13 +193,25 @@ def test_desktop_plate_solve_skips_reusable_wcs_and_retries_unsolved_panels(
         window.plate_solve_button.click()
         assert not folder_requests and window.job is not None
         assert window.progress.isVisible()
-        assert window.progress.minimum() == window.progress.maximum() == 0
-        wait_for(lambda: waiting.is_set() and window.status.text() == "Solving panel 3 of 3…")
-        assert window.progress.maximum() == 0
+        assert (window.progress.minimum(), window.progress.maximum()) == (0, 100)
+        assert window.progress_percent.text() == "0%"
+        wait_for(
+            lambda: (
+                waiting.is_set()
+                and window.status.text().endswith("Searching with Gaia DR3 · Blind…")
+            )
+        )
+        assert "Panel 3 of 3 · panel-5.fits" in window.status.text()
+        assert window.progress.width() > window.width() // 2 and window.progress.height() >= 24
+        assert window.progress_elapsed.isVisible()
+        in_progress = window.progress.value()
+        assert 66 < in_progress < 100
+        assert window.progress_percent.text() == f"{in_progress}%"
+        assert len(percentages) >= 5 and percentages == sorted(set(percentages))
         window.cancel_button.click()
         wait_for(lambda: window.job is None and window._inspection_job is None)
-        assert window.progress.isHidden() and window.progress.maximum() == 100
-        assert window.progress.value() == 66
+        assert window.progress.isVisible() and window.progress.value() == in_progress
+        assert window.cancel_button.isHidden()
         assert window.status.text() == "Plate solve cancelled. 1 solved, 1 failed."
         window.command_panel_action.trigger()
         assert window.status.text() in window.command_panel.output.toPlainText().splitlines()
@@ -208,9 +228,11 @@ def test_desktop_plate_solve_skips_reusable_wcs_and_retries_unsolved_panels(
         window._file_actions[2].trigger()
         assert load_project(manifest) == window.project
         retry.set()
+        percentages.clear()
         window.plate_solve_button.click()
         wait_for(lambda: window.job is None and window._inspection_job is None)
-        assert window.progress.value() == 100
+        assert window.progress.value() == 100 and window.progress_percent.text() == "100%"
+        assert len(percentages) >= 5 and percentages == sorted(set(percentages))
         assert window.status.text() == "Plate solve finished. 2 solved, 0 failed."
         assert window.status.text() in window.command_panel.output.toPlainText().splitlines()
         assert window.project.panels[3].wcs_sidecar == load_project(manifest).panels[3].wcs_sidecar

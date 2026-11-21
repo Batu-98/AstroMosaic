@@ -2,6 +2,7 @@
 
 import logging
 from dataclasses import dataclass, replace
+from functools import partial
 from pathlib import Path
 from threading import Event
 from time import monotonic
@@ -9,7 +10,7 @@ from time import monotonic
 import numpy as np
 from PySide6.QtCore import QObject, QThread, Signal
 
-from astromosaic.astrometry.solve import SolveOptions
+from astromosaic.astrometry.solve import SolveOptions, SolveStep
 from astromosaic.astrometry.solve_budget import SolveBudget, SolveBudgetExceeded
 from astromosaic.core import Tile
 from astromosaic.core.job import JobContext, MosaicCancelled
@@ -109,7 +110,9 @@ class PanelInspectionJob(_ProjectJob[tuple[PanelInspection, ...]]):
 
 
 class PlateSolveJob(_ProjectJob[None]):
+    solve_progress = Signal(int, str)
     label = "plate solve"
+    _eligibility_percent = 10
 
     def __init__(
         self,
@@ -134,6 +137,44 @@ class PlateSolveJob(_ProjectJob[None]):
         self.total = 0
         self.outcomes: list[PanelSolveOutcome] = []
 
+    def _checking(self, checked: int, total: int) -> None:
+        now = monotonic()
+        if 0 < checked < total and now - self._last_update < 0.05:
+            return
+        self._last_update = now
+        self.solve_progress.emit(
+            self._eligibility_percent * checked // total,
+            f"Plate Solve · Checking sky panels for reusable WCS ({checked:,} of {total:,})",
+        )
+
+    def _panel_progress(self, ordinal: int, index: int, percent: int, phase: str) -> None:
+        progress = self._eligibility_percent + (
+            (100 - self._eligibility_percent) * (100 * ordinal + percent) // (100 * self.total)
+        )
+        name = self.project.panels[index].source.path.name
+        self.solve_progress.emit(
+            progress, f"Plate Solve · Panel {ordinal + 1:,} of {self.total:,} · {name}\n{phase}"
+        )
+
+    def _solve_step(self, ordinal: int, index: int, step: SolveStep) -> None:
+        if step.phase == "publish":
+            self._panel_progress(ordinal, index, 75, "Saving validated WCS…")
+            return
+        offset, label = {
+            "prepare": (0, "Preparing {backend}"),
+            "search": (1, "Searching with {backend}"),
+            "validate": (2, "Validating {backend} result"),
+        }[step.phase]
+        backend = "Gaia DR3" if step.stage == "gaia-dr3" else "ASTAP"
+        method = {"hinted": "Hinted", "blind": "Blind", "fov-recovery": "Field-of-view recovery"}
+        description = label.format(backend=backend)
+        if name := method.get(step.method or ""):
+            description += f" · {name}"
+        # Within a panel, preparation and publication each have one quarter.
+        # The middle half covers preparation, search and validation of the planned attempts.
+        percent = 25 + 50 * (3 * (step.attempt - 1) + offset) // (3 * step.attempts)
+        self._panel_progress(ordinal, index, percent, f"{description}…")
+
     def perform(self, context: JobContext) -> None:
         started = monotonic()
         self.queue_seconds = started - self.queued_at
@@ -142,19 +183,17 @@ class PlateSolveJob(_ProjectJob[None]):
         try:
             try:
                 context.check_cancelled()
-                indices = (
-                    (self.selected_panel,)
-                    if self.selected_panel is not None
-                    else panels_needing_wcs(self.project, context)
-                )
+                if self.selected_panel is None:
+                    indices = panels_needing_wcs(self.project, context, on_inspected=self._checking)
+                else:
+                    indices = (self.selected_panel,)
                 context.check_cancelled()
             finally:
                 self.eligibility_seconds = monotonic() - started
             self.total = len(indices)
-            if self.total:
-                self.progress.emit(0, self.total)
-            for done, index in enumerate(indices, 1):
+            for ordinal, index in enumerate(indices):
                 context.check_cancelled()
+                self._panel_progress(ordinal, index, 0, "Reading image and solve hints…")
                 outcome = solve_project_panel(
                     index,
                     self.project.panels[index],
@@ -162,9 +201,9 @@ class PlateSolveJob(_ProjectJob[None]):
                     self.directory,
                     context,
                     job_budget=self.batch_budget,
+                    on_step=partial(self._solve_step, ordinal, index),
                 )
                 self.outcomes.append(outcome)
-                self.progress.emit(done, self.total)
                 if self.batch_budget is not None and outcome.status == "budget-exhausted":
                     self.batch_budget.check()
                     if outcome.budget is not None and outcome.budget["limiting_scope"] == "job":

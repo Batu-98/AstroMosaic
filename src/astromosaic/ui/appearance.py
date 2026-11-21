@@ -24,6 +24,11 @@ _STYLE = """
         padding: 6px; border: 0; border-right: 1px solid palette(mid);
         border-bottom: 1px solid palette(mid); }
     QSplitter::handle { background: palette(mid); }
+    QProgressBar#workspaceProgress {
+        background: palette(base); border: 1px solid palette(mid); border-radius: 5px;
+    }
+    QProgressBar#workspaceProgress::chunk { background: PRIMARY_FILL; border-radius: 4px; }
+    QLabel#jobPercentage { font-size: 19px; font-weight: 700; min-width: 54px; }
 """
 
 

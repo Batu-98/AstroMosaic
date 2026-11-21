@@ -20,6 +20,7 @@ from astromosaic.astrometry.hints import PanelOptics, positive_header_number, re
 from astromosaic.astrometry.solve import (
     SolveOptions,
     SolverAttempt,
+    SolveStep,
     Stage,
     load_solution,
     panel_budget,
@@ -394,13 +395,25 @@ def inspect_project_panel(panel: ProjectPanel, context: JobContext) -> PanelInsp
     )
 
 
-def panels_needing_wcs(project: MosaicProject, context: JobContext) -> tuple[int, ...]:
-    return tuple(
-        index
-        for index in project.sky_indices()
-        if inspect_project_panel(project.panels[index], context).wcs_status
-        not in {"Embedded", "Sidecar"}
-    )
+def panels_needing_wcs(
+    project: MosaicProject,
+    context: JobContext,
+    *,
+    on_inspected: Callable[[int, int], None] | None = None,
+) -> tuple[int, ...]:
+    sky = project.sky_indices()
+    if sky and on_inspected is not None:
+        on_inspected(0, len(sky))
+    pending = []
+    for checked, index in enumerate(sky, start=1):
+        if inspect_project_panel(project.panels[index], context).wcs_status not in {
+            "Embedded",
+            "Sidecar",
+        }:
+            pending.append(index)
+        if on_inspected is not None:
+            on_inspected(checked, len(sky))
+    return tuple(pending)
 
 
 @dataclass(frozen=True, slots=True)
@@ -423,6 +436,7 @@ def solve_project_panel(
     context: JobContext,
     *,
     job_budget: SolveBudget | None = None,
+    on_step: Callable[[SolveStep], None] | None = None,
 ) -> PanelSolveOutcome:
     """Resolve one candidate and publish a new sidecar with its input identity."""
     budget = panel_budget(options, job_budget)
@@ -441,6 +455,7 @@ def solve_project_panel(
                 context,
                 budget=budget,
                 existing_sidecar=existing,
+                on_step=on_step,
             )
             attempts = result.attempts
             if result.geometry is None:
@@ -451,6 +466,8 @@ def solve_project_panel(
                     status=result.outcome,
                     budget=budget.report(),
                 )
+            if on_step is not None:
+                on_step(SolveStep("publish"))
             _check_reference("Source", panel.source, context)
             if panel.sky_mask is not None:
                 _check_reference("Sky mask", panel.sky_mask, context)

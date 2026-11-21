@@ -1077,6 +1077,13 @@ The table is a status summary, not a replacement for the full exit gates in Sect
 - **Related:** None.
 - **Next:** Proceed with the scheduled Phase 8 scoping or clean-machine acceptance validation when requested.
 
+### 2026-11-21 - Plate Solve - Show stage progress and a larger job bar
+
+- **Changed** Added progress at WCS eligibility, solver preparation, search, validation and sidecar publication. The desktop shows a wide bar, numeric percentage, active panel and backend, and elapsed time. Assigned version `0.1.0b10` for the local Windows handoff.
+- **Verified** The 29 targeted source checks passed, including monotonic displayed progress, cancellation and retry, offline solve policy and budgets, rendering and the headless project workflow. Ruff, scoped mypy and the Poetry lock check passed.
+- **Related** Q-026 and [desktop plate solving](docs/phase-3b.md#desktop-plate-solving).
+- **Next** Verify real solves, the wider layout, and cancellation in the locked beta 10 Windows runtime.
+
 ## Entry Template
 
 Copy this format into a new entry immediately above this template, preserving chronological order:

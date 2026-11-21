@@ -2,8 +2,9 @@
 
 import json
 import subprocess
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import asdict, dataclass, replace
+from functools import partial
 from math import atan, degrees, isfinite, pi, radians, sin
 from pathlib import Path
 from shutil import disk_usage
@@ -49,9 +50,21 @@ from astromosaic.io import PanelSource
 from astromosaic.io.atomic import atomic_binary_file
 
 Stage = Literal["existing-wcs", "gaia-dr3", "astap-hinted", "astap-blind"]
+type _AttemptPhase = Literal["prepare", "search", "validate"]
 _STAGES: tuple[Stage, ...] = ("existing-wcs", "astap-hinted", "astap-blind", "gaia-dr3")
 _ASTAP_VALIDATION_READ_BYTES = 64 * 1024**2
 _ASTAP_VALIDATION_MAX_STARS = 100_000
+
+
+@dataclass(frozen=True, slots=True)
+class SolveStep:
+    """Report the work entering a solver attempt or sidecar publication."""
+
+    phase: _AttemptPhase | Literal["publish"]
+    stage: Stage | None = None
+    method: str | None = None
+    attempt: int = 0
+    attempts: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -359,6 +372,7 @@ class _PanelSolve:
         position: tuple[float, float] | None,
         gaia_scale: float | None,
         vertical_scale: float | None,
+        on_phase: Callable[[_AttemptPhase], None] | None = None,
     ) -> tuple[PanelGeometry | None, SolverAttempt, dict[str, object] | None]:
         options, context, budget = self.options, self.context, self.budget
         started = budget.clock()
@@ -381,10 +395,21 @@ class _PanelSolve:
             )
             search_started = budget.clock()
             failure_stage = "search"
+            if on_phase is not None:
+                on_phase("search")
             return search_limit
+
+        def start_validation() -> None:
+            nonlocal validation_started, failure_stage
+            validation_started = budget.clock()
+            failure_stage = "validation"
+            if on_phase is not None:
+                on_phase("validate")
 
         try:
             context.check_cancelled()
+            if on_phase is not None:
+                on_phase("prepare")
             header = None
             if stage.startswith("astap-"):
                 if method == "hinted" and position is None and vertical_scale is None:
@@ -426,8 +451,7 @@ class _PanelSolve:
                         sip=True,
                         context=context,
                     )
-                    validation_started = budget.clock()
-                    failure_stage = "validation"
+                    start_validation()
                     attempt = replace(
                         attempt, catalog=candidate.database, backend_version=candidate.version
                     )
@@ -483,8 +507,7 @@ class _PanelSolve:
                     start_search(),
                     context,
                 )
-                validation_started = budget.clock()
-                failure_stage = "validation"
+                start_validation()
                 attempt = replace(attempt, catalog=native.catalog, backend_version=native.version)
                 header, quality = validate_gaia(
                     native,
@@ -572,6 +595,7 @@ def solve_panel(
     *,
     budget: SolveBudget | None = None,
     existing_sidecar: Path | None = None,
+    on_step: Callable[[SolveStep], None] | None = None,
 ) -> SolveResult:
     """Run the ordered local policy under a deadline started by the caller."""
     if not isfinite(options.timeout_seconds) or options.timeout_seconds <= 0:
@@ -675,8 +699,25 @@ def solve_panel(
             or (position is None or scale is None)
         ):
             selections.append(("gaia-dr3", "blind"))
-        for stage, method in selections:
-            solved, attempt, quality = run.attempt(stage, method, position, scale, vertical_scale)
+
+        def report_phase(phase: _AttemptPhase, *, stage: Stage, method: str, number: int) -> None:
+            if on_step is not None:
+                on_step(SolveStep(phase, stage, method, number, len(selections)))
+
+        for number, (stage, method) in enumerate(selections, start=1):
+            notify = (
+                partial(report_phase, stage=stage, method=method, number=number)
+                if on_step is not None
+                else None
+            )
+            solved, attempt, quality = run.attempt(
+                stage,
+                method,
+                position,
+                scale,
+                vertical_scale,
+                notify,
+            )
             attempts.append(attempt)
             if solved is not None:
                 return finish(solved, stage, "solved", quality)
