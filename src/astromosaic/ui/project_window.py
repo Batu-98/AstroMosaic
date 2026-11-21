@@ -1,6 +1,8 @@
 """Desktop project and background render workflow."""
 
+import json
 import re
+from argparse import Namespace
 from dataclasses import asdict, replace
 from importlib.metadata import version
 from pathlib import Path
@@ -141,7 +143,7 @@ class ProjectWindow(QMainWindow):
         self.plate_solve_settings_action = tools_menu.addAction(
             "Plate Solve Settings…", self._plate_solve_settings
         )
-        self.command_panel = CommandPanel(self)
+        self.command_panel = CommandPanel(self, self._session_command)
         self.command_panel.running_changed.connect(self._command_running_changed)
         command_dock = QDockWidget("Command Panel", self)
         command_dock.setWidget(self.command_panel)
@@ -492,8 +494,11 @@ class ProjectWindow(QMainWindow):
 
     def _new(self) -> None:
         if self._confirm_discard():
-            self._set_project(MosaicProject(), None)
-            self._report_operation("New project.")
+            self._new_project()
+
+    def _new_project(self) -> None:
+        self._set_project(MosaicProject(), None)
+        self._report_operation("New project.")
 
     def _open(self) -> None:
         if not self._confirm_discard():
@@ -502,11 +507,13 @@ class ProjectWindow(QMainWindow):
         if not name:
             return
         try:
-            path = Path(name)
-            self._set_project(load_project(path), path)
-            self._report_operation(f"Opened {path.name}.")
+            self._open_project(Path(name))
         except (OSError, ValueError) as error:
             self._error("Open failed", error)
+
+    def _open_project(self, path: Path) -> None:
+        self._set_project(load_project(path), path)
+        self._report_operation(f"Opened {path.name}.")
 
     def _save(self) -> bool:
         if self.project_path is None:
@@ -543,38 +550,44 @@ class ProjectWindow(QMainWindow):
 
     def _write(self, path: Path, *, replace_existing: bool) -> bool:
         try:
-            save_project(path, self.project, replace_existing=replace_existing)
+            self._save_project(path, replace_existing=replace_existing)
         except (OSError, ValueError, OverflowError) as error:
             self._error("Save failed", error)
             return False
+        return True
+
+    def _save_project(self, path: Path, *, replace_existing: bool) -> None:
+        save_project(path, self.project, replace_existing=replace_existing)
         self.project_path, self._saved = path, self.project
         self._refresh(self.panels.currentIndex().row())
         self._report_operation(f"Saved {path.name}.")
-        return True
 
     def _add(self) -> None:
         names, _ = QFileDialog.getOpenFileNames(self, "Add Panels", "", PANEL_FILES)
         if not names:
             return
         try:
-            sources = tuple(FileReference.capture(Path(name)) for name in names)
-            known = {panel.source.path for panel in self.project.panels}
-            additions = []
-            for source in sources:
-                if source.path not in known:
-                    additions.append(ProjectPanel(source))
-                    known.add(source.path)
-            start = len(self.project.panels)
-            self.project = replace(self.project, panels=self.project.panels + tuple(additions))
-            self._refresh(start)
-            if additions:
-                self._report_operation(f"Added {len(additions)} panel(s).")
-                indices = tuple(range(start, len(self.project.panels)))
-                self._launch_job(ForegroundJob(self.project, indices, self), "Checking foreground…")
-            else:
-                self._report_operation("Panels already added.")
+            self._add_paths(tuple(map(Path, names)))
         except (OSError, ValueError) as error:
             self._error("Add failed", error)
+
+    def _add_paths(self, paths: tuple[Path, ...]) -> None:
+        sources = tuple(FileReference.capture(path) for path in paths)
+        known = {panel.source.path for panel in self.project.panels}
+        additions = []
+        for source in sources:
+            if source.path not in known:
+                additions.append(ProjectPanel(source))
+                known.add(source.path)
+        start = len(self.project.panels)
+        self.project = replace(self.project, panels=self.project.panels + tuple(additions))
+        self._refresh(start)
+        if additions:
+            self._report_operation(f"Added {len(additions)} panel(s).")
+            indices = tuple(range(start, len(self.project.panels)))
+            self._launch_job(ForegroundJob(self.project, indices, self), "Checking foreground…")
+        else:
+            self._report_operation("Panels already added.")
 
     def _relink(self) -> None:
         index = self.panels.currentIndex().row()
@@ -584,11 +597,84 @@ class ProjectWindow(QMainWindow):
         )
         if name:
             try:
-                self.project = self.project.relink_panel(index, Path(name))
-                self._refresh(index)
-                self._report_operation(f"Relinked {Path(name).name}.")
+                self._relink_panel(index, Path(name))
             except (OSError, ValueError) as error:
                 self._error("Relink failed", error)
+
+    def _relink_panel(self, index: int, path: Path) -> None:
+        self.project = self.project.relink_panel(index, path)
+        self._refresh(index)
+        self._report_operation(f"Relinked {path.name}.")
+
+    def _session_panel(self, number: int) -> int:
+        if not 1 <= number <= len(self.project.panels):
+            raise ValueError("The panel number is outside the active project.")
+        return number - 1
+
+    def _session_command(self, arguments: Namespace, directory: Path) -> str | None:
+        action = arguments.action
+        dirty = self.project != self._saved
+        if action in {"new", "open", "close"} and dirty and not arguments.discard:
+            raise ValueError(
+                "The active project has unsaved changes. Run session save or pass --discard."
+            )
+        match action:
+            case "status":
+                return json.dumps(
+                    {
+                        "schema_version": 1,
+                        "project": str(self.project_path) if self.project_path else None,
+                        "dirty": dirty,
+                        "panels": len(self.project.panels),
+                    },
+                    sort_keys=True,
+                )
+            case "new":
+                self._new_project()
+            case "open":
+                self._open_project(directory / arguments.path)
+            case "close":
+                if dirty:
+                    self._set_project(MosaicProject(), None)
+                QTimer.singleShot(0, self.close)
+            case "save":
+                if arguments.path is None:
+                    if self.project_path is None:
+                        raise ValueError("Supply a project filename for the first save.")
+                    self._save_project(self.project_path, replace_existing=True)
+                else:
+                    path = directory / arguments.path
+                    if not path.suffix:
+                        path = path.with_suffix(".astromosaic")
+                    self._save_project(path, replace_existing=arguments.replace)
+            case "add":
+                self._add_paths(tuple(directory / path for path in arguments.paths))
+            case "relink":
+                self._relink_panel(self._session_panel(arguments.panel), directory / arguments.path)
+            case "preview" | "export":
+                if not self.project.panels:
+                    raise ValueError("Add panels to the active project first.")
+                if action == "preview":
+                    self._preview()
+                else:
+                    layer: Layer = arguments.layer or self._layer()
+                    band = arguments.band if arguments.band is not None else self._sky_band()
+                    if arguments.band is not None and layer != "sky":
+                        raise ValueError("Select a band only for the sky layer.")
+                    self._export_to(
+                        directory / arguments.output, layer, band if layer == "sky" else None
+                    )
+            case "solve":
+                sky = self.project.sky_indices()
+                if not sky:
+                    raise ValueError("The active project has no sky panels.")
+                index = (
+                    self._session_panel(arguments.panel) if arguments.panel is not None else None
+                )
+                if index is not None and index not in sky:
+                    raise ValueError("The selected panel is excluded from the sky layer.")
+                self._start_plate_solve(index)
+        return None
 
     def _remove(self) -> None:
         index = self.panels.currentIndex().row()
@@ -781,9 +867,11 @@ class ProjectWindow(QMainWindow):
             path = path.with_suffix(
                 {_FITS_FILTER: ".fits", _XISF_FILTER: ".xisf"}.get(selected, ".tiff")
             )
-        layer = self._layer()
+        self._export_to(path, self._layer(), self._sky_band())
+
+    def _export_to(self, path: Path, layer: Layer, band: str | None) -> None:
         self._launch_job(
-            MosaicJob(self.project, path, self, layer, band=self._sky_band()),
+            MosaicJob(self.project, path, self, layer, band=band),
             f"Preparing {layer} mosaic export to {path.name}…",
         )
 

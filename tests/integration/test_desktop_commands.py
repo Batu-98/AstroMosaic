@@ -3,6 +3,7 @@ import os
 import subprocess
 import sys
 from collections.abc import Callable
+from dataclasses import replace
 from pathlib import Path
 from time import monotonic
 
@@ -13,7 +14,13 @@ from astropy.io import fits
 from astromosaic.core import Region
 from astromosaic.geometry import tan_output_wcs
 from astromosaic.pipeline.mosaic import RenderSpec
-from astromosaic.storage.project import FileReference, MosaicProject, ProjectPanel, save_project
+from astromosaic.storage.project import (
+    FileReference,
+    MosaicProject,
+    ProjectPanel,
+    load_project,
+    save_project,
+)
 
 
 def test_command_panel_runs_saved_projects_and_cleans_cancelled_exports(
@@ -152,5 +159,113 @@ def test_command_panel_runs_saved_projects_and_cleans_cancelled_exports(
         timer.stop()
         panel.cancel()
         until(lambda: not panel.is_running and window._inspection_job is None)
+        window.deleteLater()
+        app.processEvents()
+
+
+def test_session_commands_use_the_live_project_without_modal_dialogs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pytest.importorskip("PySide6")
+    from PySide6.QtCore import QSettings
+    from PySide6.QtTest import QTest
+    from PySide6.QtWidgets import QApplication, QFileDialog, QMessageBox
+
+    from astromosaic.pipeline.smoke import write_smoke_panel
+    from astromosaic.ui.project_window import ProjectWindow
+
+    if "QT_QPA_PLATFORM" not in os.environ:
+        monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
+    app = QApplication.instance()
+    if not isinstance(app, QApplication):
+        app = QApplication([])
+    app.setQuitOnLastWindowClosed(False)
+    window = ProjectWindow(
+        use_gpu=False,
+        preferences=QSettings(str(tmp_path / "preferences.ini"), QSettings.Format.IniFormat),
+    )
+    secondary = next((screen for screen in app.screens() if screen != app.primaryScreen()), None)
+    if secondary is not None:
+        window.move(secondary.availableGeometry().center() - window.rect().center())
+    panel = window.command_panel
+    prompts: list[str] = []
+
+    def unexpected_dialog(*args: object, **kwargs: object) -> None:
+        prompts.append("A dialog opened")
+        raise AssertionError(prompts[-1])
+
+    for method in ("getOpenFileName", "getOpenFileNames", "getSaveFileName"):
+        monkeypatch.setattr(QFileDialog, method, unexpected_dialog)
+    monkeypatch.setattr(QMessageBox, "question", unexpected_dialog)
+    monkeypatch.setattr(QMessageBox, "exec", unexpected_dialog)
+
+    def run(command: str) -> None:
+        panel.entry.setText(command)
+        panel.run_button.click()
+        assert not prompts
+
+    def wait_until(condition: Callable[[], bool]) -> None:
+        deadline = monotonic() + 15
+        while not condition():
+            assert monotonic() < deadline, panel.output.toPlainText()
+            QTest.qWait(10)
+
+    def idle() -> bool:
+        return window.job is None and window._inspection_job is None
+
+    source = tmp_path / "Gökyüzü panel.fits"
+    write_smoke_panel(source)
+    original = source.read_bytes()
+    saved = tmp_path / "Night session.astromosaic"
+    taken = tmp_path / "Occupied.astromosaic"
+    taken.write_bytes(b"existing bytes")
+    spec = RenderSpec((359.999, 20.0), (16, 12), 7.2)
+    window._set_project(MosaicProject(render=spec), None)
+    window.show()
+    try:
+        run("session save --help")
+        assert "--replace" in panel.output.toPlainText()
+        run("session save")
+        assert "Supply a project filename" in panel.output.toPlainText()
+        run(f'session add "{source}"')
+        wait_until(idle)
+        assert len(window.project.panels) == 1
+        run("session status")
+        assert '"dirty": true' in panel.output.toPlainText()
+        run("session close")
+        run("session new")
+        run(f'session open "{tmp_path / "absent.astromosaic"}" --discard')
+        assert window.isVisible() and window.project.panels[0].source.path == source
+        assert "The active project has unsaved changes" in panel.output.toPlainText()
+
+        run(f'session save "{taken}"')
+        assert taken.read_bytes() == b"existing bytes" and window.project_path is None
+        run(f'session save "{saved.with_suffix("")}"')
+        assert window.project_path == saved and load_project(saved) == window.project
+
+        window.project = replace(window.project, render=replace(spec, crop=Region(1, 1, 9, 7)))
+        run('session export -o "Live sky.fits"')
+        wait_until(idle)
+        assert fits.getdata(tmp_path / "Live sky.fits").shape == (7, 9)
+        assert load_project(saved).render.crop is None
+        run("session save")
+        assert load_project(saved).render.crop == Region(1, 1, 9, 7)
+
+        moved = source.with_name("Moved panel.fits")
+        source.rename(moved)
+        run(f'session open "{saved.name}"')
+        run(f'session relink 1 "{moved.name}"')
+        wait_until(idle)
+        assert window.project.panels[0].source.path == moved
+        run("session save")
+        assert load_project(saved).panels[0].source.path == moved
+        run("session close")
+        wait_until(lambda: not window.isVisible())
+        assert not prompts and moved.read_bytes() == original
+        assert not list(tmp_path.rglob("*.part"))
+    finally:
+        if window.job is not None:
+            window.job.cancel()
+        wait_until(idle)
         window.deleteLater()
         app.processEvents()

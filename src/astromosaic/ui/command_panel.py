@@ -1,9 +1,12 @@
 """Desktop controls for the AstroMosaic command line."""
 
+from argparse import ArgumentParser, Namespace
+from collections.abc import Callable
 from multiprocessing import get_context
 from multiprocessing.connection import wait
 from pathlib import Path
 from shlex import shlex
+from typing import Never
 
 from PySide6.QtCore import Qt, Signal, Slot
 from PySide6.QtGui import QFontDatabase, QKeySequence, QShortcut, QTextCursor
@@ -24,6 +27,46 @@ from astromosaic.ui.mosaic_job import BackgroundJob
 
 _HISTORY_LIMIT = 100
 _LAUNCHERS = {"astromosaic", "astromosaic.exe", "astromosaic-cli", "astromosaic-cli.exe"}
+
+
+class _SessionHelp(Exception):
+    pass
+
+
+class _SessionParser(ArgumentParser):
+    def error(self, message: str) -> Never:
+        raise ValueError(message)
+
+    def print_help(self, file: object = None) -> Never:
+        raise _SessionHelp(self.format_help())
+
+
+def _parse_session(argv: list[str]) -> Namespace:
+    parser = _SessionParser(prog="session", description="Control the open desktop project.")
+    commands = parser.add_subparsers(dest="action", required=True)
+    commands.add_parser("status", help="Show the active project and its unsaved state.")
+    new = commands.add_parser("new", help="Start an untitled project.")
+    opened = commands.add_parser("open", help="Open a saved project by path.")
+    opened.add_argument("path", type=Path)
+    closed = commands.add_parser("close", help="Close the desktop window.")
+    for command in (new, opened, closed):
+        command.add_argument("--discard", action="store_true", help="Discard unsaved edits.")
+    save = commands.add_parser("save", help="Save the active project by path.")
+    save.add_argument("path", type=Path, nargs="?", help="Omit to save to the current filename.")
+    save.add_argument("--replace", action="store_true", help="Replace an existing destination.")
+    add = commands.add_parser("add", help="Add panels to the active project.")
+    add.add_argument("paths", type=Path, nargs="+")
+    relink = commands.add_parser("relink", help="Relink a moved source by its saved fingerprint.")
+    relink.add_argument("panel", type=int, help="One-based panel number.")
+    relink.add_argument("path", type=Path)
+    commands.add_parser("preview", help="Build the currently selected desktop preview.")
+    solve = commands.add_parser("solve", help="Run Plate Solve using the saved desktop settings.")
+    solve.add_argument("--panel", type=int, help="Revalidate this one-based sky panel number.")
+    export = commands.add_parser("export", help="Render the active project to a new file.")
+    export.add_argument("-o", "--output", type=Path, required=True)
+    export.add_argument("--layer", choices=("sky", "foreground", "composition"))
+    export.add_argument("--band", help="Select a sky band.")
+    return parser.parse_args(argv)
 
 
 class CommandJob(BackgroundJob[int]):
@@ -74,8 +117,11 @@ class CommandJob(BackgroundJob[int]):
 class CommandPanel(QWidget):
     running_changed = Signal()
 
-    def __init__(self, parent: QWidget) -> None:
+    def __init__(
+        self, parent: QWidget, run_session: Callable[[Namespace, Path], str | None]
+    ) -> None:
         super().__init__(parent)
+        self._run_session = run_session
         self._startup_directory = Path.cwd()
         self._directory = self._startup_directory
         self._job: CommandJob | None = None
@@ -103,7 +149,7 @@ class CommandPanel(QWidget):
         controls = QHBoxLayout()
         self.entry = QLineEdit()
         self.entry.setAccessibleName("AstroMosaic command")
-        self.entry.setPlaceholderText("--help")
+        self.entry.setPlaceholderText("--help or session --help")
         self.entry.setToolTip("Use Up and Down to recall commands from this session.")
         self.entry.returnPressed.connect(self._run)
         for key, recall in ((Qt.Key.Key_Up, self._previous), (Qt.Key.Key_Down, self._next)):
@@ -196,6 +242,9 @@ class CommandPanel(QWidget):
             return
         if argv and argv[0].lower() in _LAUNCHERS:
             argv = argv[1:]
+        if argv[:1] == ["session"]:
+            self._run_session_command(argv[1:])
+            return
 
         job = CommandJob(argv, self._directory, self)
         self._job = job
@@ -209,6 +258,22 @@ class CommandPanel(QWidget):
         self.status.setText("Running command…")
         self.running_changed.emit()
         job.start()
+
+    def _run_session_command(self, argv: list[str]) -> None:
+        self.entry.clear()
+        self.progress.setValue(0)
+        try:
+            output = self._run_session(_parse_session(argv), self._directory)
+        except _SessionHelp as help_text:
+            self._append(str(help_text))
+            self.status.setText("Session command help.")
+        except (OSError, RuntimeError, ValueError, OverflowError) as error:
+            self.append_summary(f"Session command failed. {error}")
+            self.status.setText("Session command failed.")
+        else:
+            if output is not None:
+                self.append_summary(output)
+            self.status.setText("Session command accepted.")
 
     @Slot(str)
     def _append(self, text: str) -> None:
