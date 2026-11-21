@@ -31,6 +31,7 @@ _FRAGMENT = """#version 150
 uniform sampler2D mosaic;
 uniform vec4 imageRect;
 uniform float midtones;
+uniform int encodeSRGB;
 in vec2 viewUV;
 out vec4 color;
 void main() {
@@ -48,6 +49,13 @@ void main() {
     // Coverage-premultiplied mip levels average only the valid samples.
     vec3 x = clamp(pixel.rgb / pixel.a, 0.0, 1.0);
     vec3 stretched = ((midtones - 1.0) * x) / (((2.0 * midtones - 1.0) * x) - midtones);
+    if (encodeSRGB != 0) {
+        stretched = mix(
+            12.92 * stretched,
+            1.055 * pow(stretched, vec3(1.0 / 2.4)) - 0.055,
+            greaterThan(stretched, vec3(0.0031308))
+        );
+    }
     color = vec4(stretched, 1.0);
 }
 """
@@ -68,8 +76,9 @@ class OpenGLPreview(QOpenGLWidget):
         self._texture: QOpenGLTexture | None = None
         self._vao: QOpenGLVertexArrayObject | None = None
         self._frame: DisplayFrame | None = None
-        self._uploaded: DisplayFrame | None = None
+        self._uploaded: tuple[DisplayFrame | None, bool] = (None, False)
         self._midtones = 0.5
+        self._preserve_tone = False
         self._failed = False
 
     def initializeGL(self) -> None:
@@ -88,8 +97,12 @@ class OpenGLPreview(QOpenGLWidget):
         if not self._vao.create():
             self._fail("OpenGL could not create the preview vertex array.")
 
-    def set_display(self, frame: DisplayFrame | None, midtones: float) -> None:
-        self._frame, self._midtones = frame, midtones
+    def set_display(
+        self, frame: DisplayFrame | None, midtones: float, *, preserve_tone: bool = False
+    ) -> None:
+        self._frame = frame
+        self._midtones = 0.5 if preserve_tone else midtones
+        self._preserve_tone = preserve_tone
         if frame is None and self._texture is not None and self.isValid():
             self.makeCurrent()
             try:
@@ -102,7 +115,7 @@ class OpenGLPreview(QOpenGLWidget):
         if self._texture is not None:
             self._texture.destroy()
             self._texture = None
-        self._uploaded = None
+        self._uploaded = (None, False)
 
     def _upload(self, frame: DisplayFrame | None) -> None:
         self._drop_texture()
@@ -121,12 +134,17 @@ class OpenGLPreview(QOpenGLWidget):
         if not texture.isStorageAllocated():
             raise RuntimeError("OpenGL could not allocate the preview texture.")
         # Qt consumes the read-only float buffer while this frame holds it alive.
-        pointer = VoidPtr(frame.rgba.data)  # type: ignore[arg-type]
+        pixels = (
+            frame.preserved_rgba
+            if self._preserve_tone and frame.preserved_rgba is not None
+            else frame.rgba
+        )
+        pointer = VoidPtr(pixels.data)  # type: ignore[arg-type]
         texture.setData(rgba, float32, cast(int, pointer))
         error = self.context().functions().glGetError()
         if error:
             raise RuntimeError(f"OpenGL preview upload failed (0x{error:04x}).")
-        self._uploaded = frame
+        self._uploaded = (frame, self._preserve_tone)
 
     def paintGL(self) -> None:
         functions = self.context().functions()
@@ -136,7 +154,7 @@ class OpenGLPreview(QOpenGLWidget):
         program, vao = self._program, self._vao
         if self._failed or program is None or vao is None:
             return
-        if self._frame is not self._uploaded:
+        if (self._frame, self._preserve_tone) != self._uploaded:
             try:
                 self._upload(self._frame)
             except (RuntimeError, TypeError) as error:
@@ -152,6 +170,10 @@ class OpenGLPreview(QOpenGLWidget):
         width, height = self.width(), self.height()
         functions.glUniform1i(program.uniformLocation(b"mosaic"), 0)
         functions.glUniform1f(program.uniformLocation(b"midtones"), self._midtones)
+        functions.glUniform1i(
+            program.uniformLocation(b"encodeSRGB"),
+            int(self._frame is not None and self._frame.photo_levels is not None),
+        )
         program.setUniformValue(
             program.uniformLocation(b"imageRect"),
             QVector4D(

@@ -30,6 +30,7 @@ class PanelDescriptor:
     blank: int | None
     mask_provenance: tuple[str, ...]
     icc_encoding: Literal["srgb", "unsupported"] | None = None
+    icc_profile_sha256: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

@@ -38,6 +38,7 @@ try {
         '-m', 'PyInstaller', '--onedir', '--clean', '--noconfirm', '--noupx',
         '--distpath', $distPath, '--workpath', $workPath, '--specpath', $workPath,
         '--copy-metadata', 'astromosaic', '--copy-metadata', 'seiza',
+        '--add-data', 'src/astromosaic/io/sRGB2014.icc:astromosaic/io',
         '--hidden-import', 'imagecodecs._imcd',
         '--hidden-import', 'imagecodecs._deflate',
         '--hidden-import', 'imagecodecs._shared',

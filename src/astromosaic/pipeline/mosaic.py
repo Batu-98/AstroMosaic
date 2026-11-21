@@ -32,9 +32,10 @@ from astromosaic.geometry.footprint import PixelBounds, raster_bounds, tan_footp
 from astromosaic.io import TIFF_SUFFIXES, XISF_SUFFIX, PanelSource, SkyMask, open_panel
 from astromosaic.io.fits_export import open_fits_mosaic
 from astromosaic.photometry import PanelCorrection
+from astromosaic.photometry.photo import PhotoTone, encode_photo_tile, preview_levels
 from astromosaic.pipeline.framing import fit_preview_grid
 from astromosaic.pipeline.refinement import RefinementReport, RefinementSpec, refine_panels
-from astromosaic.pipeline.srgb_preview import SrgbPreviewSource
+from astromosaic.pipeline.srgb import SrgbTileSource
 from astromosaic.resampling import sample, source_window
 
 MIB = 1024**2
@@ -108,6 +109,12 @@ class MosaicResult:
     backend: str = "cpu"
     refinement: RefinementReport | None = None
     common_pixels: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class PhotoExport:
+    tone: PhotoTone | None
+    auto_frame: bool = False
 
 
 @dataclass(frozen=True, slots=True, eq=False)
@@ -232,25 +239,34 @@ def _export_header(
     assume_brightness: bool,
     filter_overrides: Mapping[int, str],
     paths: Sequence[Path],
+    *,
+    photo: bool = False,
 ) -> fits.Header:
     header = target.to_header()
-    _set_calibration(
-        header,
-        [panel.source for panel in panels],
-        declared_filter,
-        assume_brightness,
-        filter_overrides,
-        paths=paths,
-    )
+    sources = [panel.source for panel in panels]
+    if photo:
+        header["FILTER"], _ = _common_band(sources, declared_filter, filter_overrides)
+        header["AMINTENT"] = ("PHOTO", "sRGB photo export")
+    else:
+        _set_calibration(
+            header, sources, declared_filter, assume_brightness, filter_overrides, paths=paths
+        )
     projection = target.wcs.ctype[0][5:]
     header.add_history(f"AstroMosaic {version('astromosaic')}: CPU ICRS {projection} reprojection.")
-    header.add_history("Bilinear valid support; normalized panel weights; linear float32.")
+    if photo:
+        header.add_history("Decoded embedded sRGB; bilinear valid support; normalized weights.")
+        header.add_history("Encoded sRGB2014 RGB UInt16; binary coverage SubIFD.")
+    else:
+        header.add_history("Bilinear valid support; normalized panel weights; linear float32.")
     for index, panel in enumerate(panels, start=1):
         fingerprint = panel.source.descriptor.fingerprint
         header.add_history(
             f"Input {index}: {fingerprint.size_bytes} bytes; weight {panel.weight:g}"
         )
         header.add_history(f"Input {index}: mtime_ns {fingerprint.modified_ns}; {panel.wcs_origin}")
+        if photo and (profile := panel.source.descriptor.icc_profile_sha256) is not None:
+            header.add_history(f"Input {index}: embedded sRGB ICC SHA-256")
+            header.add_history(profile)
         if index - 1 in filter_overrides:
             original = panel.source.descriptor.filter_name or "(missing)"
             header.add_history(
@@ -521,7 +537,7 @@ def _prepare_mosaic(
     context: JobContext,
     filter_overrides: Mapping[int, str] | None = None,
     auto_frame: bool = False,
-    allow_visual: bool = False,
+    intent: Literal["scientific", "preview", "photo"] = "scientific",
 ) -> Iterator[_PreparedMosaic]:
     if not paths:
         raise ValueError("Supply at least one FITS, TIFF, or XISF panel.")
@@ -538,8 +554,12 @@ def _prepare_mosaic(
 
     crop = spec.output_region()
     format_name = _output_format(destination) if destination is not None else None
+    photo = intent == "photo"
+    visual_allowed = intent != "scientific"
     if destination is not None:
-        if crop.width * crop.height * 5 > spec.max_output_bytes:
+        if photo and format_name != "TIFF":
+            raise ValueError("Photo mosaic output requires a .tif or .tiff destination.")
+        if not photo and crop.width * crop.height * 5 > spec.max_output_bytes:
             raise ValueError(f"The {format_name} mosaic exceeds the configured output byte limit.")
         if destination.exists() or destination.is_symlink():
             raise FileExistsError(f"The output file already exists: {destination}")
@@ -564,7 +584,7 @@ def _prepare_mosaic(
                     None: "primary WCS",
                     "primary-header": "primary WCS",
                 }[descriptor.wcs_provenance]
-                if allow_visual:
+                if visual_allowed:
                     detail = " Run Plate Solve for this panel."
                 if index in wcs_sidecars:
                     from astromosaic.astrometry.solve import load_solution
@@ -575,14 +595,19 @@ def _prepare_mosaic(
                         source.header, descriptor.width, descriptor.height
                     )
             except ValueError as error:
-                name = f" ({path.name})" if allow_visual or auto_frame else ""
+                name = f" ({path.name})" if visual_allowed or auto_frame else ""
                 raise ValueError(f"Input panel {index + 1}{name}: {error}{detail}") from error
             panels.append(_Panel(path.name, source, geometry, weight, provenance))
 
         encodings = [panel.source.descriptor.icc_encoding for panel in panels]
-        visual = allow_visual and "srgb" in encodings
+        visual = photo or (visual_allowed and "srgb" in encodings)
         if visual:
             for path, encoding in zip(paths, encodings, strict=True):
+                if photo and encoding != "srgb":
+                    raise ValueError(
+                        f"{path.name}: Photo export requires RGB UInt16 TIFF with a "
+                        "supported embedded sRGB profile."
+                    )
                 if encoding == "unsupported":
                     raise ValueError(
                         f"{path.name} has an unsupported TIFF ICC profile. Use matching sRGB TIFFs "
@@ -594,14 +619,15 @@ def _prepare_mosaic(
                         "and linear or untagged panels separately."
                     )
             if refinement is not None:
+                activity = "photo export" if photo else "preview"
                 raise ValueError(
-                    "Disable relative refinement in Mosaic Settings for an sRGB preview."
+                    f"Disable relative refinement in Mosaic Settings for sRGB {activity}."
                 )
         layout = panels[0].source.descriptor.channel_layout
         if any(panel.source.descriptor.channel_layout != layout for panel in panels):
             raise ValueError("Supply either all mono or all RGB panels.")
         channels = 3 if layout == "rgb" else 1
-        if destination is not None:
+        if destination is not None and not photo:
             if channels == 3 and format_name == "FITS":
                 raise ValueError("RGB mosaics require TIFF or XISF output.")
             if crop.width * crop.height * (4 * channels + 1) > spec.max_output_bytes:
@@ -629,20 +655,29 @@ def _prepare_mosaic(
             crop = spec.output_region()
         target = PanelGeometry(spec.output_wcs(), ICRS())
 
-        if visual:
+        if photo and crop.width * crop.height * 7 > spec.max_output_bytes:
+            raise ValueError("The photo TIFF exceeds the configured output byte limit.")
+        if visual and not photo:
             band, _ = _common_band(
                 [panel.source for panel in panels], filter_name, filter_overrides
             )
             header = target.wcs.to_header()
             header["FILTER"] = band
-            panels = [
-                replace(panel, source=SrgbPreviewSource(panel.source, spec.max_working_bytes))
-                for panel in panels
-            ]
         else:
             header = _export_header(
-                target.wcs, panels, filter_name, assume_surface_brightness, filter_overrides, paths
+                target.wcs,
+                panels,
+                filter_name,
+                assume_surface_brightness,
+                filter_overrides,
+                paths,
+                photo=photo,
             )
+        if visual:
+            panels = [
+                replace(panel, source=SrgbTileSource(panel.source, spec.max_working_bytes))
+                for panel in panels
+            ]
         if refinement is not None:
             report = refine_panels(
                 [(panel.source, panel.geometry) for panel in panels],
@@ -694,8 +729,9 @@ def render_mosaic(
     refinement: RefinementSpec | None = None,
     context: JobContext = DEFAULT_JOB_CONTEXT,
     filter_overrides: Mapping[int, str] | None = None,
+    photo: PhotoExport | None = None,
 ) -> MosaicResult:
-    """Reproject original linear samples and publish the finished mosaic on success."""
+    """Reproject original samples and publish the finished mosaic on success."""
     with _prepare_mosaic(
         paths,
         spec,
@@ -708,11 +744,44 @@ def render_mosaic(
         refinement=refinement,
         context=context,
         filter_overrides=filter_overrides,
+        auto_frame=photo.auto_frame if photo is not None else False,
+        intent="photo" if photo is not None else "scientific",
     ) as mosaic:
-        return _write_raster(mosaic.raster(), destination, context)
+        raster = mosaic.raster()
+        if photo is not None:
+            photo = _resolve_photo(raster, photo, context)
+        return _write_raster(raster, destination, context, photo=photo)
 
 
-def _write_raster(mosaic: _RasterPlan, destination: Path, context: JobContext) -> MosaicResult:
+def _resolve_photo(raster: _RasterPlan, photo: PhotoExport, context: JobContext) -> PhotoExport:
+    tone = photo.tone
+    if tone is not None:
+        levels = tone.levels
+        if levels is None:
+            quiet = replace(context, on_progress=None)
+            preview = _preview_raster(raster, quiet, None).tile
+            if not preview.valid.any():
+                raise ValueError(
+                    "The preview grid has no covered samples for the photo tone. "
+                    "Adjust the sky grid or use Preserve Tone."
+                )
+            levels = preview_levels(preview.pixels[preview.valid].astype(np.float64))
+            photo = replace(photo, tone=replace(tone, levels=levels))
+        raster.header["PHOTOTON"] = "preview"
+        raster.header["PHOTOBLK"], raster.header["PHOTOWHT"] = levels
+        raster.header["PHOTOMID"] = tone.midtones
+    else:
+        raster.header["PHOTOTON"] = "preserve"
+    return photo
+
+
+def _write_raster(
+    mosaic: _RasterPlan,
+    destination: Path,
+    context: JobContext,
+    *,
+    photo: PhotoExport | None = None,
+) -> MosaicResult:
     width, height = mosaic.size
     total = width * height
     layers = mosaic.seam_width is not None
@@ -721,7 +790,21 @@ def _write_raster(mosaic: _RasterPlan, destination: Path, context: JobContext) -
     covered = completed = tiles = rejected = common = 0
     context.check_cancelled()
     format_name = _output_format(destination)
-    if format_name == "FITS":
+    if format_name == "TIFF":
+        from astromosaic.io.tiff_export import open_tiff_mosaic
+
+        writer_context = open_tiff_mosaic(
+            destination,
+            width,
+            height,
+            mosaic.channels,
+            mosaic.header,
+            max_bytes,
+            layers=layers,
+            photo=photo is not None,
+            publish_check=context.check_cancelled,
+        )
+    elif format_name == "FITS":
         if mosaic.channels != 1:
             raise ValueError("RGB mosaics require TIFF or XISF output.")
         writer_context = open_fits_mosaic(
@@ -734,15 +817,9 @@ def _write_raster(mosaic: _RasterPlan, destination: Path, context: JobContext) -
             publish_check=context.check_cancelled,
         )
     else:
-        if format_name == "TIFF":
-            from astromosaic.io.tiff_export import open_tiff_mosaic
+        from astromosaic.io.xisf_export import open_xisf_mosaic
 
-            open_color_mosaic = open_tiff_mosaic
-        else:
-            from astromosaic.io.xisf_export import open_xisf_mosaic
-
-            open_color_mosaic = open_xisf_mosaic
-        writer_context = open_color_mosaic(
+        writer_context = open_xisf_mosaic(
             destination,
             width,
             height,
@@ -754,6 +831,8 @@ def _write_raster(mosaic: _RasterPlan, destination: Path, context: JobContext) -
         )
     with writer_context as writer:
         for rendered in mosaic.tiles(width, height, budget, context):
+            if photo is not None:
+                encode_photo_tile(rendered.tile, photo.tone)
             writer.write(rendered.tile, rendered.contributions)
             covered += int(np.count_nonzero(rendered.tile.valid))
             if rendered.common_coverage is not None:
@@ -880,7 +959,7 @@ def preview_mosaic(
         context=context,
         filter_overrides=filter_overrides,
         auto_frame=auto_frame,
-        allow_visual=allow_visual,
+        intent="preview" if allow_visual else "scientific",
     ) as mosaic:
         return _preview_raster(
             mosaic.raster(),

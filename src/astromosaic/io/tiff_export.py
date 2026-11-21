@@ -2,6 +2,7 @@
 
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
+from importlib.resources import files
 from pathlib import Path
 from shutil import disk_usage
 
@@ -24,6 +25,7 @@ def open_tiff_mosaic(
     max_output_bytes: int,
     *,
     layers: bool = False,
+    photo: bool = False,
     publish_check: Callable[[], None] | None = None,
 ) -> Iterator[RasterMosaicWriter]:
     path = path.absolute()
@@ -31,6 +33,8 @@ def open_tiff_mosaic(
         raise ValueError("The TIFF output path must end in .tif or .tiff.")
     if channels not in (1, 3):
         raise ValueError("Expected mono or RGB channels for TIFF export.")
+    if photo and (channels != 3 or layers):
+        raise ValueError("Photo TIFF export requires a three-channel sky layer.")
     if min(width, height) < 1 or max(width, height) >= 2**32:
         raise ValueError("The mosaic dimensions exceed the supported TIFF range.")
     description = (COMPOSITION_VERSION if layers else DESCRIPTION_VERSION) + header.tostring(
@@ -38,28 +42,31 @@ def open_tiff_mosaic(
     )
     if len(description) > DESCRIPTION_LIMIT:
         raise ValueError("The TIFF mosaic metadata exceeds its size limit.")
+    profile = files("astromosaic.io").joinpath("sRGB2014.icc").read_bytes() if photo else None
     subimages = 2 if layers else 1
-    raster_bytes = width * height * (4 * channels + subimages)
-    if raster_bytes + len(description) > max_output_bytes:
+    raster_bytes = width * height * ((2 if photo else 4) * channels + subimages)
+    minimum_bytes = raster_bytes + len(description) + (len(profile) if profile else 0)
+    if minimum_bytes > max_output_bytes:
         raise ValueError("The TIFF mosaic exceeds the configured output byte limit.")
     free = disk_usage(path.parent).free
-    if raster_bytes + len(description) > free:
+    if minimum_bytes > free:
         raise OSError("There is insufficient disk space for the TIFF mosaic.")
 
     rgb = channels == 3
     shape = (height, width, 3) if rgb else (height, width)
-    bigtiff = raster_bytes + len(description) >= 2**32 - 4096
+    bigtiff = minimum_bytes >= 2**32 - 4096
     with atomic_binary_file(path, publish_check=publish_check) as stream:
         # The writer reserves the rasters on disk and returns their byte offsets.
         with TiffWriter(stream, byteorder="<", bigtiff=bigtiff) as tiff:
-            science = tiff.write(
+            pixels = tiff.write(
                 None,
                 shape=shape,
-                dtype="float32",
+                dtype="uint16" if photo else "float32",
                 photometric="rgb" if rgb else "minisblack",
                 planarconfig="contig" if rgb else None,
                 metadata=None,
                 description=description,
+                iccprofile=profile,
                 subifds=subimages,
                 returnoffset=True,
             )
@@ -76,13 +83,18 @@ def open_tiff_mosaic(
                 if raster is None:
                     raise RuntimeError("Could not reserve contiguous TIFF mask rasters.")
                 offsets.append(raster[0])
-        if science is None:
-            raise RuntimeError("Could not reserve a contiguous TIFF science raster.")
+        if pixels is None:
+            raise RuntimeError("Could not reserve a contiguous TIFF image raster.")
         size = stream.seek(0, 2)
         if size > max_output_bytes:
             raise ValueError("The TIFF mosaic exceeds the configured output byte limit.")
         if size > free:
             raise OSError("There is insufficient disk space for the TIFF mosaic.")
         yield RasterMosaicWriter(
-            stream, width, science[0], offsets[0], "<f4", offsets[1] if layers else None
+            stream,
+            width,
+            pixels[0],
+            offsets[0],
+            "<u2" if photo else "<f4",
+            offsets[1] if layers else None,
         )

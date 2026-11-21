@@ -45,6 +45,7 @@ from astromosaic.geometry.image import CompositionSpec, LayerPlacement
 from astromosaic.io import PanelSource, SkyMask, open_panel
 from astromosaic.io.atomic import atomic_binary_file
 from astromosaic.io.fits import optional_header_text
+from astromosaic.photometry.photo import PhotoTone
 from astromosaic.pipeline.control_points import (
     ControlPointFit,
     GroundControlPoint,
@@ -68,6 +69,7 @@ from astromosaic.pipeline.layers import (
 )
 from astromosaic.pipeline.mosaic import (
     MosaicResult,
+    PhotoExport,
     PreviewFrame,
     RenderSpec,
     _prepare_mosaic,
@@ -596,6 +598,25 @@ def render_project(
         destination=destination,
         spec=project.render,
         context=context,
+        **_verified_inputs(project, context, band),
+    )
+
+
+def render_project_photo(
+    project: MosaicProject,
+    destination: Path,
+    context: JobContext,
+    *,
+    tone: PhotoTone | None,
+    band: str | None = None,
+    grid: RenderSpec | None = None,
+) -> MosaicResult:
+    """Render the selected sky band on a resolved or project-derived photo grid."""
+    return render_mosaic(
+        destination=destination,
+        spec=grid if grid is not None else project.render,
+        context=context,
+        photo=PhotoExport(tone, auto_frame=grid is None and project.auto_frame_preview),
         **_verified_inputs(project, context, band),
     )
 

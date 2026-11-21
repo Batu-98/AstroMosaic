@@ -1,20 +1,30 @@
+from dataclasses import replace
 from pathlib import Path
 from struct import pack
 
 import fitsio
+import imagecodecs
 import numpy as np
 import pytest
 import tifffile
 from astropy.io import fits
 from astropy.wcs import WCS
 from mosaic_reference import CENTER, SCALE_ARCSEC, WEIGHTS, write_reference_panels
+from numpy.typing import NDArray
 
 from astromosaic.core import Region
-from astromosaic.core.job import JobContext
-from astromosaic.display import normalize_preview
+from astromosaic.core.job import JobContext, MosaicCancelled
+from astromosaic.display import normalize_preview, stretch_rgba
 from astromosaic.geometry import tan_output_wcs
 from astromosaic.io import open_panel
-from astromosaic.pipeline.mosaic import PreviewFrame, RenderSpec, preview_mosaic, render_mosaic
+from astromosaic.photometry.photo import PhotoTone
+from astromosaic.pipeline.mosaic import (
+    PhotoExport,
+    PreviewFrame,
+    RenderSpec,
+    preview_mosaic,
+    render_mosaic,
+)
 
 
 def test_fits_preview_uses_rotated_cropped_export_grid(tmp_path: Path) -> None:
@@ -230,3 +240,145 @@ def test_desktop_preview_names_the_panel_that_needs_a_wcs(tmp_path: Path) -> Non
     spec = RenderSpec(CENTER, (12, 10), SCALE_ARCSEC)
     with pytest.raises(ValueError, match=r"unsolved\.fits.*Run Plate Solve for this panel"):
         preview_mosaic([source], spec, auto_frame=True, allow_visual=True)
+
+
+@pytest.mark.parametrize("preserve", [False, True], ids=["preview-tone", "preserve-tone"])
+def test_photo_encodes_the_full_weighted_grid_and_preserves_coverage(
+    tmp_path: Path, preserve: bool
+) -> None:
+    spec = RenderSpec(CENTER, (1536, 144), SCALE_ARCSEC, tile_size=91)
+    header = spec.output_wcs().to_header()
+    header["CRPIX1"] += 0.5
+    header["FILTER"] = "RGB"
+    row, col = np.indices(spec.size[::-1])
+    first = np.stack((col % 2 * 50000, row * 350, col * 3), axis=-1).astype(np.uint16)
+    second = np.stack((col % 2 * 2000, col * 40, row * 400), axis=-1).astype(np.uint16)
+    first[:, :6] = second[:, :6] = 0
+    panels = [tmp_path / f"sRGB-{index}.tiff" for index in (1, 2)]
+    for path, pixels in zip(panels, (first, second), strict=True):
+        tifffile.imwrite(
+            path, pixels, photometric="rgb", metadata=None, iccprofile=_matrix_icc(srgb=True),
+            description="AstroMosaic TIFF 1\n" + header.tostring(sep="\n", padding=False),
+        )
+    mask = tmp_path / "sky.fits"
+    valid = np.ones(spec.size[::-1], np.uint8)
+    valid[:9] = 0
+    fits.writeto(mask, valid)
+    masks = {0: mask, 1: mask}
+    weights = (1, 3)
+    midtones = 0.31
+    original = [path.read_bytes() for path in panels]
+    preview = preview_mosaic(panels, spec, weights=weights, sky_masks=masks, allow_visual=True)
+    photo = tmp_path / "photo.tiff"
+    result = render_mosaic(
+        panels, photo, spec, weights=weights, sky_masks=masks,
+        photo=PhotoExport(None if preserve else PhotoTone(midtones)),
+    )
+    assert (result.width, result.height) == spec.size
+    assert result.peak_reserved_bytes <= spec.max_working_bytes
+    pixels = imagecodecs.tiff_decode(photo.read_bytes())
+    assert pixels.dtype == np.uint16 and pixels.shape == first.shape
+
+    def decode(rgb: NDArray[np.uint16]) -> NDArray[np.float64]:
+        encoded = rgb.astype(np.float64) / 65535
+        return np.where(encoded <= 0.04045, encoded / 12.92, ((encoded + 0.055) / 1.055) ** 2.4)
+
+    first_linear, second_linear = decode(first), decode(second)
+    blended = (
+        first_linear[:, :-1] + first_linear[:, 1:]
+        + 3 * (second_linear[:, :-1] + second_linear[:, 1:])
+    ) / 8
+    linear_samples = blended[1::3, 1::3]
+    covered = preview.tile.valid
+    np.testing.assert_allclose(preview.tile.pixels[covered], linear_samples[covered], atol=1e-6)
+    if not preserve:
+        black, white = np.percentile(linear_samples[covered], (1, 99.5))
+        linear_samples = np.clip((linear_samples - black) / (white - black), 0.0, 1.0)
+        linear_samples = (1 - midtones) * linear_samples / (
+            midtones + (1 - 2 * midtones) * linear_samples
+        )
+    encoded = np.where(
+        linear_samples <= 0.0031308, linear_samples * 12.92,
+        1.055 * linear_samples ** (1 / 2.4) - 0.055,
+    )
+    np.testing.assert_allclose(
+        pixels[1::3, 1::3][covered], np.rint(encoded[covered] * 65535), atol=2, rtol=0
+    )
+    display = stretch_rgba(normalize_preview(preview), midtones, preserve_tone=preserve)
+    np.testing.assert_allclose(
+        display[covered, :3], np.rint(pixels[1::3, 1::3][covered] / 257), atol=1, rtol=0
+    )
+    with tifffile.TiffFile(photo) as output:
+        page = output.pages[0]
+        assert isinstance(page, tifffile.TiffPage)
+        assert imagecodecs.cms_info(page.tags[34675].value)["description"] == "sRGB2014"
+        assert page.pages is not None
+        coverage = page.pages[0].asarray()
+    np.testing.assert_array_equal(coverage[1::3, 1::3], covered)
+    assert int(coverage.sum()) == result.covered_pixels and set(np.unique(coverage)) == {0, 1}
+    assert (pixels[coverage == 0] == 0).all()
+    if preserve:
+        assert coverage[12, 1] == 1 and not pixels[12, 1].any()
+    with open_panel(photo) as output_panel:
+        metadata = output_panel.header
+        assert output_panel.descriptor.icc_encoding == "srgb"
+        assert output_panel.descriptor.icc_profile_sha256 == (
+            "384b832de3412066743b52a75ee906b6fb9fb8d9e09e936fc2c43223815c6e0a"
+        )
+        assert metadata["AMINTENT"] == "PHOTO" and "BUNIT" not in metadata
+        assert metadata["FILTER"] == "RGB"
+        assert metadata["PHOTOTON"] == ("preserve" if preserve else "preview")
+        if not preserve:
+            assert metadata["PHOTOMID"] == midtones
+            assert metadata["PHOTOBLK"] == pytest.approx(black, abs=1e-6)
+            assert metadata["PHOTOWHT"] == pytest.approx(white, abs=1e-6)
+    xy = ([0, 767, 1535], [0, 71, 143])
+    np.testing.assert_allclose(
+        WCS(metadata).pixel_to_world_values(*xy), spec.output_wcs().pixel_to_world_values(*xy),
+        atol=1e-9, rtol=0,
+    )
+    with pytest.raises(ValueError, match="uses sRGB-encoded samples"):
+        render_mosaic([photo], tmp_path / "science.tiff", spec, assume_surface_brightness=True)
+    assert [path.read_bytes() for path in panels] == original
+
+
+def test_photo_errors_cancel_and_retry(tmp_path: Path) -> None:
+    spec = RenderSpec(CENTER, (32, 16), SCALE_ARCSEC, tile_size=8)
+    source = tmp_path / "sRGB.tif"
+    linear = tmp_path / "linear.tif"
+    for path, profile in ((source, _matrix_icc(srgb=True)), (linear, None)):
+        tifffile.imwrite(
+            path, np.ones((16, 32, 3), np.uint16), photometric="rgb", metadata=None,
+            iccprofile=profile,
+            description="AstroMosaic TIFF 1\n" + spec.output_wcs().to_header().tostring(sep="\n"),
+        )
+    output = tmp_path / "new.tiff"
+    photo = PhotoExport(None)
+    with pytest.raises(ValueError, match=r"linear\.tif: Photo export requires"):
+        render_mosaic([source, linear], output, spec, photo=photo)
+    with pytest.raises(ValueError, match="requires a .tif or .tiff"):
+        render_mosaic([source], output.with_suffix(".xisf"), spec, photo=photo)
+    with pytest.raises(ValueError, match="output byte limit"):
+        render_mosaic(
+            [source], output, replace(spec, max_output_bytes=spec.size[0] * spec.size[1] * 7),
+            photo=photo,
+        )
+    with pytest.raises(ValueError, match="no valid input coverage"):
+        render_mosaic([source], output, replace(spec, center=(150.0, -20.0)), photo=photo)
+    cancelled = False
+
+    def cancel_after_tile(_done: int, _total: int) -> None:
+        nonlocal cancelled
+        cancelled = True
+
+    with pytest.raises(MosaicCancelled):
+        render_mosaic(
+            [source], output, spec, photo=photo,
+            context=JobContext(is_cancelled=lambda: cancelled, on_progress=cancel_after_tile),
+        )
+    assert cancelled and not output.exists() and not list(tmp_path.glob("*.part"))
+    render_mosaic([source], output, spec, photo=photo)
+    original = output.read_bytes()
+    with pytest.raises(FileExistsError):
+        render_mosaic([source], output, spec, photo=photo)
+    assert output.read_bytes() == original

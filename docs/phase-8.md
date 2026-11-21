@@ -1,6 +1,6 @@
 # Phase 8 Configurable Color Photometry and Optics
 
-**Status** Scheduled on 2026-11-21. The 8A contract for the first full-resolution photo mosaic is frozen. Each subsequent delivery qualifies its corrections against prepared references. [Architecture and milestones](../astro_mosaic_python_first_architecture_en.md#106-phase-8-delivery-stages) · [ADR-0026](adr/0026-configurable-color-photometry-and-optics.md)
+**Status** The 8A contract is frozen and 8B implements full-resolution sRGB sky photo export. Each subsequent delivery qualifies its corrections against prepared references. [Architecture and milestones](../astro_mosaic_python_first_architecture_en.md#106-phase-8-delivery-stages) · [ADR-0026](adr/0026-configurable-color-photometry-and-optics.md)
 
 AstroMosaic 0.1.0b7 already frames selected sky panels from their WCS, decodes recognized sRGB TIFFs for Visual Preview and renders scientific mosaics from compatible linear inputs. Its optional scientific relative refinement currently uses mono panels. The new options extend those paths through the same bounded CPU renderer. [Current sky workflow](phase-3c.md#desktop-workflow) · [Existing relative refinement](phase-2.md#relative-refinement)
 
@@ -31,6 +31,22 @@ The output profile is the February 2015 revision of `sRGB2014.icc` from the Inte
 | Resource and failure checks | Require the default 64 MiB tile working-byte reservation and 2 GiB output limit on the real pair. The uncompressed photo payload is 7 bytes per output pixel, with TIFF and ICC overhead checked against the same limit. Record elapsed time and cache state. Exercise cancellation during tile writes, verify no output or part file remains, then retry the same destination. Check refusal of an occupied destination, unsupported output format and grids without coverage. |
 
 The ICC conversion matrix and reference patches, known exposure or background corrections, measured lens calibration, compatible flats and stable exposure brackets still need fixtures before the related 8C–8F methods can be qualified. Track their data and backend choices in Q-029.
+
+## 8B Export a photo mosaic
+
+1. Add the tagged sRGB TIFFs, plate solve the sky panels and select the sky band when the project contains several bands.
+2. Choose **Build Preview**. Use **Auto Frame** to fit the solved footprints or turn it off to use the saved sky grid.
+3. Choose **Use Preview Tone** to apply the displayed stretch at full resolution or **Preserve Tone** to encode the blended linear colors directly. With preview tone, set **Midtones** before the export.
+4. Choose **Export Photo Mosaic** and a new TIFF path. The export uses the preview's full grid, with the original panels sampled at each output pixel. **Use Preview Grid** can adopt the framing for subsequent saved-grid work. The File menu has **Export Scientific Mosaic** for the scientific sky workflow.
+
+The Command Panel accepts `session export-photo -o "Mosaic.tiff"` after a completed covered visual sky preview. It uses the active band, grid and tone controls.
+
+```powershell
+astromosaic project export-photo "Solved.astromosaic" -o "Mosaic.tiff" --grid auto --band RGB --midtones 25 --progress --json
+astromosaic project export-photo "Solved.astromosaic" -o "Natural.tiff" --tone preserve
+```
+
+Without `--grid`, the CLI uses the project's saved preview mode. The default tone is `preview` with midtones 25 on the desktop's 5–95 scale. Omit `--band` for a project with one effective sky band. The JSON result contains the resolved grid mode, tone and usual render measurements. The ICC tag is readable in a color-managed TIFF application. AstroMosaic also reads the FITS-style WCS description and coverage SubIFD. Generic TIFF viewers display the uncovered black raster codes and may ignore those astronomy metadata fields.
 
 ## Workflow and settings
 
@@ -255,7 +271,7 @@ Store stable method identifiers and version their settings independently of the 
 
 | Stage | Deliverable and impact | Acceptance evidence |
 | --- | --- | --- |
-| 8A | Freeze photo and scientific intents, supported method settings, coordinate frames and test data. Define profile and calibration provenance, compatibility rules and diagnostics. | Document the outcome of each legal and rejected method combination. Freeze representative fixture inputs, known corrections, reference outputs and numerical limits before tuning. |
+| 8A | Freeze photo and scientific intents, supported method settings, coordinate frames and test data. Define profile and calibration provenance, compatibility rules and diagnostics. | Document the outcome of each legal and rejected first-release method combination. Freeze representative fixture inputs, known corrections, reference outputs and numerical limits before tuning. |
 | 8B | Add full-resolution photo TIFF output from the existing visual sky workflow. Reuse known sRGB conversion, current geometry, simple weighting, preview tone and the atomic writer. Add equivalent dialog-free operation. | Open the two original sRGB TIFFs, solve, preview and export a tagged 16-bit mosaic. Independently reopen RGB, bit depth, ICC, WCS and coverage. Check source hashes, preview/export samples at coincident positions, earlier science output parity and cancellation cleanup. |
 | 8C | Add profile assignment and qualified ICC conversion. Deliver manual EV, exposure metadata, sky offset and Standard matching with overlap diagnostics. | Verify ICC reference patches and high-bit-depth gradients. Compare Off and Standard on held-out overlaps, with positive controls and weak or contaminated cases. Test absent profiles and exposure metadata and show each effective fallback. |
 | 8D | Add Advanced global matching and the first qualified optical corrections. Retain the existing stellar mono control. Start optics with imported calibration geometry and a matched flat or verified lens vignetting profile. | Verify order stability and disconnected groups. Compare held-out stars, background residuals and diffuse signal. Check masks, corner WCS, no double geometry or illumination correction, flat normalization, and full-field sample and coverage parity. |

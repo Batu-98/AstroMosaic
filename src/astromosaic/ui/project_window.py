@@ -125,6 +125,10 @@ class ProjectWindow(QMainWindow):
             file_menu.addAction("&Save Project", "Ctrl+S", self._save),
             file_menu.addAction("Save Project &As…", "Ctrl+Shift+S", self._save_as),
         )
+        file_menu.addSeparator()
+        self.scientific_export = file_menu.addAction(
+            "Export Scientific Mosaic…", self._start_scientific
+        )
         view_menu = self.menuBar().addMenu("&View")
         add_theme_menu(
             view_menu,
@@ -488,7 +492,10 @@ class ProjectWindow(QMainWindow):
                 summary = f"Composition  ·  {canvas.width} × {canvas.height} px  ·  Seam width {seam:.2f} px"
                 ready = True
         self.grid_summary.setText(summary)
+        photo = self._photo_preview_ready()
+        self.start_button.setText("Export Photo Mosaic…" if photo else "Export Mosaic…")
         self.start_button.setEnabled(idle and ready)
+        self.scientific_export.setEnabled(idle and ready and layer == "sky")
         self.preview_button.setEnabled(idle and ready)
         self.plate_solve_button.setEnabled(idle and sky)
 
@@ -710,6 +717,8 @@ class ProjectWindow(QMainWindow):
                 self._relink_panel(self._session_panel(arguments.panel), directory / arguments.path)
             case "use-preview-grid":
                 self._adopt_preview_grid()
+            case "export-photo":
+                self._export_photo_to(directory / arguments.output)
             case "preview" | "export":
                 if not self.project.panels:
                     raise ValueError("Add panels to the active project first.")
@@ -913,14 +922,28 @@ class ProjectWindow(QMainWindow):
             message = f"Revalidating plate solution for {name}…"
         self._launch_job(job, message)
 
+    def _photo_preview_ready(self) -> bool:
+        return (
+            self._layer() == "sky"
+            and self._preview_project == self.project
+            and self._display_frame is not None
+            and self._display_frame.photo_levels is not None
+        )
+
     def _start(self) -> None:
+        self._choose_export_path(photo=self._photo_preview_ready())
+
+    def _start_scientific(self) -> None:
+        self._choose_export_path(photo=False)
+
+    def _choose_export_path(self, *, photo: bool) -> None:
         if self._is_running() or not self.project.panels:
             return
         name, selected = QFileDialog.getSaveFileName(
             self,
-            "Render Mosaic",
+            "Export Photo Mosaic" if photo else "Render Mosaic",
             "",
-            f"{_TIFF_FILTER};;{_FITS_FILTER};;{_XISF_FILTER}",
+            _TIFF_FILTER if photo else f"{_TIFF_FILTER};;{_FITS_FILTER};;{_XISF_FILTER}",
             options=QFileDialog.Option.DontConfirmOverwrite,
         )
         if not name:
@@ -930,7 +953,25 @@ class ProjectWindow(QMainWindow):
             path = path.with_suffix(
                 {_FITS_FILTER: ".fits", _XISF_FILTER: ".xisf"}.get(selected, ".tiff")
             )
-        self._export_to(path, self._layer(), self._sky_band())
+        if photo:
+            self._export_photo_to(path)
+        else:
+            self._export_to(path, self._layer(), self._sky_band())
+
+    def _export_photo_to(self, path: Path) -> None:
+        if not self._photo_preview_ready():
+            raise ValueError("Build a covered sRGB sky preview before exporting a photo.")
+        self._launch_job(
+            MosaicJob(
+                self.project,
+                path,
+                self,
+                band=self._sky_band(),
+                photo_grid=self._preview_grid or self.project.render,
+                photo_tone=self.viewport.photo_tone(),
+            ),
+            f"Preparing photo mosaic export to {path.name}…",
+        )
 
     def _export_to(self, path: Path, layer: Layer, band: str | None) -> None:
         self._launch_job(
@@ -974,7 +1015,6 @@ class ProjectWindow(QMainWindow):
         if self._is_running() or not self.project.panels:
             return
         self._clear_preview()
-        self._preview_project = self.project
         layer = self._layer()
         job = PreviewJob(self.project, self, layer, band=self._sky_band())
         job.proxy_ready.connect(self._show_proxy)
@@ -1208,6 +1248,7 @@ class ProjectWindow(QMainWindow):
 
     def _finish_preview(self, job: PreviewJob) -> None:
         if job.result is not None:
+            self._preview_project = job.project
             if job.result.has_coverage:
                 self._preview_grid = job.fitted_grid
             self.preview_title.setText("Visual Preview" if job.visual_only else "Preview")

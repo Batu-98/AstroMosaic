@@ -1,4 +1,4 @@
-"""A tile adapter used only for visual sky previews of known sRGB panels."""
+"""Decode known sRGB panels for the visual sky renderer."""
 
 import numpy as np
 from astropy.io.fits import Header
@@ -7,7 +7,7 @@ from astromosaic.core import Region, Tile
 from astromosaic.io import PanelSource
 
 
-class SrgbPreviewSource:
+class SrgbTileSource:
     def __init__(self, source: PanelSource, max_tile_bytes: int) -> None:
         self._source = source
         self._max_tile_bytes = max_tile_bytes
@@ -25,7 +25,7 @@ class SrgbPreviewSource:
     def read_tile(self, region: Region, *, halo: int = 0) -> Tile:
         actual = region.with_halo(self.descriptor.width, self.descriptor.height, halo)
         if self.tile_bytes(actual) > self._max_tile_bytes:
-            raise ValueError("The sRGB preview tile exceeds the configured byte budget.")
+            raise ValueError("The sRGB source tile exceeds the configured byte budget.")
         tile = self._source.read_tile(actual)
         pixels = tile.pixels
         pixels *= np.float32(1 / 65535)

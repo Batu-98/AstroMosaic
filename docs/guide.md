@@ -41,6 +41,8 @@ Use **Tools → Plate Solve Settings** to choose and check the local ASTAP CLI a
 
 The **Command Panel** opens at startup and records summaries of desktop operations alongside CLI output. Use **Tools → Command Panel** to toggle it. The panel runs commands such as `project validate` and `project export` and supports render progress, cancellation and session history. [Command panel workflow](phase-4c.md#desktop-workflow)
 
+Build a visual sky preview from supported sRGB TIFFs to enable **Export Photo Mosaic**. Choose **Use Preview Tone** or **Preserve Tone** to write a tagged 16-bit TIFF at the full preview grid resolution. [Photo mosaic workflow and CLI](phase-8.md#8b-export-a-photo-mosaic)
+
 On import or project reopen, **Panel Settings** automatically fills the available focal length and X and Y pixel sizes and shows the camera model. The readers use FITS keywords, TIFF EXIF/XMP and FITS-style metadata, and XISF instrument properties and FITS keywords. Per-panel edits override the corresponding file values. [Supported optics and units](phase-3b.md#panel-wcs-and-plate-solve-hints)
 
 ### Run the Headless CLI

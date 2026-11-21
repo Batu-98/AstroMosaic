@@ -114,7 +114,14 @@ def add_project_commands(parser: ArgumentParser) -> None:
         help="Saved layer to render (default: sky).",
     )
     export.add_argument("--progress", action="store_true", help="Report tile progress to stderr.")
-    for command in (validate, export):
+    photo = commands.add_parser("export-photo", help="Render a full-resolution sRGB sky TIFF.")
+    photo.add_argument("path", type=Path, help="Saved .astromosaic project.")
+    photo.add_argument("-o", "--output", required=True, type=Path, help="A new TIFF path.")
+    photo.add_argument("--grid", choices=("auto", "saved"), help="Override the project grid mode.")
+    photo.add_argument("--tone", choices=("preview", "preserve"), default="preview")
+    photo.add_argument("--midtones", type=int, metavar="PERCENT", help="Preview midtones (5–95).")
+    photo.add_argument("--progress", action="store_true", help="Report tile progress to stderr.")
+    for command in (validate, export, photo):
         command.add_argument("--band", metavar="FILTER", help="Select one saved sky band.")
     fit = commands.add_parser(
         "fit-foreground", help="Fit terrain control points and optionally save the alignment."
@@ -130,6 +137,7 @@ def add_project_commands(parser: ArgumentParser) -> None:
         bands,
         validate,
         export,
+        photo,
         fit,
     ):
         command.add_argument("--json", action="store_true", help="Emit a versioned JSON result.")
@@ -458,10 +466,13 @@ def _interruptible_context() -> Iterator[JobContext]:
 
 
 def _export(arguments: Namespace, result: dict[str, object], context: JobContext) -> str:
+    from astromosaic.photometry.photo import DEFAULT_MIDTONES, PhotoTone
     from astromosaic.pipeline.refinement import RefinementRejected
-    from astromosaic.storage.project import load_project, render_project_layer
+    from astromosaic.storage.project import load_project, render_project_layer, render_project_photo
 
-    result.update(layer=arguments.layer, output=str(arguments.output))
+    photo = arguments.project_command == "export-photo"
+    layer = "sky" if photo else arguments.layer
+    result.update(layer=layer, output=str(arguments.output))
     band = arguments.band.strip() if arguments.band is not None else None
     if band is not None:
         result["band"] = band
@@ -470,6 +481,21 @@ def _export(arguments: Namespace, result: dict[str, object], context: JobContext
     job.check_cancelled()
     project = load_project(arguments.path)
     job.check_cancelled()
+    if photo:
+        if arguments.grid is not None:
+            project = replace(project, auto_frame_preview=arguments.grid == "auto")
+        tone = None
+        if arguments.tone == "preview":
+            midtones = DEFAULT_MIDTONES if arguments.midtones is None else arguments.midtones
+            tone = PhotoTone(midtones / 100)
+        elif arguments.midtones is not None:
+            raise ValueError("--midtones requires --tone preview.")
+        result.update(
+            intent="photo", tone=arguments.tone, grid="auto" if project.auto_frame_preview else "saved"
+        )
+        mosaic = render_project_photo(project, arguments.output, job, tone=tone, band=band)
+        result.update(asdict(mosaic))
+        return f"Exported sky photo with {mosaic.width} x {mosaic.height} pixels."
     try:
         mosaic = render_project_layer(project, arguments.layer, arguments.output, job, band=band)
     except RefinementRejected as error:

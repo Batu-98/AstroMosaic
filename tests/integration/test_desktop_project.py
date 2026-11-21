@@ -3,8 +3,10 @@ import subprocess
 import sys
 from collections.abc import Callable
 from importlib.metadata import version
+from importlib.resources import files
 from pathlib import Path
 from threading import Event, get_ident
+from time import monotonic, sleep
 
 import fitsio
 import numpy as np
@@ -16,6 +18,7 @@ from packaging.version import Version
 
 from astromosaic.astrometry.hints import PanelOptics
 from astromosaic.astrometry.solve import SolveOptions, solve_panel, write_solution
+from astromosaic.cli import main
 from astromosaic.core import Region, Tile
 from astromosaic.core.job import JobContext
 from astromosaic.core.masks import FOREGROUND, MASK_EDGE, SKY, UNCLASSIFIED, SourceMask
@@ -33,6 +36,98 @@ from astromosaic.storage.project import (
     render_project,
     save_project,
 )
+
+
+def test_photo_desktop_session_and_cli_share_the_fitted_grid_and_tone(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    pytest.importorskip("PySide6")
+    from PySide6.QtCore import QEvent, QSettings
+    from PySide6.QtWidgets import QApplication, QFileDialog
+
+    from astromosaic.ui.project_window import ProjectWindow
+
+    monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
+    app = QApplication.instance()
+    if not isinstance(app, QApplication):
+        app = QApplication([])
+    old_quit = app.quitOnLastWindowClosed()
+    app.setQuitOnLastWindowClosed(False)
+    spec = RenderSpec((32.0, 10.0), (24, 18), 7.2)
+    header = spec.output_wcs().to_header()
+    header["FILTER"] = "RGB"
+    pixels = np.arange(24 * 18 * 3, dtype=np.uint16).reshape(18, 24, 3) * 33
+    photo_source = tmp_path / "tagged.tiff"
+    tifffile.imwrite(
+        photo_source, pixels, photometric="rgb", metadata=None,
+        iccprofile=files("astromosaic.io").joinpath("sRGB2014.icc").read_bytes(),
+        description="AstroMosaic TIFF 1\n" + header.tostring(sep="\n"),
+    )
+    linear_source = tmp_path / "linear.fits"
+    header["FILTER"], header["BUNIT"] = "L", "MJy/sr"
+    fits.writeto(linear_source, np.ones((18, 24), dtype=np.float32), header)
+    project = MosaicProject(
+        panels=tuple(ProjectPanel(FileReference.capture(p)) for p in (photo_source, linear_source)),
+        auto_frame_preview=True,
+    )
+    manifest = tmp_path / "Saved.astromosaic"
+    save_project(manifest, project)
+    initial = manifest.read_bytes()
+    desktop = tmp_path / "photo-desktop.tiff"
+    session = tmp_path / "photo-session.tiff"
+    cli = tmp_path / "photo-cli.tiff"
+    window = ProjectWindow(
+        use_gpu=False,
+        preferences=QSettings(str(tmp_path / "appearance.ini"), QSettings.Format.IniFormat),
+    )
+
+    def wait_idle() -> None:
+        deadline = monotonic() + 15
+        while window.job is not None or window._inspection_job is not None:
+            assert monotonic() < deadline, window.status.text()
+            app.processEvents()
+            sleep(0.005)
+
+    try:
+        window.show()
+        window._open_project(manifest)
+        wait_idle()
+        window.band_box.setCurrentIndex(window.band_box.findData("RGB"))
+        window.preview_button.click()
+        wait_idle()
+        assert window.preview_title.text() == "Visual Preview"
+        assert window.start_button.text() == "Export Photo Mosaic…"
+        assert window._preview_grid is not None and window.project.render == project.render
+        window.viewport.midtones.setValue(41)
+        monkeypatch.setattr(QFileDialog, "getSaveFileName", lambda *a, **kw: (str(desktop), ""))
+        window.start_button.click()
+        wait_idle()
+        assert desktop.is_file(), window.status.text()
+
+        assert main(
+            ["project", "export-photo", str(manifest), "--band", "RGB", "--midtones", "41",
+             "-o", str(cli), "--json"]
+        ) == 0
+        result = json.loads(capsys.readouterr().out)
+        assert (result["band"], result["tone"], result["grid"]) == ("RGB", "preview", "auto")
+        assert cli.read_bytes() == desktop.read_bytes()
+
+        window.viewport.tone_box.setCurrentIndex(1)
+        window.command_panel.entry.setText(f'session export-photo -o "{session}"')
+        window.command_panel.run_button.click()
+        wait_idle()
+        with open_panel(session) as reader:
+            assert reader.header["PHOTOTON"] == "preserve"
+        assert manifest.read_bytes() == initial
+        assert window.project.render == project.render and window.project.auto_frame_preview
+        window.band_box.setCurrentIndex(window.band_box.findData("L"))
+        assert window.start_button.text() == "Export Mosaic…" and window.viewport.frame is None
+    finally:
+        window.close()
+        wait_idle()
+        window.deleteLater()
+        app.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        app.setQuitOnLastWindowClosed(old_quit)
 
 
 def test_desktop_project_roundtrip_progress_cancel_and_retry(

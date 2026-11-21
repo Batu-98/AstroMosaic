@@ -48,11 +48,11 @@ def test_sky_viewport_pixels_pan_zoom_and_stretch(
             return canvas.grabFramebuffer()
         return canvas.grab().toImage()
 
-    def check_samples() -> None:
+    def check_samples(*, preserve_tone: bool = False) -> None:
         image = screenshot()
         assert not image.isNull()
         rect = viewport.image_rect()
-        expected = stretch_rgba(frame, viewport.midtones.value() / 100)
+        expected = stretch_rgba(frame, viewport.midtones.value() / 100, preserve_tone=preserve_tone)
         for row, col in np.ndindex(expected.shape[:2]):
             x = rect.x() + rect.width() * (col + 0.5) / 3
             y = rect.y() + rect.height() * (row + 0.5) / 2
@@ -65,6 +65,9 @@ def test_sky_viewport_pixels_pan_zoom_and_stretch(
             np.testing.assert_allclose(actual, truth, atol=1, rtol=0)
 
     try:
+        secondary = next((screen for screen in app.screens() if screen != app.primaryScreen()), None)
+        if secondary is not None:
+            viewport.move(secondary.availableGeometry().center() - viewport.rect().center())
         viewport.show()
         viewport.set_frame(frame)
         viewport.midtones.setValue(50)
@@ -111,6 +114,16 @@ def test_sky_viewport_pixels_pan_zoom_and_stretch(
         check_samples()
         np.testing.assert_array_equal(frame.rgba, rgba)
 
+        preserved = rgba.copy()
+        preserved[..., :3] *= 0.5
+        preserved.setflags(write=False)
+        frame = replace(frame, photo_levels=(0.0, 0.5), preserved_rgba=preserved)
+        viewport.set_frame(frame)
+        check_samples()
+        viewport.tone_box.setCurrentIndex(1)
+        assert not viewport.midtones.isEnabled()
+        check_samples(preserve_tone=True)
+
         if use_gpu:
 
             def fail_upload(*args: object) -> None:
@@ -121,7 +134,7 @@ def test_sky_viewport_pixels_pan_zoom_and_stretch(
             screenshot()
             app.processEvents()
             assert viewport.backend == "CPU"
-            check_samples()
+            check_samples(preserve_tone=True)
     finally:
         viewport.close()
         viewport.deleteLater()

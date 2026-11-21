@@ -3,6 +3,7 @@
 import os
 from collections.abc import Iterator
 from contextlib import ExitStack, contextmanager
+from hashlib import sha256
 from pathlib import Path
 from typing import IO, Literal
 
@@ -224,15 +225,17 @@ def _check_orientation(page: TiffPage) -> None:
         raise ValueError("Expected top-left TIFF orientation (Orientation 1).")
 
 
-def _icc_encoding(page: TiffPage) -> Literal["srgb", "unsupported"] | None:
+def _icc_metadata(
+    page: TiffPage, rgb: bool
+) -> tuple[Literal["srgb", "unsupported"] | None, str | None]:
     tag = page.tags.get(34675)
     if tag is None:
-        return None
-    if page.dtype == np.dtype("uint16") and tag.valuebytecount <= MAX_ICC_BYTES:
+        return None, None
+    if rgb and page.dtype == np.dtype("uint16") and tag.valuebytecount <= MAX_ICC_BYTES:
         profile = tag.value
         if isinstance(profile, bytes) and is_srgb_profile(profile):
-            return "srgb"
-    return "unsupported"
+            return "srgb", sha256(profile).hexdigest()
+    return "unsupported", None
 
 
 def _read_metadata(page: TiffPage) -> tuple[fits.Header, TiffPage | None]:
@@ -293,6 +296,9 @@ def open_tiff_panel(
             raise ValueError("Expected 16-bit integer or float32 TIFF with mono or RGB samples.")
         science = _Segments(page, stream, stat.st_size, tiff.byteorder)
         header, coverage_page = _read_metadata(page)
+        encoding, profile_sha256 = _icc_metadata(page, rgb)
+        if header.get("AMINTENT") == "PHOTO" and encoding != "srgb":
+            raise ValueError("An AstroMosaic photo TIFF requires a supported embedded sRGB profile.")
         header = add_tiff_optical_metadata(page, header)
         coverage = None
         mask = None
@@ -318,6 +324,7 @@ def open_tiff_panel(
             else None,
             blank=None,
             mask_provenance=provenance,
-            icc_encoding=_icc_encoding(page),
+            icc_encoding=encoding,
+            icc_profile_sha256=profile_sha256,
         )
         yield TiffTileSource(science, descriptor, header, max_tile_bytes, coverage, mask)

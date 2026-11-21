@@ -19,6 +19,7 @@ from astromosaic.display import DisplayFrame, normalize_preview, normalize_tile
 from astromosaic.geometry.image import CompositionSpec
 from astromosaic.io import open_panel
 from astromosaic.io.fits import open_fits_sky_mask
+from astromosaic.photometry.photo import PhotoTone
 from astromosaic.pipeline.foreground import (
     ForegroundAlignmentRejected,
     ForegroundGraphResiduals,
@@ -51,6 +52,7 @@ from astromosaic.storage.project import (
     propose_project_composition,
     render_project,
     render_project_layer,
+    render_project_photo,
     solve_project_panel,
 )
 
@@ -224,13 +226,26 @@ class MosaicJob(_ProjectJob[MosaicResult]):
         layer: Layer = "sky",
         *,
         band: str | None = None,
+        photo_grid: RenderSpec | None = None,
+        photo_tone: PhotoTone | None = None,
     ) -> None:
         super().__init__(project, parent)
         self.destination = destination
         self.layer = layer
         self.band = band
+        self.photo_grid = photo_grid
+        self.photo_tone = photo_tone
 
     def perform(self, context: JobContext) -> MosaicResult:
+        if self.photo_grid is not None:
+            return render_project_photo(
+                self.project,
+                self.destination,
+                context,
+                band=self.band,
+                grid=self.photo_grid,
+                tone=self.photo_tone,
+            )
         if self.layer == "sky" and self.band is None:
             return render_project(self.project, self.destination, context)
         return render_project_layer(

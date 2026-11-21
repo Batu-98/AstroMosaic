@@ -6,11 +6,23 @@ import numpy as np
 from numpy.typing import NDArray
 
 from astromosaic.core import Tile
+from astromosaic.photometry.photo import (
+    DEFAULT_MIDTONES as DEFAULT_MIDTONES,
+)
+from astromosaic.photometry.photo import (
+    MAX_MIDTONES as MAX_MIDTONES,
+)
+from astromosaic.photometry.photo import (
+    MIN_MIDTONES as MIN_MIDTONES,
+)
+from astromosaic.photometry.photo import (
+    encode_srgb,
+    normalize_levels,
+    preview_levels,
+    stretch_midtones,
+    validate_midtones,
+)
 from astromosaic.pipeline.mosaic import PreviewFrame
-
-MIN_MIDTONES = 5
-MAX_MIDTONES = 95
-DEFAULT_MIDTONES = 25
 
 
 @dataclass(frozen=True, slots=True, eq=False)
@@ -20,6 +32,8 @@ class DisplayFrame:
     has_coverage: bool
     common_coverage: NDArray[np.bool_] | None = None
     seam_width: float | None = None
+    photo_levels: tuple[float, float] | None = None
+    preserved_rgba: NDArray[np.float32] | None = None
 
     @property
     def size(self) -> tuple[int, int]:
@@ -28,7 +42,7 @@ class DisplayFrame:
 
 def normalize_preview(frame: PreviewFrame) -> DisplayFrame:
     return replace(
-        normalize_tile(frame.tile, frame.output_size),
+        normalize_tile(frame.tile, frame.output_size, photo=frame.visual_only),
         common_coverage=frame.common_coverage,
         seam_width=frame.seam_width,
     )
@@ -43,33 +57,43 @@ def highlight_overlap(frame: DisplayFrame) -> DisplayFrame:
     return replace(frame, rgba=rgba)
 
 
-def normalize_tile(tile: Tile, output_size: tuple[int, int]) -> DisplayFrame:
+def normalize_tile(
+    tile: Tile, output_size: tuple[int, int], *, photo: bool = False
+) -> DisplayFrame:
     """Set linked black and white points from valid samples only."""
     valid = tile.valid
     rgba = np.zeros((*valid.shape, 4), dtype=np.float32)
     samples = tile.pixels[valid].astype(np.float64)
+    preserved = None
+    photo_levels = None
     if samples.size:
-        low, high = np.percentile(samples, (1.0, 99.5))
-        if low == high:
-            low, high = samples.min(), samples.max()
-        if low == high:
-            samples.fill(0.5)
-        else:
-            samples -= low
-            samples /= high - low
-            np.clip(samples, 0.0, 1.0, out=samples)
+        levels = preview_levels(samples)
+        if photo:
+            photo_levels = levels
+            preserved = rgba.copy()
+            preserved[valid, :3] = samples
+            preserved[..., 3] = valid
+            preserved.setflags(write=False)
+        normalize_levels(samples, levels)
         rgba[valid, :3] = samples.reshape(-1, 1) if samples.ndim == 1 else samples
         rgba[..., 3] = valid
     rgba.setflags(write=False)
-    return DisplayFrame(output_size, rgba, bool(samples.size))
+    return DisplayFrame(
+        output_size, rgba, bool(samples.size), photo_levels=photo_levels, preserved_rgba=preserved
+    )
 
 
-def stretch_rgba(frame: DisplayFrame, midtones: float) -> NDArray[np.uint8]:
+def stretch_rgba(
+    frame: DisplayFrame, midtones: float, *, preserve_tone: bool = False
+) -> NDArray[np.uint8]:
     """Apply the midtone transfer to the cached display values and retain coverage."""
-    if not MIN_MIDTONES / 100 <= midtones <= MAX_MIDTONES / 100:
-        raise ValueError("Expected preview midtones between 0.05 and 0.95.")
-    x = frame.rgba[..., :3]
-    stretched = ((midtones - 1.0) * x) / (((2.0 * midtones - 1.0) * x) - midtones)
+    validate_midtones(midtones)
+    if preserve_tone and frame.preserved_rgba is not None:
+        stretched = frame.preserved_rgba[..., :3].copy()
+    else:
+        stretched = stretch_midtones(frame.rgba[..., :3], midtones)
+    if frame.photo_levels is not None:
+        encode_srgb(stretched)
     rgba = np.empty(frame.rgba.shape, dtype=np.uint8)
     rgba[..., :3] = np.rint(255.0 * stretched)
     rgba[..., 3] = 255 * frame.rgba[..., 3]

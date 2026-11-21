@@ -51,6 +51,7 @@ The table is a status summary, not a replacement for the full exit gates in Sect
 | 6 - Real-observation reliability | Local 6A–6E checks passed | The real references, native lifecycle, and source and portable product comparison are recorded. Fresh Windows acceptance remains open for the named 6E build. |
 | 7 - Terrain panorama registration | 7A–7F local checks passed | Repeat the intended portable candidate on a fresh Windows 11 x64 installation. PA4 and the unsupported rotation models retain their recorded outcomes. |
 | 8A - Photo export contract | Frozen for 8B | Record supported inputs, method compatibility, profile provenance, the real owner pair, and sample, WCS, cancellation and memory gates before implementation. |
+| 8B - Full-resolution photo TIFF | Implemented | Verify both photo tone modes and the selected grid through native desktop and dialog-free export. Independently reopen the real photo and scientific controls. |
 
 ## Journal Rules
 
@@ -1098,6 +1099,13 @@ The table is a status summary, not a replacement for the full exit gates in Sect
 - **Verified** Both original TIFF hashes and their shared ICC fingerprint matched. Their saved Gaia solutions reproduced the 8917 × 10259 grid and 109,331 covered preview samples. Little CMS read the exact ICC registry profile and reported the expected colorants.
 - **Related** Q-029 and [8A acceptance limits](docs/phase-8.md#8a-frozen-photo-export-contract).
 - **Next** Add the shared photo export path and verify it against the real pair and independent sample references.
+
+### 2026-11-21 - Phase 8B - Implemented full-resolution sky photo export
+
+- **Changed** Added 16-bit sRGB TIFF export with binary coverage, the resolved sky WCS, two tone modes and profile provenance. The desktop and dialog-free commands use the shared tiled renderer. Assigned version `0.1.0b11` for the local handoff.
+- **Verified** The initial 43 focused source checks and three native viewport and lifecycle checks passed. The full-size Preserve Tone product had 43,897,047 covered pixels. LibTIFF and an independent interpolation and transfer check measured a maximum error of one UInt16 code over 4,966 covered locations.
+- **Related** Q-029 and [desktop and CLI workflow](docs/phase-8.md#8b-export-a-photo-mosaic).
+- **Next** Complete the source suite and replay the original owner TIFF workflow and scientific parity checks in the locked Windows package.
 
 ## Entry Template
 

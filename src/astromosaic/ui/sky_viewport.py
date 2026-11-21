@@ -4,6 +4,7 @@ from PySide6.QtCore import QEvent, QObject, QPointF, QRectF, Qt, QTimer, Slot
 from PySide6.QtGui import QColor, QImage, QMouseEvent, QPainter, QPaintEvent, QWheelEvent
 from PySide6.QtWidgets import (
     QApplication,
+    QComboBox,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -21,6 +22,7 @@ from astromosaic.display import (
     DisplayFrame,
     stretch_rgba,
 )
+from astromosaic.photometry.photo import PhotoTone
 from astromosaic.ui.preview_gl import BACKGROUND_RGB, OpenGLPreview
 
 
@@ -30,10 +32,12 @@ class _RasterPreview(QWidget):
         self._view = view
         self._image = QImage()
 
-    def set_display(self, frame: DisplayFrame | None, midtones: float) -> None:
+    def set_display(
+        self, frame: DisplayFrame | None, midtones: float, *, preserve_tone: bool = False
+    ) -> None:
         self._image = QImage()
         if frame is not None:
-            pixels = stretch_rgba(frame, midtones)
+            pixels = stretch_rgba(frame, midtones, preserve_tone=preserve_tone)
             width, height = frame.size
             self._image = QImage(
                 pixels.data, width, height, width * 4, QImage.Format.Format_RGBA8888
@@ -87,6 +91,12 @@ class SkyViewport(QWidget):
         label.setBuddy(self.midtones)
         controls.addWidget(label)
         controls.addWidget(self.midtones)
+        self.tone_box = QComboBox()
+        self.tone_box.setAccessibleName("Photo mosaic tone")
+        self.tone_box.addItem("Use Preview Tone")
+        self.tone_box.addItem("Preserve Tone")
+        self.tone_box.currentIndexChanged.connect(self._update_display)
+        controls.addWidget(self.tone_box)
         controls.addStretch()
         self._backend = QLabel()
         controls.addWidget(self._backend)
@@ -107,6 +117,13 @@ class SkyViewport(QWidget):
     def backend(self) -> str:
         return "OpenGL" if self.canvas is self._gl else "CPU"
 
+    def photo_tone(self) -> PhotoTone | None:
+        if self._frame is None or self._frame.photo_levels is None:
+            raise ValueError("Build a covered sRGB sky preview before exporting a photo.")
+        if self.tone_box.currentIndex() == 1:
+            return None
+        return PhotoTone(self.midtones.value() / 100, self._frame.photo_levels)
+
     def _configure_canvas(self, canvas: QWidget) -> None:
         canvas.setAccessibleName("Mosaic preview")
         self._pages.addWidget(canvas)
@@ -118,7 +135,7 @@ class SkyViewport(QWidget):
         if frame is None or previous is None or frame.output_size != previous.output_size:
             self.fit()
         self.fit_button.setEnabled(frame is not None)
-        self.midtones.setEnabled(frame is not None)
+        self.tone_box.setVisible(frame is not None and frame.photo_levels is not None)
         if frame is not None and self._use_gpu and self._gl is None:
             gl = self._gl = OpenGLPreview(self.image_rect)
             gl.failed.connect(self._fallback, Qt.ConnectionType.QueuedConnection)
@@ -162,7 +179,12 @@ class SkyViewport(QWidget):
     def _update_display(self) -> None:
         surface = self._gl if self.canvas is self._gl else self._raster
         assert surface is not None
-        surface.set_display(self._frame, self.midtones.value() / 100)
+        frame = self._frame
+        preserve = frame is not None and frame.photo_levels is not None and (
+            self.tone_box.currentIndex() == 1
+        )
+        self.midtones.setEnabled(frame is not None and not preserve)
+        surface.set_display(frame, self.midtones.value() / 100, preserve_tone=preserve)
 
     @Slot()
     def fit(self) -> None:

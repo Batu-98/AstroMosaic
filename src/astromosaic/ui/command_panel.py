@@ -68,6 +68,8 @@ def _parse_session(argv: list[str]) -> Namespace:
     export.add_argument("-o", "--output", type=Path, required=True)
     export.add_argument("--layer", choices=("sky", "foreground", "composition"))
     export.add_argument("--band", help="Select a sky band.")
+    photo = commands.add_parser("export-photo", help="Export the active sRGB sky preview as TIFF.")
+    photo.add_argument("-o", "--output", type=Path, required=True)
     return parser.parse_args(argv)
 
 
