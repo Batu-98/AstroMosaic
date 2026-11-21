@@ -53,7 +53,9 @@ Download public DSS reference images from their archives for optional reproducti
 
 ## Verification status
 
-The initial source beta is tagged `v0.1.0b1`. The current development version on `main` is `0.1.0b5`. The Phase 6E local verification record and ZIPs in `.tooling/phase6e-20261119/artifacts/` identify the tested `0.1.0b1` build and its SHA-256 hashes. [Phase 6E evidence](phase-6.md#local-windows-lifecycle-and-package-results) · [GitHub releases](https://github.com/Batu-98/AstroMosaic/releases)
+The initial source beta is tagged `v0.1.0b1`. The current development version on `main` is `0.1.0b6`. The Phase 6E local verification record and ZIPs in `.tooling/phase6e-20261119/artifacts/` identify the tested `0.1.0b1` build and its SHA-256 hashes. [Phase 6E evidence](phase-6.md#local-windows-lifecycle-and-package-results) · [GitHub releases](https://github.com/Batu-98/AstroMosaic/releases)
+
+The beta 6 local launchers are in `dist/AstroMosaic-0.1.0b6-windows-x64/` and `dist/astromosaic-cli-0.1.0b6-windows-x64/` with their build records. The desktop session saved, solved, exported unsaved WCS, relinked and closed on a real M13 panel without dialogs. The standalone console created, relinked, solved and exported M13, recovered from a solve deadline, and prepared the real Paranal masks, foreground alignment and placement for composition export. [Live desktop commands](phase-4c.md#control-the-active-project-without-dialogs) · [Headless preparation](phase-4a.md#prepare-a-project-without-the-desktop)
 
 The verified local beta 5 desktop is in `dist/AstroMosaic-0.1.0b5-windows-x64/` with its `BUILD-INFO.json`. The title shows `AstroMosaic 0.1.0b5 (Beta)`. The packaged runtime animated the bar during real M13 solves with ASTAP D05. The batch status advanced to the next panel, cancellation retained the first solution, and retry solved the remaining panel. Revalidation showed the animation with both CPU and OpenGL previews. [Desktop plate solving](phase-3b.md#desktop-plate-solving)
 

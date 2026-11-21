@@ -301,13 +301,14 @@ This register tracks unresolved decisions, problems, and risks. It is not a work
 
 ### Q-027 - Dialog-free project lifecycle and headless preparation
 
-- **Status / priority:** Investigating / P1
+- **Status / priority:** Resolved / P1
 - **Opened / updated:** 2026-11-21 / 2026-11-21
 - **Affected phase:** Phase 4A headless automation and Phase 4C desktop commands.
 - **Impact and evidence:** The Command Panel could run CLI jobs against saved files. First save, open, relink and closing a dirty desktop project required GUI input. The standalone solver could produce a sidecar for one panel, and batch scripts needed a separate way to attach results to an existing project.
 - **Current assumption:** Use explicit session paths and write new manifests for file-based preparation. Accept supplied label masks and numeric placement with the existing geometry validators. Phase 7E tracks saving and rendering terrain control-point geometry.
-- **Next action / responsibility:** Verify the workflows on both Windows launchers with the M13 and Paranal observations.
+- **Next action / responsibility:** Keep the session and project preparation regressions in Windows verification for later builds.
 - **Closure condition:** The live project can be saved, reopened and exported without dialogs. The standalone CLI can relink, solve and prepare mixed-layer projects from supplied paths, and failures preserve the inputs and permit retry.
+- **Resolution:** 2026-11-21. The beta 6 desktop exercised the M13 lifecycle with zero modal dialogs, and the console attached WCS and exported M13 after a deadline retry. The real Paranal run imported label masks, aligned the two ground panels, verified proposed and numeric placement, and reopened the composition. [Windows evidence](docs/windows-release.md#verification-status)
 
 ## New Entry Template
 
