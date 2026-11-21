@@ -277,6 +277,7 @@ This register tracks unresolved decisions, problems, and risks. It is not a work
 - **Resolution:** 2026-11-21. The Command Panel identifies the missing settings. A separate project with linear-light visual copies and a fitted grid previewed both panels on native CPU and OpenGL. The source and portable CLI validated the project. The original file hashes matched.
 - **Follow-up:** 2026-11-21. Beta 4 assigns `Unspecified` to unlabeled panels. The original project reaches brightness validation, and the packaged CPU and OpenGL backends previewed both real linear TIFF panels with their filter labels removed. [Per-band workflow](docs/phase-5c.md)
 - **Follow-up:** 2026-11-21. The latest saved project still referenced the sRGB input TIFFs and the default output grid. A separate visual preview project reused the validated linear-light copies after checking their WCS against the latest sidecars and their sampled values against the sRGB transfer. The beta 6 CLI and native OpenGL checks passed with both panels represented.
+- **Follow-up** 2026-11-21. Beta 7 previews the original TIFFs directly with automatic framing. See Q-028 for the packaged verification.
 
 ### Q-025 - Identify the local Windows build after source changes
 
@@ -313,13 +314,14 @@ This register tracks unresolved decisions, problems, and risks. It is not a work
 
 ### Q-028 - Automatic sky preview for solved panels
 
-- **Status / priority** Verifying / P1
+- **Status / priority** Resolved / P1
 - **Opened / updated** 2026-11-21
 - **Affected phase** Phase 3C desktop sky preview and export setup.
 - **Impact and evidence** The beta 6 workflow for the owner TIFFs required a manually framed grid and separate linear-light copies. The original images carry standard sRGB profiles and have usable WCS after offline solving.
 - **Current assumption** Fit new sky previews from the selected WCS footprints. Decode recognized unsigned 16-bit RGB sRGB TIFFs in the visual preview. Keep the fitted grid temporary until the user explicitly adopts it. [ADR-0025](docs/adr/0025-automatic-sky-preview.md)
-- **Next action / responsibility** Replay the three desktop steps with the original TIFFs on source and packaged Windows.
+- **Next action / responsibility** Keep the automatic grid, sRGB and science validation regressions in Windows verification.
 - **Closure condition** Both original panels solve and appear in the preview with measurable overlap. The saved grid changes only on explicit adoption and scientific export still rejects the encoded panels.
+- **Resolution** 2026-11-21. Source OpenGL and bundled CPU and OpenGL each solved both originals and built the preview. The bundled runs matched 109,331 valid samples and 23,020 common samples. Explicit grid adoption and scientific rejection passed, and the inputs retained their hashes. [Windows workflow verification](docs/phase-3c.md#windows-verification)
 
 ## New Entry Template
 

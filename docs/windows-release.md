@@ -53,7 +53,9 @@ Download public DSS reference images from their archives for optional reproducti
 
 ## Verification status
 
-The initial source beta is tagged `v0.1.0b1`. The current development version on `main` is `0.1.0b6`. The Phase 6E local verification record and ZIPs in `.tooling/phase6e-20261119/artifacts/` identify the tested `0.1.0b1` build and its SHA-256 hashes. [Phase 6E evidence](phase-6.md#local-windows-lifecycle-and-package-results) · [GitHub releases](https://github.com/Batu-98/AstroMosaic/releases)
+The initial source beta is tagged `v0.1.0b1`. The current development version on `main` is `0.1.0b7`. The Phase 6E local verification record and ZIPs in `.tooling/phase6e-20261119/artifacts/` identify the tested `0.1.0b1` build and its SHA-256 hashes. [Phase 6E evidence](phase-6.md#local-windows-lifecycle-and-package-results) · [GitHub releases](https://github.com/Batu-98/AstroMosaic/releases)
+
+The beta 7 desktop and console are in `dist/AstroMosaic-0.1.0b7-windows-x64/` and `dist/astromosaic-cli-0.1.0b7-windows-x64/`. Their build records identify clean source commit `023595ec62f4d634da64ebb7f37e0f0744a0021d` and the launcher checksums. The launchers report version `0.1.0b7`. The bundled desktop solved the two original owner TIFFs and built the fitted sRGB preview in an untitled project on native CPU and OpenGL. Existing saved projects can enable **Auto Frame**. Scientific rendering requires compatible linear sources, including when a common scale is declared. [Beta 7 workflow and evidence](phase-3c.md#windows-verification)
 
 The beta 6 local launchers are in `dist/AstroMosaic-0.1.0b6-windows-x64/` and `dist/astromosaic-cli-0.1.0b6-windows-x64/` with their build records. The desktop session saved, solved, exported unsaved WCS, relinked and closed on a real M13 panel without dialogs. The standalone console created, relinked, solved and exported M13, recovered from a solve deadline, and prepared the real Paranal masks, foreground alignment and placement for composition export. [Live desktop commands](phase-4c.md#control-the-active-project-without-dialogs) · [Headless preparation](phase-4a.md#prepare-a-project-without-the-desktop)
 
