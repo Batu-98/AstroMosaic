@@ -1,10 +1,36 @@
 # Phase 8 Configurable Color Photometry and Optics
 
-**Status** Proposed on 2026-11-21. The first delivery is a full-resolution photo mosaic from the current sky preview. Each subsequent delivery adds a selectable correction after its data, accuracy and resource checks pass. The existing Phase 7 terrain registration work remains the active implementation baseline. [Architecture and milestones](../astro_mosaic_python_first_architecture_en.md#106-proposed-phase-8-delivery-stages) · [ADR-0026](adr/0026-configurable-color-photometry-and-optics.md)
+**Status** Scheduled on 2026-11-21. The 8A contract for the first full-resolution photo mosaic is frozen. Each subsequent delivery qualifies its corrections against prepared references. [Architecture and milestones](../astro_mosaic_python_first_architecture_en.md#106-phase-8-delivery-stages) · [ADR-0026](adr/0026-configurable-color-photometry-and-optics.md)
 
 AstroMosaic 0.1.0b7 already frames selected sky panels from their WCS, decodes recognized sRGB TIFFs for Visual Preview and renders scientific mosaics from compatible linear inputs. Its optional scientific relative refinement currently uses mono panels. The new options extend those paths through the same bounded CPU renderer. [Current sky workflow](phase-3c.md#desktop-workflow) · [Existing relative refinement](phase-2.md#relative-refinement)
 
-[Settings](#workflow-and-settings) · [Input profiles and color](#input-profile-and-color-conversion) · [Exposure and brightness](#exposure-and-brightness-matching) · [Lens geometry](#lens-geometry) · [Vignetting](#vignetting-and-flat-field-correction) · [Delivery stages](#proposed-delivery-stages)
+[8A contract](#8a-frozen-photo-export-contract) · [Settings](#workflow-and-settings) · [Input profiles and color](#input-profile-and-color-conversion) · [Exposure and brightness](#exposure-and-brightness-matching) · [Lens geometry](#lens-geometry) · [Vignetting](#vignetting-and-flat-field-correction) · [Delivery stages](#delivery-stages)
+
+## 8A Frozen photo export contract
+
+8B adds a distinct sky export intent. A completed, covered visual sky preview provides the selected band, resolved grid and linked display statistics for the desktop export. The headless command resolves the saved or automatically fitted grid and, for preview tone, samples the same final preview grid. It never needs a Qt session. Project manifests and scientific output keep their existing contracts. Visual input eligibility precedes the render, with diagnostics naming the affected panel.
+
+| Selection or input | 8B behavior |
+| --- | --- |
+| Photo, all selected panels are RGB UInt16 TIFF with recognized embedded matrix/TRC sRGB | Read original pixels and masks through the validated WCS, including its SIP terms when present. Decode canonical sRGB before bilinear sampling and validity-weighted blending. Keep effective input ICC fingerprints, WCS origin, weight, band, and tone in the output history or metadata. |
+| Photo, an untagged, unsupported-profile, mono, or scientific panel in the selected band | Reject the first ineligible panel with its name. Profile assignment, mixed-profile conversion and a linear photo intent require their own qualified inputs in later stages. |
+| Photo, missing WCS or sky, mixed bands without an effective band choice, or enabled scientific refinement | Report the failed prerequisite. Use existing sky masks and band selection. Additional exposure, camera response, brightness, lens and illumination corrections are off for this delivery. |
+| Photo, **Use Preview Tone** | Apply the linked 1st and 99.5th percentiles measured on the final covered preview, falling back to the full sampled range if the percentiles coincide. A flat range maps to 0.5. Apply the selected midtones transfer, then the canonical forward sRGB transfer and nearest-integer 16-bit quantization. Record the effective black point, white point and midtones. |
+| Photo, **Preserve Tone** | Apply the canonical forward sRGB transfer and 16-bit quantization directly to the blended linear sRGB. Both modes clip to the representable range. |
+| Photo TIFF | Write contiguous RGB UInt16 with the ICC profile in tag 34675, the celestial WCS and band in the AstroMosaic TIFF description, and the binary coverage in its SubIFD. Store zero RGB codes for missing coverage. A covered zero sample has mask value 1. Store a photo intent marker and omit scientific units. Publish at a new local path after the job completes. |
+| Scientific sky export | Require compatible linear inputs. An explicit common-scale declaration cannot qualify encoded sRGB. Keep existing scientific FITS, TIFF and XISF samples, WCS, masks and optional mono refinements. |
+| Foreground and composition | Use their existing export contracts. Phase 8B covers the sky photo layer. |
+
+The output profile is the February 2015 revision of `sRGB2014.icc` from the International Color Consortium. Its size is 3,024 bytes and SHA-256 is `384b832de3412066743b52a75ee906b6fb9fb8d9e09e936fc2c43223815c6e0a`. The profile's embedded copyright identifies ICC and the registry permits redistribution and embedding under its general profile terms. The profile ships unchanged. Little CMS 2 identified the exact file as RGB v2, matrix/shaper, with sRGB colorants. The analytic transfer is the production conversion for 8B. [ICC profile and provenance](https://registry.color.org/rgb-registry/srgbprofiles#v2) · [Profile licensing](https://registry.color.org/profile-library/#license) · [sRGB transfer reference](https://www.w3.org/TR/css-color-4/#color-conversion-code)
+
+| Reference | Frozen evidence and limits |
+| --- | --- |
+| Original owner `20.TIF` and `21.TIF` | Use the [recorded source SHA-256 values](../tests/integration/test_owner_tiff.py). Both 6000 × 4000 originals have the same embedded profile SHA-256 `2b3aa1645779a9e634744faf9b01e9102b0c9b88fd6deced7934df86b949af7e`. The local Gaia SIP solutions produce an 8917 × 10259 automatic TAN grid at 34.59134313160837 arcsec/px and 109,331 covered 445 × 512 preview samples, including 23,020 shared samples. Reuse this grid for the full export and verify both original hashes. |
+| Analytic sRGB controls and real sampled tiles | Compare a double-precision decode, valid weighted bilinear blend, fixed tone and encode reference against the reopened TIFF within 2 UInt16 codes at corresponding pixel centers. Include the sRGB toe, RGB ordering, covered black, holes, and a coincident proxy grid. Require exact coverage at compared positions and published WCS within 1e-9 degrees of the resolved grid. Compare the CPU and OpenGL display with preview-tone references within one 8-bit level at base-level sample positions. |
+| Linear FITS, TIFF and XISF with existing mixed-layer control | Preserve exact samples and masks, and WCS within 1e-9 degrees. Use the [Phase 6 parity products](phase-6.md#local-windows-lifecycle-and-package-results) and existing numerical TIFF and XISF references. Reuse PA4 only under the real-data protocol when replaying its Phase 6 or 7 outcomes. |
+| Resource and failure checks | Require the default 64 MiB tile working-byte reservation and 2 GiB output limit on the real pair. The uncompressed photo payload is 7 bytes per output pixel, with TIFF and ICC overhead checked against the same limit. Record elapsed time and cache state. Exercise cancellation during tile writes, verify no output or part file remains, then retry the same destination. Check refusal of an occupied destination, unsupported output format and grids without coverage. |
+
+The ICC conversion matrix and reference patches, known exposure or background corrections, measured lens calibration, compatible flats and stable exposure brackets still need fixtures before the related 8C–8F methods can be qualified. Track their data and backend choices in Q-029.
 
 ## Workflow and settings
 
@@ -225,7 +251,7 @@ Store stable method identifiers and version their settings independently of the 
 | Metadata normalization with Standard or Advanced | Use it as a recorded seed or prior when selected. The fit estimates the remaining change on the effective sample scale. |
 | Insufficient overlap, field coverage or signal | The automatic policy can select an eligible simpler result and explain the fallback. A requested fit with explicit prerequisites reports the missing support. |
 
-## Proposed delivery stages
+## Delivery stages
 
 | Stage | Deliverable and impact | Acceptance evidence |
 | --- | --- | --- |
@@ -242,4 +268,4 @@ Store stable method identifiers and version their settings independently of the 
 - Acquire a known lens calibration or measured wide-field stellar control, compatible flats across relevant apertures, and a bracket sequence from a stable scene before qualifying data-dependent methods. Include known previous correction, missing metadata, saturated samples, weak overlaps, unsupported radii and deliberate profile disagreements. Follow the real-data requirements whenever the work replays Phase 6 or Phase 7. [Real data and acceptance measures](phase-7.md#real-data-and-acceptance-measurements)
 - Measure representative tile RGB errors against an independent transform, preview fidelity at shared sample positions, held-out registration median and P95, valid-area coverage, aperture flux and FWHM, seam/background residuals, and diffuse-region brightness. Start with the existing `0.5 px` geometry and `1%` aperture-flux targets for comparable well-sampled controls. Freeze method-specific limits in 8A. Record runtime, memory, input count and cache state. [Current numerical gates](../astro_mosaic_python_first_architecture_en.md#11-validation-and-acceptance-criteria)
 
-The first implementation after this proposal is the 8A contract followed by the 8B photo output. Results from 8B keep a measurable baseline for every later correction. The order of Advanced, optical and bracket features depends on which real calibration data is ready. [Open decisions and reference data](../questions_open_topics.md#q-029---configurable-color-photometry-and-optics)
+The 8B photo output supplies a baseline for later corrections. The order of Advanced, optical and bracket features depends on which real calibration data is ready. [Open decisions and reference data](../questions_open_topics.md#q-029---configurable-color-photometry-and-optics)

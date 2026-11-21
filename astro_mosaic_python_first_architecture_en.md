@@ -493,9 +493,9 @@ Start 7A when the Phase 6A terrain references and 6B diagnostic checks are ready
 | 7E | Shared rendering and compatible persistence | Compose transforms in the tile sampler, check independent sky and ground coverage, and reopen both new and earlier saved geometry. |
 | 7F | Point review and Windows delivery | Verify manual editing, preview, cancellation and independent exports across native Windows source and portable launchers on the real reference set. |
 
-### 10.6 Proposed Phase 8 Delivery Stages
+### 10.6 Phase 8 Delivery Stages
 
-Phase 8 proposes selectable profile, color conversion, exposure, brightness, lens geometry and vignetting methods. Its first deliverable is full-resolution photo export from the current sRGB sky preview. Later stages qualify optical profiles, flats, overlap fits and bracketed-exposure experiments with independent measurements. The delivery gates cover scientific output parity, bounded sampling, saved project compatibility and desktop/CLI automation. [Detailed Phase 8 method catalog and acceptance](docs/phase-8.md) · [Proposed ADR-0026](docs/adr/0026-configurable-color-photometry-and-optics.md)
+Phase 8 starts with full-resolution photo export from the current sRGB sky preview. Stage 8A freezes the sky photo and scientific output intents, source coordinate frame, color transfer, profiles, fixtures and numerical limits for 8B. Later stages qualify selectable profile, color conversion, exposure, brightness, lens geometry and vignetting methods with independent measurements. The delivery gates cover scientific output parity, bounded sampling, saved project compatibility and desktop/CLI automation. [8A contract](docs/phase-8.md#8a-frozen-photo-export-contract) · [Delivery and acceptance](docs/phase-8.md#delivery-stages) · [ADR-0026](docs/adr/0026-configurable-color-photometry-and-optics.md)
 
 ## 11. Validation and Acceptance Criteria
 

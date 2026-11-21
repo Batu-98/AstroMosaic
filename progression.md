@@ -10,8 +10,8 @@ Use this file for concise development history and handoff state. Detailed techni
 - **Available artifacts:** The verified beta 10 desktop and console are in `dist/AstroMosaic-0.1.0b10-windows-x64/` and `dist/astromosaic-cli-0.1.0b10-windows-x64/` with their build records. Earlier local betas remain in their versioned folders. The [application test guide](docs/application-tests.md) and [extended cases](docs/application-tests-extension.md) describe the ignored real-observation fixtures. [Release guide](docs/windows-release.md#verification-status)
 - **Implementation / verification:** Beta 10 displays stage percentages, elapsed time and a wider Plate Solve progress strip. Real M13 ASTAP and Gaia runs passed on the copied CPU and OpenGL desktops. The source suite passed 227 offscreen tests, with both opt-in OpenGL tests passed separately on native Windows. Ruff, scoped mypy and the Poetry lock check passed. [Plate Solve evidence](docs/phase-3b.md#beta-10-progress-verification) · [7F evidence](docs/phase-7.md#7f-local-windows-results)
 - **Version control:** The current development version on `main` is `0.1.0b10`. The first published source beta uses the annotated Git tag `v0.1.0b1`. [AstroMosaic GitHub repository](https://github.com/Batu-98/AstroMosaic)
-- **Next action:** Repeat the 6E and 7F acceptance on a fresh Windows 11 x64 installation using the intended release candidate. Review the native inventory under Q-005 before public portable distribution. When the owner schedules the proposed Phase 8, freeze its 8A contracts and references. [Clean-machine gate](docs/phase-3f.md#pending-clean-machine-check) · [Phase 8](docs/phase-8.md)
-- **Proposed follow-up** [Phase 8](docs/phase-8.md) covers full-resolution photo export and selectable color, brightness, lens and vignetting methods. Q-029 tracks the proposed acceptance data and backend choices.
+- **Next action:** Implement the 8B sky photo export against the frozen 8A contract. Repeat the 6E and 7F acceptance on a fresh Windows 11 x64 installation using the intended release candidate. Review the native inventory under Q-005 before public portable distribution. [Phase 8](docs/phase-8.md) · [Clean-machine gate](docs/phase-3f.md#pending-clean-machine-check)
+- **Phase 8** The first delivery covers a tagged full-resolution photo TIFF. Q-029 tracks reference data and backend choices for selectable color, brightness, lens and vignetting methods.
 - **Open dependencies:** Q-003 tracks reference data and frozen criteria. Q-010 tracks real-scene diagnostics and the proposed terrain models. Q-016 tracks astrometry. Q-005, Q-009 and Q-020 track distribution and format work. Q-008 tracks deferred platforms and Q-011 deferred visual fill. Resolved Q-022 and Q-023 record the Windows lifecycle and ZEA results.
 
 ## Phase Overview
@@ -50,6 +50,7 @@ The table is a status summary, not a replacement for the full exit gates in Sect
 | 5C - Per-band output | Complete | Saved membership, band-local units and channels, common geometry, independent exports, and Windows desktop, CLI and batch checks passed. |
 | 6 - Real-observation reliability | Local 6A–6E checks passed | The real references, native lifecycle, and source and portable product comparison are recorded. Fresh Windows acceptance remains open for the named 6E build. |
 | 7 - Terrain panorama registration | 7A–7F local checks passed | Repeat the intended portable candidate on a fresh Windows 11 x64 installation. PA4 and the unsupported rotation models retain their recorded outcomes. |
+| 8A - Photo export contract | Frozen for 8B | Record supported inputs, method compatibility, profile provenance, the real owner pair, and sample, WCS, cancellation and memory gates before implementation. |
 
 ## Journal Rules
 
@@ -1090,6 +1091,13 @@ The table is a status summary, not a replacement for the full exit gates in Sect
 - **Verified** Real M13 solves showed intermediate percentages and stable elapsed updates on the second display in the copied CPU and OpenGL runtimes. Both themes and the compact layout passed. Batch cancellation at 68% retained the first solution and retry completed the remaining panel. Standalone ASTAP solving and input preservation passed. Source passed 227 offscreen tests and the two opt-in native checks.
 - **Related** Q-026 and [beta 10 progress results](docs/phase-3b.md#beta-10-progress-verification).
 - **Next** Retain the real single, batch and cancellation checks for future Windows packaging.
+
+### 2026-11-21 - Phase 8A - Froze the first photo export contract
+
+- **Changed** Scheduled Phase 8 and fixed the accepted photo inputs, tone modes, TIFF layout, geometry, and science parity controls for 8B.
+- **Verified** Both original TIFF hashes and their shared ICC fingerprint matched. Their saved Gaia solutions reproduced the 8917 × 10259 grid and 109,331 covered preview samples. Little CMS read the exact ICC registry profile and reported the expected colorants.
+- **Related** Q-029 and [8A acceptance limits](docs/phase-8.md#8a-frozen-photo-export-contract).
+- **Next** Add the shared photo export path and verify it against the real pair and independent sample references.
 
 ## Entry Template
 
