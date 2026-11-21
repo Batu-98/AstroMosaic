@@ -1070,6 +1070,13 @@ The table is a status summary, not a replacement for the full exit gates in Sect
 - **Related** Q-003, Q-005, Q-010 and [7F local results](docs/phase-7.md#7f-local-windows-results).
 - **Next** Run the shared 6E and 7F matrix on a fresh Windows installation. No separate Windows test environment was available on the development host.
 
+### 2026-11-21 - Documentation - Completed: expanded README with structured project details
+
+- **Changed:** Expanded `README.md` while preserving existing header, support, license, and quick-start links. Added structured sections covering processing highlights, pipeline design, codebase layout, astronomical data/solvers, dependency specs, developer setup, and binary packaging using alternative terminology and an organized sequence.
+- **Verified:** Validated markdown formatting and confirmed all relative documentation, decision record, license, and phase links resolve to existing paths. Application tests were not required for this documentation-only edit.
+- **Related:** None.
+- **Next:** Proceed with the scheduled Phase 8 scoping or clean-machine acceptance validation when requested.
+
 ## Entry Template
 
 Copy this format into a new entry immediately above this template, preserving chronological order:
