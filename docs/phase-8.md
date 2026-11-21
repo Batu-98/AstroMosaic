@@ -1,6 +1,6 @@
 # Phase 8 Configurable Color Photometry and Optics
 
-**Status** The 8A contract is frozen and 8B implements full-resolution sRGB sky photo export. Each subsequent delivery qualifies its corrections against prepared references. [Architecture and milestones](../astro_mosaic_python_first_architecture_en.md#106-phase-8-delivery-stages) · [ADR-0026](adr/0026-configurable-color-photometry-and-optics.md)
+**Status** The 8A contract is frozen and 8B passed local Windows verification in `0.1.0b11`. Each subsequent delivery qualifies its corrections against prepared references. [Architecture and milestones](../astro_mosaic_python_first_architecture_en.md#106-phase-8-delivery-stages) · [ADR-0026](adr/0026-configurable-color-photometry-and-optics.md)
 
 AstroMosaic 0.1.0b7 already frames selected sky panels from their WCS, decodes recognized sRGB TIFFs for Visual Preview and renders scientific mosaics from compatible linear inputs. Its optional scientific relative refinement currently uses mono panels. The new options extend those paths through the same bounded CPU renderer. [Current sky workflow](phase-3c.md#desktop-workflow) · [Existing relative refinement](phase-2.md#relative-refinement)
 
@@ -42,11 +42,33 @@ The ICC conversion matrix and reference patches, known exposure or background co
 The Command Panel accepts `session export-photo -o "Mosaic.tiff"` after a completed covered visual sky preview. It uses the active band, grid and tone controls.
 
 ```powershell
-astromosaic project export-photo "Solved.astromosaic" -o "Mosaic.tiff" --grid auto --band RGB --midtones 25 --progress --json
+astromosaic project export-photo "Solved.astromosaic" -o "Mosaic.tiff" --grid auto --midtones 25 --progress --json
 astromosaic project export-photo "Solved.astromosaic" -o "Natural.tiff" --tone preserve
 ```
 
 Without `--grid`, the CLI uses the project's saved preview mode. The default tone is `preview` with midtones 25 on the desktop's 5–95 scale. Omit `--band` for a project with one effective sky band. The JSON result contains the resolved grid mode, tone and usual render measurements. The ICC tag is readable in a color-managed TIFF application. AstroMosaic also reads the FITS-style WCS description and coverage SubIFD. Generic TIFF viewers display the uncovered black raster codes and may ignore those astronomy metadata fields.
+
+### 8B Source verification
+
+The double-precision test covers both tone modes, weighted linear-light bilinear sampling, the sRGB toe, coincident preview and export positions, covered black, WCS and output limits. LibTIFF reopens the UInt16 RGB plane and Little CMS identifies the embedded profile. The source Windows **Preserve Tone** export of the real pair completed in about 184 seconds. Independent projection, interpolation and encoding at 4,966 covered locations measured a maximum error of one UInt16 code. Coverage matched at the compared locations, including 1,047 overlap samples and 5,417 uncovered positions.
+
+Source tests passed 231 cases with the previously measured OpenCV wheel available through the isolated Phase 7 test environment. Four native checks passed separately, including both opt-in OpenGL checks and the 630-pixel multi-band layout. The lockfile, Ruff and scoped mypy checks passed. [Numerical and failure checks](../tests/numerical/test_preview.py) · [Desktop and CLI parity test](../tests/integration/test_desktop_project.py) · [Native viewport checks](../tests/integration/test_sky_viewport.py)
+
+### 8B Local Windows package results
+
+The final beta 11 bundles were built with CPython 3.13.18 and the Poetry lock from clean commit `e644768177da5013d9aa909621bc38a3d45756ce`. The packaged desktop on the secondary display solved both original TIFFs with the local Gaia catalog. Each backend built a 445 × 512 visual preview and showed the complete export button text at the compact width. Cancelling after tile progress cleared the temporary TIFF and retained the preview. The CPU button workflow and the OpenGL `session export-photo` command both retried successfully at the original destination.
+
+Both desktop modes and the copied Qt-free console produced byte-identical 8917 × 10259 TIFFs with **Use Preview Tone** at midtones 37. The original input hashes matched. The TIFF contained 43,897,047 covered pixels and its SHA-256 was `7d4bc6f6ac2ceb45ca584475d623ac42eae5349b115b761d2e699ce29925828f`. Independent LibTIFF and Little CMS reopening checked RGB UInt16 and the sRGB2014 profile. The WCS matched within 1e-9 degrees and the independent sample and coverage comparison repeated the source bounds.
+
+| Copied workflow | Photo export time | Resource measurement |
+| --- | ---: | --- |
+| Native desktop CPU | 208.33 s | 230.80 MiB peak working set and 200.18 MiB peak commit |
+| Native desktop OpenGL | 207.71 s | 304.29 MiB peak working set and 308.31 MiB peak commit |
+| Standalone CLI | 222.52 s | 20,328,667 peak reserved tile bytes across 5,670 tiles |
+
+The three jobs ran concurrently on a Windows 11 Pro x64 build 26200 host with an i5-14600K and RTX 4070, after earlier reads of both 6000 × 4000 inputs. The desktop figures cover the parent process through solve, preview and export. The CLI reservation tracks the renderer's bounded buffers. The output occupied 640,362,687 bytes.
+
+The source and copied console also matched nine real scientific and layer references for float32 values, coverage, applicable contribution masks and WCS. These included the M17 and atlas chain FITS, the M42 solved FITS, wide RGB TIFF, ALPACA sky and foreground plus FITS and XISF composition, and Paranal TIFF composition. The two historical PA4 exports retain the current encoded-sRGB scientific rejection. A separate clean Windows installation run remains open. Local measurements and the independent reopen report are in `.tooling/desktop-0.1.0b11/`. [Windows launchers and build records](windows-release.md#verification-status)
 
 ## Workflow and settings
 

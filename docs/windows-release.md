@@ -53,7 +53,9 @@ Download public DSS reference images from their archives for optional reproducti
 
 ## Verification status
 
-The initial source beta is tagged `v0.1.0b1`. The current development version on `main` is `0.1.0b10`. The Phase 6E local verification record and ZIPs in `.tooling/phase6e-20261119/artifacts/` identify the tested `0.1.0b1` build and its SHA-256 hashes. [Phase 6E evidence](phase-6.md#local-windows-lifecycle-and-package-results) · [GitHub releases](https://github.com/Batu-98/AstroMosaic/releases)
+The initial source beta is tagged `v0.1.0b1`. The current development version on `main` is `0.1.0b11`. The Phase 6E local verification record and ZIPs in `.tooling/phase6e-20261119/artifacts/` identify the tested `0.1.0b1` build and its SHA-256 hashes. [Phase 6E evidence](phase-6.md#local-windows-lifecycle-and-package-results) · [GitHub releases](https://github.com/Batu-98/AstroMosaic/releases)
+
+The beta 11 desktop and console are in `dist/AstroMosaic-0.1.0b11-windows-x64/` and `dist/astromosaic-cli-0.1.0b11-windows-x64/`. Each `BUILD-INFO.json` records the build time, launcher SHA-256 and source commit `e644768177da5013d9aa909621bc38a3d45756ce`. The copied CPU desktop, OpenGL session and CLI produced identical full-resolution tagged sRGB photo TIFFs. Both native display paths passed the compact layout and cancellation/retry checks. [Phase 8B results](phase-8.md#8b-local-windows-package-results)
 
 The beta 10 desktop and console are in `dist/AstroMosaic-0.1.0b10-windows-x64/` and `dist/astromosaic-cli-0.1.0b10-windows-x64/`. Their build records identify source commit `ca0238003f8631ff1eb93ceb0e5def27c4ee2be4` and the launcher checksums. The desktop shows a step-based Plate Solve percentage in a wider progress strip. Native CPU and OpenGL on the second display verified ASTAP D05 and Gaia DR3 M13 solutions, cancellation and retry in both themes. [Plate Solve results](phase-3b.md#beta-10-progress-verification)
 
