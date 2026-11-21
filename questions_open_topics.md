@@ -311,6 +311,16 @@ This register tracks unresolved decisions, problems, and risks. It is not a work
 - **Closure condition:** The live project can be saved, reopened and exported without dialogs. The standalone CLI can relink, solve and prepare mixed-layer projects from supplied paths, and failures preserve the inputs and permit retry.
 - **Resolution:** 2026-11-21. The beta 6 desktop exercised the M13 lifecycle with zero modal dialogs, and the console attached WCS and exported M13 after a deadline retry. The real Paranal run imported label masks, aligned the two ground panels, verified proposed and numeric placement, and reopened the composition. [Windows evidence](docs/windows-release.md#verification-status)
 
+### Q-028 - Automatic sky preview for solved panels
+
+- **Status / priority** Verifying / P1
+- **Opened / updated** 2026-11-21
+- **Affected phase** Phase 3C desktop sky preview and export setup.
+- **Impact and evidence** The beta 6 workflow for the owner TIFFs required a manually framed grid and separate linear-light copies. The original images carry standard sRGB profiles and have usable WCS after offline solving.
+- **Current assumption** Fit new sky previews from the selected WCS footprints. Decode recognized unsigned 16-bit RGB sRGB TIFFs in the visual preview. Keep the fitted grid temporary until the user explicitly adopts it. [ADR-0025](docs/adr/0025-automatic-sky-preview.md)
+- **Next action / responsibility** Replay the three desktop steps with the original TIFFs on source and packaged Windows.
+- **Closure condition** Both original panels solve and appear in the preview with measurable overlap. The saved grid changes only on explicit adoption and scientific export still rejects the encoded panels.
+
 ## New Entry Template
 
 ```markdown

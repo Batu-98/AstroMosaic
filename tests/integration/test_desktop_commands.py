@@ -251,6 +251,24 @@ def test_session_commands_use_the_live_project_without_modal_dialogs(
         run("session save")
         assert load_project(saved).render.crop == Region(1, 1, 9, 7)
 
+        run("session use-preview-grid")
+        assert "Build an automatically framed sky preview first." in panel.output.toPlainText()
+        saved_grid = window.project.render
+        run("session preview --grid auto")
+        wait_until(idle)
+        fitted_grid = window._preview_grid
+        assert fitted_grid is not None and fitted_grid != saved_grid
+        assert window.viewport.frame is not None and window.viewport.frame.has_coverage
+        assert window.project.render == saved_grid
+        run("session save")
+        assert load_project(saved).auto_frame_preview
+        assert load_project(saved).render == saved_grid
+        run("session use-preview-grid")
+        assert window.project.render == fitted_grid and not window.project.auto_frame_preview
+        assert window.viewport.frame is not None and window.viewport.frame.has_coverage
+        run("session save")
+        assert load_project(saved).render == fitted_grid
+
         moved = source.with_name("Moved panel.fits")
         source.rename(moved)
         run(f'session open "{saved.name}"')

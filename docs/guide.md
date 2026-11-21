@@ -23,7 +23,7 @@ poetry sync --only main -E desktop
 poetry run python -m astromosaic.ui
 ```
 
-Choose **Add Panels**, set the mosaic grid, and save the project. Use the layer selector with **Build Preview** and **Export Mosaic** for sky, foreground, or composition. The **Layers** menu contains foreground alignment and composition controls. Both preview and export report progress and support cancellation. [Sky workflow](phase-3c.md#desktop-workflow) · [Mixed-panel workflow](phase-3e.md#desktop-workflow)
+For a sky preview, choose **Add Panels → Plate Solve → Build Preview**. **Auto Frame** starts on in a new desktop project. Use **Use Preview Grid** to adopt a fitted sky grid for export, or set a grid in **Mosaic Settings**. Use the layer selector for sky, foreground, or composition. The **Layers** menu contains foreground alignment and composition controls. [Sky workflow](phase-3c.md#desktop-workflow) · [Mixed-panel workflow](phase-3e.md#desktop-workflow)
 
 The panel control table opens in **Overview**. Choose **Optics**, **Files**, or **All properties** to compare additional columns. Double-click a weight, band, focal length, or pixel size to edit it. Use the **Sky** checkbox to include a panel in the sky layer. The desktop starts in dark mode. Choose **View → Theme** to switch between dark and light appearances. [Panel controls](phase-3b.md#panel-control-table)
 

@@ -1013,6 +1013,13 @@ The table is a status summary, not a replacement for the full exit gates in Sect
 - **Related** Q-024, Q-026 and Q-027.
 - **Next** Update the reference when the implemented workflows change.
 
+### 2026-11-21 - Sky preview - Implemented automatic framing and sRGB preview
+
+- **Changed** Added WCS framing, a visual sRGB sky preview and explicit export grid adoption to the desktop and session commands.
+- **Verified** The initial focused source suite passed 21 tests. The original TIFFs with their existing solved WCS covered 109,331 preview samples, including 23,020 shared samples. Science preflight rejected the encoded inputs even with a common-scale declaration.
+- **Related** Q-028 and [ADR-0025](docs/adr/0025-automatic-sky-preview.md).
+- **Next** Run the fresh solve workflow and verify the locked beta 7 Windows package.
+
 ## Entry Template
 
 Copy this format into a new entry immediately above this template, preserving chronological order:

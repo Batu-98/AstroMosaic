@@ -1,6 +1,6 @@
 # AstroMosaic Workflow Reference
 
-AstroMosaic 0.1.0b6 takes local astronomical panels through project setup, optional offline solving, layer preparation, preview and export. The desktop works on the active project, including unsaved edits. The standalone CLI works on explicit files. Both use the same processing engine. This reference describes the behavior of beta 6 on the tested Windows 11 x64 baseline. [Windows verification](windows-release.md#verification-status)
+AstroMosaic 0.1.0b7 takes local astronomical panels through project setup, optional offline solving, layer preparation, preview and export. The desktop works on the active project, including unsaved edits. The standalone CLI works on explicit files. Both use the same processing engine. This reference describes the Windows 11 x64 workflow. [Windows verification](windows-release.md#verification-status)
 
 ## Contents
 
@@ -84,7 +84,7 @@ flowchart TD
 
 | Scenario | Current result |
 | --- | --- |
-| New project | The active panel list starts empty. The default sky grid is TAN with center `(0°, 0°)`, size `1024 × 1024`, scale `2 arcsec/px`, rotation zero and no crop. The common brightness declaration and relative refinement start disabled. |
+| New project | The active panel list starts empty with **Auto Frame** enabled for sky previews. The initial saved export grid is TAN with center `(0°, 0°)`, size `1024 × 1024`, scale `2 arcsec/px`, rotation zero and no crop. The common brightness declaration and relative refinement start disabled. |
 | Open a project | The app decodes the manifest, restores saved settings and references, then checks panel metadata in the background. Invalid JSON, unsupported schema or invalid settings cause an open error. Missing source files can remain as saved references for relinking. |
 | Save a named workspace | **Save Project** writes the active settings to the current path. First save and **Save Project As** collect a new filename. The file picker allows cancellation and an occupied destination requires explicit replacement. |
 | Switch or close with dirty edits | The normal desktop actions offer Save, Discard or Cancel. A cancelled or failed save prevents the switch or close. The corresponding session commands require an explicit `--discard` or a prior successful save. |
@@ -92,7 +92,7 @@ flowchart TD
 | Remove a panel | The app removes the panel record from the active project. Source files and attachments are separate files. The project may need a fresh foreground alignment if the participant order or masks change. |
 | Save error | An invalid filename, occupied new path, unwritable destination, oversized manifest or invalid settings leaves the desktop dirty state available for correction. The project save path must end in `.astromosaic`. |
 
-The manifest contains panel order, weights, sky inclusion, filter and optics overrides, masks, WCS references, grid, refinement, foreground alignment and composition settings. Relative paths are used where possible, with absolute paths across Windows drives. The reference statuses are `Ready`, `Missing`, `Changed` and `Unavailable`. A saved source fingerprint uses size and modification time. A WCS sidecar also binds to the original pixel dimensions and effective sky mask. The manifest size limit is 4 MiB. Beta 6 reads schemas 1 through 6 and writes 4 for TAN by default, 5 for ZEA, or 6 when a panel has a band override. [Project persistence decision](adr/0012-project-manifest-and-render-worker.md) · [Manifest code](../src/astromosaic/storage/project.py)
+The manifest contains panel order, weights, sky inclusion, filter and optics overrides, masks, WCS references, the saved grid and optional automatic preview setting, refinement, foreground alignment and composition settings. Relative paths are used where possible, with absolute paths across Windows drives. The reference statuses are `Ready`, `Missing`, `Changed` and `Unavailable`. A saved source fingerprint uses size and modification time. A WCS sidecar also binds to the original pixel dimensions and effective sky mask. The manifest size limit is 4 MiB. Beta 7 reads schemas 1 through 6 and writes 4 for TAN by default, 5 for ZEA, or 6 when a panel has a band override. Older manifests without the option use their saved grid. [Project persistence decision](adr/0012-project-manifest-and-render-worker.md) · [Manifest code](../src/astromosaic/storage/project.py)
 
 ## Panel Import and Masks
 
@@ -194,7 +194,10 @@ flowchart TD
     refs -->|No| stop["Report what blocked preparation"]
     refs -->|Yes| geometry{"Effective WCS, masks and channel layout usable?"}
     geometry -->|No| stop
-    geometry -->|Yes| calibration{"Filter and brightness checks pass?"}
+    geometry -->|Yes| mode{"Supported sRGB sky preview?"}
+    mode -->|Yes, common filter| visual["Decode sRGB in source tiles and label Visual Preview"]
+    mode -->|Unsupported profile, mixed encodings or filters| stop
+    mode -->|Linear workflow| calibration{"Filter and brightness checks pass?"}
     calibration -->|No| stop
     calibration -->|Yes| request{"Preflight or rendering?"}
     request -->|Validate| ready["Report dimensions, channels and panel count"]
@@ -203,6 +206,7 @@ flowchart TD
     refine -->|Yes| fit["Fit stellar shifts, gains and optional background"]
     fit -->|Accepted registration| tiles
     fit -->|Weak, disconnected or unsupported| stop
+    visual --> tiles
     tiles --> combine["Combine valid samples with panel weights and record coverage"]
 ```
 
@@ -223,7 +227,8 @@ flowchart TD
 | A present unit contains a per-pixel basis | The job requires area-aware conversion of those inputs before mosaicking. |
 | Conflicting filter labels | The job reports the filter requirement. The saved band and common-filter controls provide the grouping inputs for the next attempt. |
 | Mono and RGB appear in one layer | The job requires a common channel layout. RGB sky mosaics use TIFF or XISF for output. |
-| Display-encoded TIFF with a usable WCS | Plate solving can succeed. Build Preview uses the shared calibration gate. The TIFF reader preserves stored sample values, and the common-scale declaration expects a linear shared scale. A missing-unit error can therefore occur after a successful solve. |
+| Supported sRGB TIFF with a usable WCS | The desktop sky **Visual Preview** decodes the sRGB transfer before interpolation. Science validation and export require compatible linear inputs, even if a common scale is declared. |
+| Unsupported TIFF ICC profile or mixed sRGB and linear inputs | The sky preview reports the affected panel and requires a compatible input set. |
 
 ### Sampling and optional refinement
 
@@ -276,7 +281,10 @@ Foreground stitching stores translations. The composition similarity transform p
 flowchart TD
     preview["Build Preview or session preview"] --> prepare["Take active snapshot and selected layer and prepare inputs"]
     prepare -->|Validation failure| error["Clear the frame and show preview diagnostics"]
-    prepare -->|Ready| proxy{"Smaller proxy useful?"}
+    prepare -->|Sky with Auto Frame| fit["Fit a preview grid to the solved WCS footprints"]
+    fit -->|Framing failed| error
+    fit -->|Ready| proxy{"Smaller proxy useful?"}
+    prepare -->|Saved sky grid, foreground or composition| proxy
     proxy -->|Yes| coarse["Render up to 160 pixels on the longest edge"]
     coarse -->|Covered samples| interim["Show the proxy"]
     coarse -->|No covered samples| finalFrame["Render final bounded preview"]
@@ -290,11 +298,11 @@ flowchart TD
     backend -->|CPU selected or OpenGL fails| cpu["Draw cached frame using CPU display"]
 ```
 
-The final preview is at most 512 samples along its longest edge. It maps its pixel centers onto the same output grid, masks, crop and transforms as the full-resolution export. A valid coarse proxy can appear first. A completed preview with no coverage reports that outcome explicitly. A cancelled or failed render clears the preview, including any proxy that appeared earlier. [Preview geometry](phase-3c.md#geometry-and-display)
+The final preview is at most 512 samples along its longest edge. A valid coarse proxy can appear first. **Auto Frame** fits the selected sky footprints to a temporary ICRS grid and shows **Use Preview Grid** after a covered result. This action applies the framing to the export settings. With **Auto Frame** off, the saved sky grid supplies the preview geometry. A completed preview with no coverage reports that outcome explicitly. A cancelled or failed render clears the preview, including any proxy that appeared earlier. [Preview geometry](phase-3c.md#geometry-and-display)
 
 Display normalization uses the 1st and 99.5th percentiles of valid samples with linked RGB levels. **Midtones**, pan, pointer-centered zoom and **Fit View** act on the cached display. **Highlight Overlap** is available for a composition with a common-coverage map. Changing the active project, layer or band can clear the cached preview and require a new build. **View → Theme** stores the application's Dark or Light appearance preference. Pixel processing remains on the CPU, with OpenGL used for display when available. Context, shader or upload failure switches to CPU display and preserves the usable frame. [Preview implementation](../src/astromosaic/ui/sky_viewport.py) · [Display normalization](../src/astromosaic/display.py)
 
-**sRGB TIFF scenario.** An input can pass inspection and plate solving with no surface-brightness unit. Build Preview can then stop at the brightness check and show the Mosaic Settings declaration. Beta 6 treats the TIFF's stored values as input samples and takes the sky grid from the saved settings. For the existing workflow with linear-light visual copies, the copies need their corresponding WCS and a grid covering the intended sky. [Desktop preview workflow](phase-3c.md#desktop-workflow) · [Recorded sRGB preview case](../questions_open_topics.md#q-024---preview-of-solved-rgb-tiff-panels)
+**sRGB TIFF scenario.** Add unsigned 16-bit RGB TIFFs tagged with a supported sRGB ICC profile, solve their WCS and choose **Build Preview**. The **Visual Preview** decodes the sRGB transfer before combining the panels. Its inputs stay unchanged. Unknown profiles or a mixture with linear or untagged panels give a panel-specific error. Scientific exports require compatible linear inputs. [Desktop preview workflow](phase-3c.md#desktop-workflow) · [Recorded sRGB preview case](../questions_open_topics.md#q-028---automatic-sky-preview-for-solved-panels)
 
 ## Export and File Publication
 
@@ -363,7 +371,8 @@ The command panel accepts quoted paths, keeps Windows backslashes and strips an 
 | `session save [PATH]` | Save the active workspace, including unsaved edits. First save needs a destination. A named existing destination requires `--replace`. Omitting the path saves to the active project's filename. |
 | `session add PATH ...` | Add explicit panel paths to the active project and start the foreground check. |
 | `session relink N PATH` | Relink one live panel by index and matching fingerprint. |
-| `session preview` | Build the active layer and selected band's desktop preview. |
+| `session preview [--grid auto\|saved]` | Build the active layer and selected band's desktop preview. The optional sky grid mode is saved with the project. |
+| `session use-preview-grid` | Copy the current fitted sky preview grid to the project's export settings. |
 | `session solve [--panel N]` | Start the desktop solve batch or revalidate one sky panel with the local desktop settings. |
 | `session export -o PATH` | Render the live snapshot to a new file. Optional `--layer` and `--band` select the requested output. |
 

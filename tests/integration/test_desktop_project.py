@@ -133,9 +133,16 @@ def test_desktop_project_roundtrip_progress_cancel_and_retry(
         return render_project(project, path, pause_on_progress(context))
 
     def pause_preview(
-        project: MosaicProject, context: JobContext, on_proxy: Callable[[PreviewFrame], None]
+        project: MosaicProject,
+        context: JobContext,
+        on_proxy: Callable[[PreviewFrame], None],
+        *,
+        band: str | None,
+        allow_visual: bool,
     ) -> PreviewFrame:
-        return preview_project(project, pause_on_progress(context), on_proxy)
+        return preview_project(
+            project, pause_on_progress(context), on_proxy, band=band, allow_visual=allow_visual
+        )
 
     def set_geometry() -> None:
         dialog = QApplication.activeModalWidget()
@@ -200,7 +207,7 @@ def test_desktop_project_roundtrip_progress_cancel_and_retry(
         assert load_project(manifest).panels[0].source.path == moved
         assert window.project.panels[0].optics == PanelOptics(500)
 
-        def mixed_filters(*_args: object) -> None:
+        def mixed_filters(*_args: object, **_kwargs: object) -> None:
             raise SkyCalibrationError("filter", "Expected a common FILTER.")
 
         with monkeypatch.context() as patch:

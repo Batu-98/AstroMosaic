@@ -29,6 +29,7 @@ class PanelDescriptor:
     wcs_provenance: Literal["primary-header", "tiff-description", "xisf-fits-keywords"] | None
     blank: int | None
     mask_provenance: tuple[str, ...]
+    icc_encoding: Literal["srgb", "unsupported"] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,7 +57,7 @@ class Region:
 
 @dataclass(frozen=True, slots=True)
 class Tile:
-    """Linear YX mono or YXC RGB samples and one shared YX validity mask."""
+    """YX mono or YXC RGB samples and one shared YX validity mask."""
 
     region: Region
     pixels: NDArray[np.float32]

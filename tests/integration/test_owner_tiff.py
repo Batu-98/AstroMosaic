@@ -55,6 +55,7 @@ def test_owner_rgb_tiff_loads_camera_optics_and_stages_original_green_samples(
     with open_panel(source) as panel:
         assert (panel.descriptor.width, panel.descriptor.height) == (6000, 4000)
         assert panel.descriptor.channel_layout == "rgb"
+        assert panel.descriptor.icc_encoding == "srgb"
         position, scale, vertical = _pointing(panel, SolveOptions())
         assert position is None
         assert scale == vertical == pytest.approx(206.264806 * pitch / 24)

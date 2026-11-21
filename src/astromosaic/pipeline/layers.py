@@ -44,6 +44,10 @@ class ForegroundSource:
     transform: GroundPanel
     correction: PanelCorrection | None = None
 
+    @property
+    def name(self) -> str:
+        return f"Foreground panel {self.transform.index + 1}"
+
 
 @dataclass(frozen=True, slots=True)
 class ForegroundLayer:

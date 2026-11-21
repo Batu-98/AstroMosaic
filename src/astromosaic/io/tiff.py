@@ -1,4 +1,4 @@
-"""Read bounded windows from linear mono and RGB TIFF panels."""
+"""Read bounded windows from mono and RGB TIFF panels without color conversion."""
 
 import os
 from collections.abc import Iterator
@@ -21,6 +21,7 @@ from tifffile import (
 
 from astromosaic.core import PanelDescriptor, Region, SourceFingerprint, Tile
 from astromosaic.io.fits import FitsTileSource, open_fits_sky_mask, optional_header_text
+from astromosaic.io.icc import MAX_ICC_BYTES, is_srgb_profile
 from astromosaic.io.tiff_metadata import add_tiff_optical_metadata
 
 DESCRIPTION_PREFIX = "AstroMosaic TIFF "
@@ -223,6 +224,17 @@ def _check_orientation(page: TiffPage) -> None:
         raise ValueError("Expected top-left TIFF orientation (Orientation 1).")
 
 
+def _icc_encoding(page: TiffPage) -> Literal["srgb", "unsupported"] | None:
+    tag = page.tags.get(34675)
+    if tag is None:
+        return None
+    if page.dtype == np.dtype("uint16") and tag.valuebytecount <= MAX_ICC_BYTES:
+        profile = tag.value
+        if isinstance(profile, bytes) and is_srgb_profile(profile):
+            return "srgb"
+    return "unsupported"
+
+
 def _read_metadata(page: TiffPage) -> tuple[fits.Header, TiffPage | None]:
     description = page.description
     if not description.startswith(DESCRIPTION_PREFIX):
@@ -306,5 +318,6 @@ def open_tiff_panel(
             else None,
             blank=None,
             mask_provenance=provenance,
+            icc_encoding=_icc_encoding(page),
         )
         yield TiffTileSource(science, descriptor, header, max_tile_bytes, coverage, mask)

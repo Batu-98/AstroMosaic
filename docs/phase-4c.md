@@ -34,6 +34,7 @@ The original panel exposed saved-project CLI commands. First save and Save As re
 | Add panels or repair a moved source | `session add "Panel A.fits" "Panel B.fits"` or `session relink 1 "Moved Panel.fits"` |
 | Save the current contents | `session save "Night.astromosaic"` for the first save or a new path, then `session save` for that file |
 | Preview, solve or export the active project | `session preview`, `session solve`, or `session export -o "Sky.fits" --layer sky` |
+| Choose or adopt the sky preview grid | `session preview --grid auto`, `session preview --grid saved`, or `session use-preview-grid` |
 | Close the window | `session close` |
 
 A named save uses a new file unless you pass `--replace`. New, open and close require a saved project or an explicit `--discard` for unsaved changes. The panel reports invalid arguments, an occupied destination, a failed relink or an unsaved project in the log. An export uses the active snapshot and accepts `--layer` and `--band`. Preview, solving and rendering use the desktop job and **Cancel Job**. `session solve --panel 2` revalidates an individual sky panel with the saved solver settings. For scripts that process files without opening the desktop, use the [project commands](phase-4a.md#prepare-a-project-without-the-desktop).

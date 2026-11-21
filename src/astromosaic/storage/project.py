@@ -185,6 +185,7 @@ class MosaicProject:
     refinement: RefinementSpec | None = None
     foreground: SavedForeground | None = None
     composition: CompositionSpec | None = None
+    auto_frame_preview: bool = False
 
     def validate(self) -> None:
         spec = self.render
@@ -446,7 +447,12 @@ def _verified_inputs(
         raise ValueError("Include at least one panel with sky samples in the sky layer.")
     for index, panel in enumerate(panels):
         for role, reference in panel.references():
-            _check_reference(role, reference, context)
+            try:
+                _check_reference(role, reference, context)
+            except ValueError as error:
+                if role == "Source":
+                    raise
+                raise ValueError(f"{panel.source.path.name}: {error}") from error
         if (mask := panel.sky_input()) is not None:
             sky_masks[index] = mask
     return {
@@ -510,11 +516,14 @@ def preview_project(
     on_proxy: Callable[[PreviewFrame], None] | None = None,
     *,
     band: str | None = None,
+    allow_visual: bool = False,
 ) -> PreviewFrame:
     return preview_mosaic(
         spec=project.render,
         context=context,
         on_proxy=on_proxy,
+        auto_frame=project.auto_frame_preview,
+        allow_visual=allow_visual,
         **_verified_inputs(project, context, band),
     )
 
@@ -774,6 +783,7 @@ def save_project(
     data = {
         "version": schema_version,
         "application_version": version("astromosaic"),
+        **({"auto_frame_preview": True} if project.auto_frame_preview else {}),
         "render": render,
         "filter_name": project.filter_name,
         "assume_surface_brightness": project.assume_surface_brightness,
@@ -1023,6 +1033,9 @@ def load_project(path: Path) -> MosaicProject:
         if not isinstance(data["panels"], list):
             raise ValueError("Expected an ordered panel list.")
         filter_name, assume = data["filter_name"], data["assume_surface_brightness"]
+        auto_frame = data.get("auto_frame_preview", False)
+        if not isinstance(auto_frame, bool):
+            raise ValueError("Invalid automatic preview framing setting.")
         if (filter_name is not None and not isinstance(filter_name, str)) or not isinstance(
             assume, bool
         ):
@@ -1038,6 +1051,7 @@ def load_project(path: Path) -> MosaicProject:
             _decode_refinement(data["refinement"]),
             _decode_foreground(data["foreground"]) if schema_version >= 3 else None,
             _decode_composition(data["composition"]) if schema_version >= 3 else None,
+            auto_frame_preview=auto_frame,
         )
         project.validate()
         return project

@@ -31,7 +31,7 @@ from PySide6.QtWidgets import (
 from astromosaic.astrometry.hints import PanelOptics
 from astromosaic.astrometry.solve import read_solution_diagnostics
 from astromosaic.display import DisplayFrame, highlight_overlap
-from astromosaic.pipeline.mosaic import SkyCalibrationRequirement
+from astromosaic.pipeline.mosaic import RenderSpec, SkyCalibrationRequirement
 from astromosaic.storage.project import (
     FileReference,
     Layer,
@@ -97,7 +97,7 @@ class ProjectWindow(QMainWindow):
         app_version = version("astromosaic")
         beta_label = " (Beta)" if re.match(r"(?:\d+!)?[\d.]+b\d+", app_version) else ""
         self._app_title = f"AstroMosaic {app_version}{beta_label}"
-        self.project = MosaicProject()
+        self.project = MosaicProject(auto_frame_preview=True)
         self._saved = self.project
         self.project_path: Path | None = None
         self.job: _Job | None = None
@@ -110,6 +110,7 @@ class ProjectWindow(QMainWindow):
         self._foreground_panels: tuple[ProjectPanel, ...] | None = None
         self._panel_dialog: tuple[int, PanelSettings] | None = None
         self._preview_project: MosaicProject | None = None
+        self._preview_grid: RenderSpec | None = None
         self._display_frame: DisplayFrame | None = None
         self._close_after_job = False
         self.resize(1140, 780)
@@ -211,15 +212,25 @@ class ProjectWindow(QMainWindow):
         preview_layout = QVBoxLayout(preview)
         preview_layout.setContentsMargins(0, 6, 0, 0)
         preview_header = QHBoxLayout()
-        preview_title = QLabel("Preview")
-        preview_title.setProperty("sectionTitle", True)
-        preview_header.addWidget(preview_title)
+        self.preview_title = QLabel("Preview")
+        self.preview_title.setProperty("sectionTitle", True)
+        preview_header.addWidget(self.preview_title)
+        self.auto_frame_check = QCheckBox("Auto Frame")
+        self.auto_frame_check.setToolTip("Fit the preview to the solved sky panels.")
+        self.auto_frame_check.toggled.connect(self._set_auto_frame)
+        preview_header.addWidget(self.auto_frame_check)
+        preview_header.addStretch()
+        self.use_preview_grid_button = QPushButton("Use Preview Grid")
+        self.use_preview_grid_button.setToolTip(
+            "Use this framing as the saved sky grid for export."
+        )
+        self.use_preview_grid_button.clicked.connect(self._adopt_preview_grid)
+        preview_header.addWidget(self.use_preview_grid_button)
+        preview_layout.addLayout(preview_header)
         self.grid_summary = QLabel()
         self.grid_summary.setTextFormat(Qt.TextFormat.PlainText)
         self.grid_summary.setWordWrap(True)
-        self.grid_summary.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        preview_header.addWidget(self.grid_summary, 1)
-        preview_layout.addLayout(preview_header)
+        preview_layout.addWidget(self.grid_summary)
         preview_layout.addWidget(self.viewport, 1)
         splitter.addWidget(preview)
         splitter.setStretchFactor(0, 2)
@@ -402,15 +413,28 @@ class ProjectWindow(QMainWindow):
         self.overlap_check.setEnabled(
             self._display_frame is not None and self._display_frame.common_coverage is not None
         )
+        self.auto_frame_check.setVisible(layer == "sky")
+        self.auto_frame_check.setEnabled(idle and layer == "sky")
+        with QSignalBlocker(self.auto_frame_check):
+            self.auto_frame_check.setChecked(self.project.auto_frame_preview)
+        can_adopt = layer == "sky" and self._preview_grid is not None
+        self.use_preview_grid_button.setVisible(can_adopt)
+        self.use_preview_grid_button.setEnabled(idle and can_adopt)
         spec = self.project.render
         region = spec.output_region()
-        ra, dec = spec.center
         ready = False
         if layer == "sky":
-            summary = (
-                f"ICRS {spec.projection}  ·  RA {ra:.7g}°, Dec {dec:.7g}°"
-                f"  ·  {region.width} × {region.height} px  ·  {spec.scale_arcsec:g} arcsec/px"
-            )
+            if self.project.auto_frame_preview and self._preview_grid is None:
+                summary = "Fit to solved sky panels"
+            else:
+                preview_spec = self._preview_grid or spec
+                ra, dec = preview_spec.center
+                framing = preview_spec.output_region()
+                summary = (
+                    f"ICRS {preview_spec.projection}  ·  RA {ra:.7g}°, Dec {dec:.7g}°"
+                    f"  ·  {framing.width} × {framing.height} px"
+                    f"  ·  {preview_spec.scale_arcsec:g} arcsec/px"
+                )
             band = self._sky_band()
             ready = sky and (self.band_box.count() <= 2 or band is not None)
             if band is not None:
@@ -497,7 +521,7 @@ class ProjectWindow(QMainWindow):
             self._new_project()
 
     def _new_project(self) -> None:
-        self._set_project(MosaicProject(), None)
+        self._set_project(MosaicProject(auto_frame_preview=True), None)
         self._report_operation("New project.")
 
     def _open(self) -> None:
@@ -651,10 +675,16 @@ class ProjectWindow(QMainWindow):
                 self._add_paths(tuple(directory / path for path in arguments.paths))
             case "relink":
                 self._relink_panel(self._session_panel(arguments.panel), directory / arguments.path)
+            case "use-preview-grid":
+                self._adopt_preview_grid()
             case "preview" | "export":
                 if not self.project.panels:
                     raise ValueError("Add panels to the active project first.")
                 if action == "preview":
+                    if arguments.grid is not None:
+                        if self._layer() != "sky":
+                            raise ValueError("Select the sky layer to set the sky preview grid.")
+                        self._set_auto_frame(arguments.grid == "auto")
                     self._preview()
                 else:
                     layer: Layer = arguments.layer or self._layer()
@@ -877,9 +907,35 @@ class ProjectWindow(QMainWindow):
 
     def _clear_preview(self) -> None:
         self._preview_project = None
+        self._preview_grid = None
+        self.preview_title.setText("Preview")
         self._display_frame = None
         self.overlap_check.setEnabled(False)
         self.viewport.set_frame(None)
+
+    @Slot(bool)
+    def _set_auto_frame(self, enabled: bool) -> None:
+        if enabled != self.project.auto_frame_preview:
+            self.project = replace(self.project, auto_frame_preview=enabled)
+            self._refresh(self.panels.currentIndex().row())
+
+    @Slot()
+    def _adopt_preview_grid(self) -> None:
+        grid = self._preview_grid
+        if self._is_running() or grid is None or self._preview_project != self.project:
+            raise ValueError("Build an automatically framed sky preview first.")
+        previous = self.project
+        composition = previous.composition if grid == previous.render else None
+        self.project = replace(
+            previous, render=grid, auto_frame_preview=False, composition=composition
+        )
+        self._preview_project = self.project
+        self._preview_grid = None
+        self._refresh(self.panels.currentIndex().row())
+        text = "Applied the preview grid to the sky export settings."
+        if previous.composition is not None and composition is None:
+            text += " Set the composition placement for the new sky grid."
+        self._report_operation(text)
 
     def _preview(self) -> None:
         if self._is_running() or not self.project.panels:
@@ -891,9 +947,10 @@ class ProjectWindow(QMainWindow):
         job.proxy_ready.connect(self._show_proxy)
         self._launch_job(job, f"Preparing {layer} preview…")
 
-    @Slot(object)
-    def _show_proxy(self, frame: DisplayFrame) -> None:
+    @Slot(object, bool)
+    def _show_proxy(self, frame: DisplayFrame, visual_only: bool) -> None:
         if self.sender() is self.job and self.cancel_button.isEnabled():
+            self.preview_title.setText("Visual Preview" if visual_only else "Preview")
             self._set_display_frame(frame)
 
     def _set_display_frame(self, frame: DisplayFrame) -> None:
@@ -1065,16 +1122,28 @@ class ProjectWindow(QMainWindow):
 
     def _finish_preview(self, job: PreviewJob) -> None:
         if job.result is not None:
+            if job.result.has_coverage:
+                self._preview_grid = job.fitted_grid
+            self.preview_title.setText("Visual Preview" if job.visual_only else "Preview")
             self._set_display_frame(job.result)
+            self._layer_controls()
             self.progress.setValue(100)
             width, height = job.result.size
+            label = (
+                "Visual sky preview (sRGB)"
+                if job.visual_only
+                else f"{job.layer.capitalize()} preview"
+            )
             text = (
-                f"{job.layer.capitalize()} preview · {width} × {height} samples."
+                f"{label} · {width} × {height} samples."
                 if job.result.has_coverage
                 else "No coverage at this preview resolution."
             )
             if job.layer == "sky" and not job.result.has_coverage:
-                text += " Set a grid that covers the sky panels in Mosaic Settings."
+                if job.project.auto_frame_preview:
+                    text += " Try a smaller selection or choose a sky grid in Mosaic Settings."
+                else:
+                    text += " Enable Auto Frame or choose a grid that covers the sky panels."
             if job.result.common_coverage is not None:
                 text += (
                     f" Both layers cover {int(job.result.common_coverage.sum()):,} preview samples."

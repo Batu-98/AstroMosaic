@@ -32,6 +32,7 @@ from astromosaic.pipeline.masking import (
 from astromosaic.pipeline.mosaic import (
     MosaicResult,
     PreviewFrame,
+    RenderSpec,
     SkyCalibrationError,
     SkyCalibrationRequirement,
 )
@@ -199,7 +200,7 @@ class MosaicJob(_ProjectJob[MosaicResult]):
 
 
 class PreviewJob(_ProjectJob[DisplayFrame]):
-    proxy_ready = Signal(object)
+    proxy_ready = Signal(object, bool)
     label = "preview"
     progress_label = "Previewing"
 
@@ -214,20 +215,26 @@ class PreviewJob(_ProjectJob[DisplayFrame]):
         super().__init__(project, parent)
         self.layer = layer
         self.band = band
+        self.fitted_grid: RenderSpec | None = None
+        self.visual_only = False
 
     def _publish_proxy(self, preview: PreviewFrame) -> None:
-        self.proxy_ready.emit(normalize_preview(preview))
+        self.proxy_ready.emit(normalize_preview(preview), preview.visual_only)
 
     def perform(self, context: JobContext) -> DisplayFrame:
         preview = (
-            preview_project(self.project, context, self._publish_proxy)
-            if self.layer == "sky" and self.band is None
+            preview_project(
+                self.project, context, self._publish_proxy, band=self.band, allow_visual=True
+            )
+            if self.layer == "sky"
             else preview_project_layer(
                 self.project, self.layer, context, self._publish_proxy, band=self.band
             )
         )
         frame = normalize_preview(preview)
         context.check_cancelled()
+        self.fitted_grid = preview.fitted_grid
+        self.visual_only = preview.visual_only
         return frame
 
 

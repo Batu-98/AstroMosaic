@@ -205,6 +205,8 @@ Use a low-resolution proxy followed by visible tiles or GPU mip levels. Cache in
 
 The CPU fallback supports pan/zoom efficiently on cached imagery. Reframing into a new sky projection can require a new coarse preview; do not equate cached image panning with interactive spherical reprojection.
 
+New desktop sky previews can fit a temporary ICRS grid to the effective WCS of the selected panels. Adopting the fit for export is an explicit project edit. A desktop visual sky preview can linearize recognized sRGB TIFF tiles before resampling. Scientific rendering keeps its linear-input and brightness requirements. [Automatic sky preview decision](docs/adr/0025-automatic-sky-preview.md)
+
 ### 6.3 WCS Reuse, Solving, and Registration
 
 The planned Phase 3.6 policy tries the following local steps in order and stops at the first solution that passes the applicable quality and geometry checks. The existing Phase 2/3.5 implementation and evidence remain Gaia-first until this revision is implemented and verified.

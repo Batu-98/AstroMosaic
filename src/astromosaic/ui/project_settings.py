@@ -128,6 +128,7 @@ class ProjectSettings(_SettingsDialog):
         project = replace(
             self.project,
             render=spec,
+            auto_frame_preview=self.project.auto_frame_preview and spec == previous,
             filter_name=self.filter.text().strip() or None,
             assume_surface_brightness=self.assume.isChecked(),
             refinement=refinement,

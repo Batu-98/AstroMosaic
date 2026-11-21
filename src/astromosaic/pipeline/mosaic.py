@@ -19,6 +19,7 @@ from astromosaic.core import Region, SourceFingerprint, Tile
 from astromosaic.core.job import DEFAULT_JOB_CONTEXT
 from astromosaic.core.job import JobContext as JobContext
 from astromosaic.core.job import MosaicCancelled as MosaicCancelled
+from astromosaic.core.masks import SKY, SourceMask
 from astromosaic.geometry import (
     PanelGeometry,
     SkyProjection,
@@ -31,7 +32,9 @@ from astromosaic.geometry.footprint import PixelBounds, raster_bounds, tan_footp
 from astromosaic.io import TIFF_SUFFIXES, XISF_SUFFIX, PanelSource, SkyMask, open_panel
 from astromosaic.io.fits_export import open_fits_mosaic
 from astromosaic.photometry import PanelCorrection
+from astromosaic.pipeline.framing import fit_preview_grid
 from astromosaic.pipeline.refinement import RefinementReport, RefinementSpec, refine_panels
+from astromosaic.pipeline.srgb_preview import SrgbPreviewSource
 from astromosaic.resampling import sample, source_window
 
 MIB = 1024**2
@@ -109,7 +112,7 @@ class MosaicResult:
 
 @dataclass(frozen=True, slots=True, eq=False)
 class PreviewFrame:
-    """Read-only linear raster over the full cropped export rectangle."""
+    """Read-only linear raster over the preview grid."""
 
     tile: Tile
     output_size: tuple[int, int]
@@ -117,9 +120,13 @@ class PreviewFrame:
     peak_reserved_bytes: int
     common_coverage: NDArray[np.bool_] | None = None
     seam_width: float | None = None
+    fitted_grid: RenderSpec | None = None
+    visual_only: bool = False
 
 
 class _RasterPanel(Protocol):
+    @property
+    def name(self) -> str: ...
     @property
     def source(self) -> PanelSource: ...
     @property
@@ -134,6 +141,7 @@ type _Scale = tuple[float, float]
 
 @dataclass(frozen=True, slots=True)
 class _Panel:
+    name: str
     source: PanelSource
     geometry: PanelGeometry
     weight: float
@@ -153,22 +161,46 @@ def sky_band_label(panel_filter: str | None, common_filter: str | None) -> str:
     return panel_filter or (common_filter or "").strip() or DEFAULT_SKY_BAND
 
 
+def _common_band(
+    sources: Sequence[PanelSource],
+    declared_filter: str | None,
+    filter_overrides: Mapping[int, str] | None = None,
+) -> tuple[str, bool]:
+    declared_filter = (declared_filter or "").strip() or None
+    overrides = filter_overrides or {}
+    filters = [
+        overrides.get(index, source.descriptor.filter_name) for index, source in enumerate(sources)
+    ]
+    bands = [sky_band_label(label, declared_filter) for label in filters]
+    band = declared_filter or bands[0]
+    if any(label != band for label in bands):
+        raise SkyCalibrationError("filter", "Expected a common FILTER across the selected panels.")
+    return band, not all(filters)
+
+
 def _set_calibration(
     header: fits.Header,
     sources: Sequence[PanelSource],
     declared_filter: str | None,
     assume_brightness: bool,
     filter_overrides: Mapping[int, str] | None = None,
+    *,
+    paths: Sequence[Path] | None = None,
 ) -> None:
     descriptors = [source.descriptor for source in sources]
-    declared_filter = (declared_filter or "").strip() or None
-    overrides = filter_overrides or {}
-    filters = [overrides.get(index, panel.filter_name) for index, panel in enumerate(descriptors)]
-    bands = [sky_band_label(label, declared_filter) for label in filters]
-    band = declared_filter or bands[0]
-    if any(label != band for label in bands):
-        raise SkyCalibrationError("filter", "Expected a common FILTER across the selected panels.")
-
+    band, missing_filters = _common_band(sources, declared_filter, filter_overrides)
+    for index, panel in enumerate(descriptors):
+        name = paths[index].name if paths is not None else f"Input panel {index + 1}"
+        if panel.icc_encoding == "srgb":
+            raise ValueError(
+                f"{name} uses sRGB-encoded samples. Scientific rendering requires linear "
+                "panels with a common brightness scale."
+            )
+        if panel.icc_encoding == "unsupported":
+            raise ValueError(
+                f"{name} has an unsupported TIFF ICC profile. Supply a linear, "
+                "color-managed copy with compatible brightness units."
+            )
     labels = [panel.unit for panel in descriptors if panel.unit is not None]
     units = [u.Unit(label, format="fits", parse_strict="silent") for label in labels]
     if units and any(unit != units[0] for unit in units):
@@ -189,7 +221,7 @@ def _set_calibration(
         header["BUNIT"] = labels[0]
     if assume_brightness:
         header.add_history("User declared a common surface-brightness scale for all panels.")
-    if not all(filters):
+    if missing_filters:
         header.add_history(f"Used {band} for panels with missing filter metadata.")
 
 
@@ -199,6 +231,7 @@ def _export_header(
     declared_filter: str | None,
     assume_brightness: bool,
     filter_overrides: Mapping[int, str],
+    paths: Sequence[Path],
 ) -> fits.Header:
     header = target.to_header()
     _set_calibration(
@@ -207,6 +240,7 @@ def _export_header(
         declared_filter,
         assume_brightness,
         filter_overrides,
+        paths=paths,
     )
     projection = target.wcs.ctype[0][5:]
     header.add_history(f"AstroMosaic {version('astromosaic')}: CPU ICRS {projection} reprojection.")
@@ -294,7 +328,12 @@ def _try_tile[P: _RasterPanel](
         reserved_bytes = output_bytes + panel.source.tile_bytes(window.region)
         if not budget.reserve(reserved_bytes):
             return None
-        indices, values = sample(panel.source.read_tile(window.region), window)
+        try:
+            tile = panel.source.read_tile(window.region)
+        except (OSError, ValueError) as error:
+            raise ValueError(f"{panel.name}: {error}") from error
+        indices, values = sample(tile, window)
+        del tile
         if correction is not None:
             correction.apply(values, px[indices], py[indices], descriptor.width, descriptor.height)
 
@@ -398,6 +437,7 @@ class _PreparedMosaic:
     spec: RenderSpec
     refinement: RefinementReport | None
     footprint_bytes: int
+    visual_only: bool = False
 
     def try_tile(
         self,
@@ -480,6 +520,8 @@ def _prepare_mosaic(
     refinement: RefinementSpec | None,
     context: JobContext,
     filter_overrides: Mapping[int, str] | None = None,
+    auto_frame: bool = False,
+    allow_visual: bool = False,
 ) -> Iterator[_PreparedMosaic]:
     if not paths:
         raise ValueError("Supply at least one FITS, TIFF, or XISF panel.")
@@ -495,11 +537,9 @@ def _prepare_mosaic(
         raise ValueError("Filter override indices must refer to input panels.")
 
     crop = spec.output_region()
-    target = PanelGeometry(spec.output_wcs(), ICRS())
-    total = crop.width * crop.height
     format_name = _output_format(destination) if destination is not None else None
     if destination is not None:
-        if total * 5 > spec.max_output_bytes:
+        if crop.width * crop.height * 5 > spec.max_output_bytes:
             raise ValueError(f"The {format_name} mosaic exceeds the configured output byte limit.")
         if destination.exists() or destination.is_symlink():
             raise FileExistsError(f"The output file already exists: {destination}")
@@ -508,6 +548,7 @@ def _prepare_mosaic(
         panels = []
         for index, (path, weight) in enumerate(zip(paths, weights, strict=True)):
             context.check_cancelled()
+            detail = ""
             try:
                 source = inputs.enter_context(
                     open_panel(
@@ -523,6 +564,8 @@ def _prepare_mosaic(
                     None: "primary WCS",
                     "primary-header": "primary WCS",
                 }[descriptor.wcs_provenance]
+                if allow_visual:
+                    detail = " Run Plate Solve for this panel."
                 if index in wcs_sidecars:
                     from astromosaic.astrometry.solve import load_solution
 
@@ -532,9 +575,28 @@ def _prepare_mosaic(
                         source.header, descriptor.width, descriptor.height
                     )
             except ValueError as error:
-                raise ValueError(f"Input panel {index + 1}: {error}") from error
-            panels.append(_Panel(source, geometry, weight, provenance))
+                name = f" ({path.name})" if allow_visual or auto_frame else ""
+                raise ValueError(f"Input panel {index + 1}{name}: {error}{detail}") from error
+            panels.append(_Panel(path.name, source, geometry, weight, provenance))
 
+        encodings = [panel.source.descriptor.icc_encoding for panel in panels]
+        visual = allow_visual and "srgb" in encodings
+        if visual:
+            for path, encoding in zip(paths, encodings, strict=True):
+                if encoding == "unsupported":
+                    raise ValueError(
+                        f"{path.name} has an unsupported TIFF ICC profile. Use matching sRGB TIFFs "
+                        "or calibrated linear panels."
+                    )
+                if encoding != "srgb":
+                    raise ValueError(
+                        f"{path.name} does not declare a supported sRGB profile. Preview sRGB "
+                        "and linear or untagged panels separately."
+                    )
+            if refinement is not None:
+                raise ValueError(
+                    "Disable relative refinement in Mosaic Settings for an sRGB preview."
+                )
         layout = panels[0].source.descriptor.channel_layout
         if any(panel.source.descriptor.channel_layout != layout for panel in panels):
             raise ValueError("Supply either all mono or all RGB panels.")
@@ -542,14 +604,45 @@ def _prepare_mosaic(
         if destination is not None:
             if channels == 3 and format_name == "FITS":
                 raise ValueError("RGB mosaics require TIFF or XISF output.")
-            if total * (4 * channels + 1) > spec.max_output_bytes:
+            if crop.width * crop.height * (4 * channels + 1) > spec.max_output_bytes:
                 raise ValueError(
                     f"The {format_name} mosaic exceeds the configured output byte limit."
                 )
 
-        header = _export_header(
-            target.wcs, panels, filter_name, assume_surface_brightness, filter_overrides
-        )
+        if auto_frame:
+            regions = []
+            for index, (path, panel) in enumerate(zip(paths, panels, strict=True)):
+                context.check_cancelled()
+                mask = sky_masks.get(index)
+                descriptor = panel.source.descriptor
+                region = (
+                    mask.bounds(SKY)
+                    if isinstance(mask, SourceMask)
+                    else Region(0, 0, descriptor.width, descriptor.height)
+                )
+                if region is None:
+                    raise ValueError(
+                        f"{path.name} has no sky in its saved mask. Edit the sky mask."
+                    )
+                regions.append((path, panel.geometry, region))
+            spec = fit_preview_grid(spec, regions, context)
+            crop = spec.output_region()
+        target = PanelGeometry(spec.output_wcs(), ICRS())
+
+        if visual:
+            band, _ = _common_band(
+                [panel.source for panel in panels], filter_name, filter_overrides
+            )
+            header = target.wcs.to_header()
+            header["FILTER"] = band
+            panels = [
+                replace(panel, source=SrgbPreviewSource(panel.source, spec.max_working_bytes))
+                for panel in panels
+            ]
+        else:
+            header = _export_header(
+                target.wcs, panels, filter_name, assume_surface_brightness, filter_overrides, paths
+            )
         if refinement is not None:
             report = refine_panels(
                 [(panel.source, panel.geometry) for panel in panels],
@@ -563,7 +656,7 @@ def _prepare_mosaic(
                 for panel, correction in zip(panels, report.corrections, strict=True)
             ]
             header = _export_header(
-                target.wcs, panels, filter_name, assume_surface_brightness, filter_overrides
+                target.wcs, panels, filter_name, assume_surface_brightness, filter_overrides, paths
             )
             if report.background is not None:
                 header.add_history(
@@ -583,7 +676,9 @@ def _prepare_mosaic(
                 if footprint is not None:
                     footprint_bytes += _FOOTPRINT_BYTES_PER_PANEL
                     panels[index] = replace(panel, footprint=footprint)
-        yield _PreparedMosaic(target, panels, channels, header, size, spec, report, footprint_bytes)
+        yield _PreparedMosaic(
+            target, panels, channels, header, size, spec, report, footprint_bytes, visual
+        )
 
 
 def render_mosaic(
@@ -732,7 +827,12 @@ def _preview_frame(
 
 
 def _preview_raster(
-    mosaic: _RasterPlan, context: JobContext, on_proxy: Callable[[PreviewFrame], None] | None
+    mosaic: _RasterPlan,
+    context: JobContext,
+    on_proxy: Callable[[PreviewFrame], None] | None,
+    *,
+    fitted_grid: RenderSpec | None = None,
+    visual_only: bool = False,
 ) -> PreviewFrame:
     coarse = _bounded_size(mosaic.size, _PROXY_EDGE)
     size = _bounded_size(mosaic.size, _PREVIEW_EDGE)
@@ -741,9 +841,13 @@ def _preview_raster(
     if on_proxy is not None and completed:
         proxy = _preview_frame(mosaic, coarse, context, 0, total)
         if proxy.tile.valid.any():
-            on_proxy(proxy)
+            on_proxy(replace(proxy, fitted_grid=fitted_grid, visual_only=visual_only))
         del proxy
-    return _preview_frame(mosaic, size, context, completed, total)
+    return replace(
+        _preview_frame(mosaic, size, context, completed, total),
+        fitted_grid=fitted_grid,
+        visual_only=visual_only,
+    )
 
 
 def preview_mosaic(
@@ -759,8 +863,10 @@ def preview_mosaic(
     context: JobContext = DEFAULT_JOB_CONTEXT,
     on_proxy: Callable[[PreviewFrame], None] | None = None,
     filter_overrides: Mapping[int, str] | None = None,
+    auto_frame: bool = False,
+    allow_visual: bool = False,
 ) -> PreviewFrame:
-    """Sample the export grid at preview raster centers without opening an output file."""
+    """Sample the saved or fitted sky grid without opening an output file."""
     with _prepare_mosaic(
         paths,
         spec,
@@ -773,5 +879,13 @@ def preview_mosaic(
         refinement=refinement,
         context=context,
         filter_overrides=filter_overrides,
+        auto_frame=auto_frame,
+        allow_visual=allow_visual,
     ) as mosaic:
-        return _preview_raster(mosaic.raster(), context, on_proxy)
+        return _preview_raster(
+            mosaic.raster(),
+            context,
+            on_proxy,
+            fitted_grid=mosaic.spec if auto_frame else None,
+            visual_only=mosaic.visual_only,
+        )
