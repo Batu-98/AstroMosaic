@@ -63,6 +63,12 @@ Phase 3.6 runs ASTAP first for new solves and uses Automatic catalog selection o
 
 The earlier Phase 3.1C Windows checks passed on offscreen CPU and native OpenGL with the solver order of that checkpoint. The mixed project reused its embedded and attached WCS, skipped its foreground-only panel, and used real Gaia DR3 and ASTAP D05 on M13. Cancelling a later ASTAP attempt reaped the process and removed staging files while keeping the first solution. The saved project reopened and preview and FITS export used the attached solutions. [Historical packaged checks](phase-3f.md#background-checks)
 
+### Beta 10 progress verification
+
+On a real M13 DSS FITS panel, the copied desktop runtime showed 10%, 32%, 37%, 42%, 77% and 100% at WCS eligibility, ASTAP preparation, search, validation, sidecar publication and completion. Gaia DR3 also showed preparation, search and validation checkpoints. While the native search was active, elapsed time updated and the stage percentage stayed steady. The two-panel ASTAP run cancelled at 68%, retained the first WCS and solved the second panel when retried. Revalidation with an existing preview also passed.
+
+The CPU and OpenGL checks ran on the secondary LS24DG30X screen. The bar measured 1,040 × 27 logical pixels in the standard dark window and 660 × 27 in the compact light window. The active percentage and Cancel Job were visible in both. [Beta 10 build record](windows-release.md#verification-status)
+
 ## Verification
 
 - Persistence tests check Unicode paths, project folder moves, all render settings and attachment references, fingerprint-matching relink, changed and missing file errors, unsupported schemas, and preservation of the original manifest after a failed atomic replacement. [Persistence tests](../tests/integration/test_project.py)

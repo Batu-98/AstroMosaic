@@ -296,10 +296,11 @@ This register tracks unresolved decisions, problems, and risks. It is not a work
 - **Opened / updated:** 2026-11-21 / 2026-11-21
 - **Affected phase:** Phase 3.1C desktop plate solving.
 - **Impact and evidence:** The desktop bar showed 0% until the first panel produced an outcome. A single-panel solve could look idle throughout its search. The desktop regression reproduced this display while the worker was active.
-- **Current assumption:** Animate the bar during preparation and solves and report the active panel's position in the eligible batch. The desktop job reports completion at panel boundaries.
-- **Next action / responsibility:** Retain the desktop regression and the real M13 Windows verification for later builds.
-- **Closure condition:** Single-panel and batch solves show activity. The batch labels advance and cancellation preserves completed outcomes.
+- **Current assumption:** Show percentages at completed solve steps and update elapsed time while the native solver searches. Display the active panel, backend and phase beside the job controls.
+- **Next action / responsibility:** Retain the stage progression, narrow-window layout and real M13 Windows checks in later builds.
+- **Closure condition:** Single-panel and batch solves report increasing percentage milestones. The status advances with the active work, and cancellation retains completed outcomes and reports partial progress.
 - **Resolution:** 2026-11-21. Beta 5 rendered distinct animation frames during real single-panel and batch M13 solves in the packaged runtime. Cancellation preserved the first WCS, retry solved the remaining panel, and revalidation animated with CPU and OpenGL previews active. [Windows build verification](docs/windows-release.md#verification-status)
+- **Follow-up:** 2026-11-21. Beta 10 adds the step-based percentage in a wider strip. The real ASTAP D05 and Gaia DR3 M13 runs verified the displayed stages, elapsed timer and cancellation in source and both packaged preview modes. The Command Panel shows its own progress during its commands. [Beta 10 progress verification](docs/phase-3b.md#beta-10-progress-verification)
 
 ### Q-027 - Dialog-free project lifecycle and headless preparation
 
