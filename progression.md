@@ -1006,6 +1006,13 @@ The table is a status summary, not a replacement for the full exit gates in Sect
 - **Related** Q-024 and [desktop sky preview](docs/phase-3c.md#desktop-workflow).
 - **Next** Use the prepared project for the relative visual preview.
 
+### 2026-11-21 - Documentation - Map the current application workflows
+
+- **Changed** Added a [workflow reference](docs/workflows.md) for desktop, CLI and batch use, including the panel, solver, layer, preview, export and recovery branches. Linked it from the guide.
+- **Verified** Parsed nine Mermaid flowcharts, checked 64 relative file and section links, and compared the documented commands and desktop controls with the beta 6 source.
+- **Related** Q-024, Q-026 and Q-027.
+- **Next** Update the reference when the implemented workflows change.
+
 ## Entry Template
 
 Copy this format into a new entry immediately above this template, preserving chronological order:

@@ -106,6 +106,7 @@ The viewport command checks a small projection and exits. The [Phase 0 evidence]
 | [progression.md](../progression.md) | Current phase, concise work history, verification, and next action. |
 | [questions_open_topics.md](../questions_open_topics.md) | Open decisions, problems, risks, and their resolutions. |
 | [Python-first architecture](../astro_mosaic_python_first_architecture_en.md) | Active technical plan, revision 3.12, covering desktop workflows, astronomy validation, automation, formats, and [Phase 7 terrain panorama registration](../astro_mosaic_python_first_architecture_en.md#105-phase-7-delivery-stages). |
+| [Application workflow reference](workflows.md) | Current desktop, CLI and batch flowcharts, including data validation, failure, cancellation and retry. |
 | [Phase 0 evidence](phase-0.md) | Platform matrix, fixture tolerances, probe results, and packaging procedure. |
 | [Phase 1 FITS reference](phase-1.md) | CLI contract, fixtures, export checks, and measured resource use. |
 | [Phase 2 astronomy reference](phase-2.md) | Offline catalog setup, WCS sidecars, masks, refinement, and acceptance evidence. |
