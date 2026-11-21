@@ -950,6 +950,13 @@ The table is a status summary, not a replacement for the full exit gates in Sect
 - **Related** Q-024, Q-025 and [Windows build verification](docs/windows-release.md#verification-status).
 - **Next** Use this local beta for the combined desktop fixes. Record fresh Windows acceptance for a future tagged package.
 
+### 2026-11-21 - Development workflow - Recorded Windows build handoff rules
+
+- **Changed** Added instructions to `AGENTS.md` for delivering versioned Windows builds, recording their source commit and verifying the changed workflow in the packaged runtime.
+- **Verified** Reviewed the rules against the release procedure and beta 3 evidence. Checked the document links and diff.
+- **Related** Q-025 and [Local Windows Build Handoff](AGENTS.md#local-windows-build-handoff).
+- **Next** Apply the handoff checks to the next Windows executable delivery.
+
 ## Entry Template
 
 Copy this format into a new entry immediately above this template, preserving chronological order:
