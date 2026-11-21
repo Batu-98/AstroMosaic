@@ -38,6 +38,7 @@ MIB = 1024**2
 DEFAULT_WORKING_BYTES = 64 * MIB
 DEFAULT_OUTPUT_BYTES = 2048 * MIB
 DEFAULT_TILE_SIZE = 128
+DEFAULT_SKY_BAND = "Unspecified"
 # Include live WCS/frame and inverse-iteration arrays, blend buffers, and endian conversion.
 _OUTPUT_BYTES_PER_PIXEL = 1024
 _TILE_FIXED_BYTES = 64 * 1024
@@ -147,6 +148,11 @@ def _footprint_reservation(panels: int, working_bytes: int) -> int:
     return reserved if panels > 1 and reserved <= working_bytes // 32 else 0
 
 
+def sky_band_label(panel_filter: str | None, common_filter: str | None) -> str:
+    """Resolve the grouping label for a sky panel."""
+    return panel_filter or (common_filter or "").strip() or DEFAULT_SKY_BAND
+
+
 def _set_calibration(
     header: fits.Header,
     sources: Sequence[PanelSource],
@@ -155,17 +161,13 @@ def _set_calibration(
     filter_overrides: Mapping[int, str] | None = None,
 ) -> None:
     descriptors = [source.descriptor for source in sources]
-    declared_filter = declared_filter.strip() if declared_filter is not None else None
+    declared_filter = (declared_filter or "").strip() or None
     overrides = filter_overrides or {}
-    filters = [
-        overrides.get(index, panel.filter_name) or declared_filter
-        for index, panel in enumerate(descriptors)
-    ]
-    band = declared_filter or filters[0]
-    if not band or any(label != band for label in filters):
-        raise SkyCalibrationError(
-            "filter", "Expected a common FILTER. Use --filter to declare missing metadata."
-        )
+    filters = [overrides.get(index, panel.filter_name) for index, panel in enumerate(descriptors)]
+    bands = [sky_band_label(label, declared_filter) for label in filters]
+    band = declared_filter or bands[0]
+    if any(label != band for label in bands):
+        raise SkyCalibrationError("filter", "Expected a common FILTER across the selected panels.")
 
     labels = [panel.unit for panel in descriptors if panel.unit is not None]
     units = [u.Unit(label, format="fits", parse_strict="silent") for label in labels]
@@ -187,8 +189,8 @@ def _set_calibration(
         header["BUNIT"] = labels[0]
     if assume_brightness:
         header.add_history("User declared a common surface-brightness scale for all panels.")
-    if declared_filter:
-        header.add_history("User provided FILTER for panels with missing filter metadata.")
+    if not all(filters):
+        header.add_history(f"Used {band} for panels with missing filter metadata.")
 
 
 def _export_header(

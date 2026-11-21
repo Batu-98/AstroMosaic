@@ -200,14 +200,14 @@ def test_desktop_project_roundtrip_progress_cancel_and_retry(
         assert load_project(manifest).panels[0].source.path == moved
         assert window.project.panels[0].optics == PanelOptics(500)
 
-        def missing_filter(*_args: object) -> None:
+        def mixed_filters(*_args: object) -> None:
             raise SkyCalibrationError("filter", "Expected a common FILTER.")
 
         with monkeypatch.context() as patch:
-            patch.setattr(mosaic_job, "preview_project", missing_filter)
+            patch.setattr(mosaic_job, "preview_project", mixed_filters)
             click(window.preview_button)
             until(lambda: window.job is None)
-        assert "Set Common filter in Mosaic Settings" in window.status.text()
+        assert "Select a Sky band" in window.status.text()
         assert window.status.text() in window.command_panel.output.toPlainText().splitlines()
 
         with monkeypatch.context() as patch:

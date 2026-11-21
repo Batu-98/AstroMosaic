@@ -117,7 +117,7 @@ def test_infeasible_jobs_leave_no_output_or_pixel_read(
     assert not list(tmp_path.glob("*.part"))
 
 
-def test_incomplete_wcs_and_panel_metadata_require_explicit_input(tmp_path: Path) -> None:
+def test_default_filter_preserves_calibration_requirements(tmp_path: Path) -> None:
     source = tmp_path / "source.fits"
     write_smoke_panel(source)
     with fits.open(source, do_not_scale_image_data=True) as hdus:
@@ -128,11 +128,11 @@ def test_incomplete_wcs_and_panel_metadata_require_explicit_input(tmp_path: Path
     missing = tmp_path / "missing-labels.fits"
     fits.writeto(missing, pixels, header=header)
     output = tmp_path / "mosaic.fits"
-    with pytest.raises(SkyCalibrationError, match="common FILTER") as missing_filter:
-        render_mosaic([missing], output, SPEC)
-    assert missing_filter.value.requirement == "filter"
+    with pytest.raises(SkyCalibrationError, match="common FILTER") as mixed_filters:
+        render_mosaic([source, missing], output, SPEC, assume_surface_brightness=True)
+    assert mixed_filters.value.requirement == "filter"
     with pytest.raises(SkyCalibrationError, match="surface-brightness BUNIT") as missing_brightness:
-        render_mosaic([missing], output, SPEC, filter_name="L")
+        render_mosaic([missing], output, SPEC)
     assert missing_brightness.value.requirement == "brightness"
 
     pixel_flux = tmp_path / "pixel-flux.fits"
@@ -149,12 +149,17 @@ def test_incomplete_wcs_and_panel_metadata_require_explicit_input(tmp_path: Path
         render_mosaic([missing_wcs], output, SPEC)
 
     assert (
-        render_mosaic(
-            [missing], output, SPEC, filter_name="L", assume_surface_brightness=True
-        ).covered_pixels
-        == 63
+        render_mosaic([missing], output, SPEC, assume_surface_brightness=True).covered_pixels == 63
     )
     exported = fits.getheader(output)
-    assert exported["FILTER"] == "L"
+    assert exported["FILTER"] == "Unspecified"
     assert "BUNIT" not in exported
+    assert any(
+        "Used Unspecified for panels with missing filter metadata" in line
+        for line in exported["HISTORY"]
+    )
     assert any("User declared a common" in line for line in exported["HISTORY"])
+
+    declared = tmp_path / "declared.fits"
+    render_mosaic([missing], declared, SPEC, filter_name="L", assume_surface_brightness=True)
+    assert fits.getheader(declared)["FILTER"] == "L"

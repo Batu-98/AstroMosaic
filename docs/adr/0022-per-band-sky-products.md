@@ -5,7 +5,7 @@
 
 ## Decision
 
-Resolve sky membership from explicit panel assignments, embedded filter labels, and the declared common fallback. Discovery verifies the included source references. Save explicit assignments in project manifest version 6 and record the assignment in sky export history. Validate units, layout, masks, and geometry for the selected band and render its members on the saved grid. A band can carry mono or RGB data at its own declared brightness scale.
+Resolve sky membership from explicit panel assignments, embedded filter labels, the declared common fallback, and finally the `Unspecified` default. Discovery verifies the included source references. Save explicit assignments in project manifest version 6 and record the assignment in sky export history. Validate units, layout, masks, and geometry for the selected band and render its members on the saved grid. A band can carry mono or RGB data at its own declared brightness scale.
 
 Use explicit destinations and the existing batch result and cancellation behavior for jobs that need several bands. Each completed file is independently usable. The ordinary layer renderer still applies the common-filter sky contract when a band is unspecified.
 

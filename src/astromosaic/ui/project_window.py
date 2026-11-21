@@ -82,8 +82,8 @@ _Job = (
 )
 _LAYERS: tuple[Layer, ...] = ("sky", "foreground", "composition")
 _CALIBRATION_GUIDANCE: dict[SkyCalibrationRequirement, str] = {
-    "filter": "Set Common filter in Mosaic Settings for unlabeled panels. "
-    "For different filters, select a Sky band.",
+    "filter": "Select a Sky band when panels have different filter labels. "
+    "Use Common filter in Mosaic Settings to assign unlabeled panels to a known band.",
     "brightness": "Use linear panels with compatible brightness units. For linear panels on a "
     "shared scale, select Declare a common surface-brightness scale in Mosaic Settings.",
 }
@@ -371,8 +371,7 @@ class ProjectWindow(QMainWindow):
                 label = self.project.panels[index].sky_band(
                     info.filter_name, self.project.filter_name
                 )
-                if label is not None:
-                    bands[label] = None
+                bands[label] = None
         with QSignalBlocker(self.band_box):
             self.band_box.clear()
             self.band_box.addItem("Select a band" if len(bands) > 1 else "All sky panels")

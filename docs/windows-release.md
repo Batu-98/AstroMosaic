@@ -53,7 +53,7 @@ Download public DSS reference images from their archives for optional reproducti
 
 ## Verification status
 
-The initial source beta is tagged `v0.1.0b1`. The current development version on `main` is `0.1.0b3`. The Phase 6E local verification record and ZIPs in `.tooling/phase6e-20261119/artifacts/` identify the tested `0.1.0b1` build and its SHA-256 hashes. [Phase 6E evidence](phase-6.md#local-windows-lifecycle-and-package-results) · [GitHub releases](https://github.com/Batu-98/AstroMosaic/releases)
+The initial source beta is tagged `v0.1.0b1`. The current development version on `main` is `0.1.0b4`. The Phase 6E local verification record and ZIPs in `.tooling/phase6e-20261119/artifacts/` identify the tested `0.1.0b1` build and its SHA-256 hashes. [Phase 6E evidence](phase-6.md#local-windows-lifecycle-and-package-results) · [GitHub releases](https://github.com/Batu-98/AstroMosaic/releases)
 
 The verified local beta 3 desktop is in `dist/AstroMosaic-0.1.0b3-windows-x64/`. Its `BUILD-INFO.json` records the source commit, launcher hash and test results. The main window title shows `AstroMosaic 0.1.0b3 (Beta)`. Windows CPU and OpenGL checks verified that the Command Panel opens at startup, preview diagnostics identify missing settings, and the recovered two-panel project previews successfully. [Command Panel workflow](phase-4c.md#desktop-workflow) · [Build Preview workflow](phase-3c.md#desktop-workflow)
 

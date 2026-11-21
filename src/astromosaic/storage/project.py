@@ -71,6 +71,7 @@ from astromosaic.pipeline.mosaic import (
     _write_raster,
     preview_mosaic,
     render_mosaic,
+    sky_band_label,
 )
 from astromosaic.pipeline.refinement import RefinementSpec, validate_refinement_inputs
 
@@ -136,8 +137,8 @@ class ProjectPanel:
         ):
             raise ValueError("Supply a nonempty band override using printable FITS characters.")
 
-    def sky_band(self, embedded: str | None, fallback: str | None) -> str | None:
-        return self.band_override or embedded or ((fallback or "").strip() or None)
+    def sky_band(self, embedded: str | None, fallback: str | None) -> str:
+        return sky_band_label(self.band_override or embedded, fallback)
 
     @property
     def foreground_tag(self) -> ForegroundSuggestion | None:
@@ -417,8 +418,6 @@ def project_sky_bands(project: MosaicProject, context: JobContext) -> dict[str, 
                 if source.descriptor.fingerprint != panel.source.fingerprint:
                     raise ValueError("The source changed during band discovery.")
                 label = panel.sky_band(source.descriptor.filter_name, project.filter_name)
-            if label is None:
-                raise ValueError("Assign a sky band or supply an embedded FILTER.")
         except (OSError, ValueError, OverflowError) as error:
             raise ValueError(f"Panel {index + 1} ({panel.source.path.name}): {error}") from error
         bands.setdefault(label, []).append(index)

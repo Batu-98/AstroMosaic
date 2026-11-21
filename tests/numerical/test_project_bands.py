@@ -152,11 +152,26 @@ def test_bands_preserve_independent_values_and_wcs(tmp_path: Path) -> None:
         load_project(manifest)
 
 
+def test_unlabeled_panel_has_a_separate_selectable_band(tmp_path: Path) -> None:
+    project, _, _ = _fixture(tmp_path)
+    project = replace(project, filter_name=None)
+    context = JobContext()
+    assert project_sky_bands(project, context) == {"H-alpha": [0], "O III": [1], "Unspecified": [2]}
+    assert validate_project_sky(project, context, band="Unspecified").panels == 1
+
+    preview = preview_project(project, context, band="Unspecified")
+    with fits.open(project.panels[2].source.path) as source:
+        expected = source[0].data[project.render.output_region().slices].copy()
+    expected[2, 2:4] = np.nan
+    np.testing.assert_array_equal(preview.tile.pixels, expected)
+    output = tmp_path / "Unspecified.fits"
+    assert render_project(project, output, context, band="Unspecified").panels == 1
+    assert fits.getheader(output)["FILTER"] == "Unspecified"
+
+
 def test_band_preflight_reports_bad_membership_units_and_layout(tmp_path: Path) -> None:
     project, _, _ = _fixture(tmp_path)
     context = JobContext()
-    with pytest.raises(ValueError, match="Panel 3 .*Assign a sky band"):
-        project_sky_bands(replace(project, filter_name=None), context)
     with pytest.raises(ValueError, match="Unknown sky band.*H-alpha, O III"):
         validate_project_sky(project, context, band="h-alpha")
     with pytest.raises(ValueError, match="RGB mosaics require"):

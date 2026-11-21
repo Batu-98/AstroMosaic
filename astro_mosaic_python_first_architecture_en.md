@@ -462,7 +462,7 @@ Start with [Phase 5A XISF interchange](docs/phase-5a.md). Use the shared panel a
 
 [Phase 5B](docs/phase-5b.md) adds ICRS ZEA as an equal-area sky grid. Save the projection choice, preserve legacy TAN interpretation, and share preview and export geometry. Exercise longitude wrap, crop and rotation, the antipode, masked samples, and independently reopened WCS in every supported sky export format. Verify Qt-free CLI and desktop workflows with the copied Windows packages.
 
-[Phase 5C](docs/phase-5c.md) renders one filter band's sky panels on the saved grid. Resolve explicit panel assignments and embedded labels, validate band-local units and layout, and retain independent coverage and WCS in each output. Verify desktop selection, Qt-free automation, batch cancellation, and independent reopening of the mono and RGB products.
+[Phase 5C](docs/phase-5c.md) renders one filter band's sky panels on the saved grid. Resolve explicit panel assignments, embedded labels and a declared common filter before assigning the `Unspecified` default. Validate band-local units and layout, and retain independent coverage and WCS in each output. Verify desktop selection, Qt-free automation, batch cancellation, and independent reopening of the mono and RGB products.
 
 ### 10.4 Phase 6 Delivery Stages
 

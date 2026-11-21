@@ -8,13 +8,13 @@
 - AstroMosaic's version 1 `ImageDescription` starts with `AstroMosaic TIFF 1` followed by a newline and newline-delimited ASCII FITS header cards. WCS uses the same zero-based pixel centers in array access and FITS `CRPIX` convention in the cards. The header also carries the common `FILTER`, `BUNIT` if known, and processing history.
 - The AstroMosaic description can be used without coverage on input. If it has a SubIFD, the SubIFD must be a same-size unscaled byte grayscale raster with 1 for covered and 0 for excluded. The first and only top-level image always holds the science pixels. Export writes the description and coverage SubIFD together so success leaves one complete file.
 - TIFFs without this description can be inspected and solved locally. Existing source-bound `solve -o` sidecars work with `mosaic --wcs`. RGB solving uses its green plane as the astrometry signal, with the shared masks. A supplied binary FITS `--sky-mask` uses the original panel coordinates and intersects the TIFF coverage.
-- Mono TIFF and mono FITS can share a job when their brightness scales and filters agree. Use `--filter` and `--assume-surface-brightness` to declare missing metadata. Relative photometric refinement accepts mono panels. RGB jobs use resolved WCS and export to TIFF. Output TIFF uses uncompressed little-endian float32 and interleaved RGB when applicable.
+- Mono TIFF and mono FITS can share a job when their brightness scales and filter labels agree. Files with no filter label use `Unspecified` by default. Use `--filter` to assign a known common label and `--assume-surface-brightness` to declare a shared brightness scale for compatible linear inputs. Relative photometric refinement accepts mono panels. RGB jobs use resolved WCS and export to TIFF. Output TIFF uses uncompressed little-endian float32 and interleaved RGB when applicable.
 - Uncompressed reads fetch row fragments from the intersecting strips or tiles. Compressed reads reserve scratch for one decoded segment plus the requested window. If a single encoded segment exceeds the budget even for a one-pixel request, use a larger working budget or a source with smaller strips or tiles.
 
 Example for two already-solved RGB panels with no embedded filter or brightness label:
 
 ```shell
-astromosaic mosaic data/panel-a.tif data/panel-b.tif --wcs 1=output/panel-a.wcs.json --wcs 2=output/panel-b.wcs.json --filter RGB --assume-surface-brightness --center 359.999 20 --scale 7.2 --size 1500 900 --progress -o output/mosaic.tiff
+astromosaic mosaic data/panel-a.tif data/panel-b.tif --wcs 1=output/panel-a.wcs.json --wcs 2=output/panel-b.wcs.json --assume-surface-brightness --center 359.999 20 --scale 7.2 --size 1500 900 --progress -o output/mosaic.tiff
 astromosaic inspect output/mosaic.tiff
 ```
 

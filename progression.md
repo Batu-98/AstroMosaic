@@ -9,7 +9,7 @@ Use this file for concise development history and handoff state. Detailed techni
 - **Current stage:** [Phases 6A–6D](docs/phase-6.md) and [local 6E](docs/phase-6.md#local-windows-lifecycle-and-package-results) passed on Windows. [Phases 7A–7C](docs/phase-7.md#7c-real-observation-results) froze the real controls and verified the manual fit and optional matching. [Phase 7D](docs/phase-7.md#7d-real-observation-results) completed the calibrated comparison. The camera-rotation candidates miss the held-out target, so translation and similarity remain the supported terrain models. Clean-machine acceptance and review of the native distribution remain open. Linux and macOS support is deferred.
 - **Available artifacts:** The verified local 0.1.0b3 desktop is in `dist/AstroMosaic-0.1.0b3-windows-x64/` with its build record. The 0.1.0b2 desktop and CLI archives are in `.tooling/plate-solve-phase7-20261121/artifacts/`. The 0.1.0b1 Phase 6E archives are in `.tooling/phase6e-20261119/artifacts/`. The [application test guide](docs/application-tests.md) and [extended cases](docs/application-tests-extension.md) describe the ignored real-observation fixtures. [Release guide](docs/windows-release.md#verification-status)
 - **Implementation / verification:** Eight corrected lifecycle sequences and 54 scientific outputs passed across source and portable CPU and OpenGL desktop and CLI. The regular packaged launcher opened and exported M17. Both CLIs repeated the 14 real solve cases. Twenty real-observation tests, Ruff and mypy passed. The preceding Phase 5 Windows baseline passed 179 tests, and the [dense ASTAP follow-up](docs/phase-36-results.md#dense-astap-catalog-verification) passed 42 targeted regressions.
-- **Version control:** The current development version on `main` is `0.1.0b3`. The first published source beta uses the annotated Git tag `v0.1.0b1`. [AstroMosaic GitHub repository](https://github.com/Batu-98/AstroMosaic)
+- **Version control:** The current development version on `main` is `0.1.0b4`. The first published source beta uses the annotated Git tag `v0.1.0b1`. [AstroMosaic GitHub repository](https://github.com/Batu-98/AstroMosaic)
 - **Next action:** Start 7E with validated translation and similarity geometry, tile sampling, and compatibility for saved translations. Keep the 7C SIFT provider optional pending clean-machine checks and native distribution review under Q-005. Tagged release packaging and fresh Windows acceptance remain open. [Release verification status](docs/windows-release.md#verification-status)
 - **Open dependencies:** Q-003 tracks reference data and frozen criteria. Q-010 tracks real-scene diagnostics and the proposed terrain models. Q-016 tracks astrometry. Q-005, Q-009 and Q-020 track distribution and format work. Q-008 tracks deferred platforms and Q-011 deferred visual fill. Resolved Q-022 and Q-023 record the Windows lifecycle and ZEA results.
 
@@ -956,6 +956,13 @@ The table is a status summary, not a replacement for the full exit gates in Sect
 - **Verified** Reviewed the rules against the release procedure and beta 3 evidence. Checked the document links and diff.
 - **Related** Q-025 and [Local Windows Build Handoff](AGENTS.md#local-windows-build-handoff).
 - **Next** Apply the handoff checks to the next Windows executable delivery.
+
+### 2026-11-21 - Sky preview - Defaulted unlabeled panels to Unspecified
+
+- **Changed** Shared the `Unspecified` fallback between desktop band selection, CLI project discovery and sky rendering. Assigned version `0.1.0b4` for the Windows handoff.
+- **Verified** Fifteen focused tests passed. The saved two-panel project lists both panels in `Unspecified` and reaches brightness validation. Explicit labels still form their own groups. Ruff, mypy and the Poetry lock check passed.
+- **Related** Q-024 and [sky band selection](docs/phase-5c.md).
+- **Next** Verify the automatic label and a successful two-panel preview in the beta 4 desktop package.
 
 ## Entry Template
 

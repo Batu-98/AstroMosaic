@@ -25,6 +25,7 @@ from astromosaic.core import Region
 from astromosaic.core.masks import ForegroundTag
 from astromosaic.geometry import SkyProjection
 from astromosaic.geometry.image import CompositionSpec, LayerPlacement
+from astromosaic.pipeline.mosaic import DEFAULT_SKY_BAND
 from astromosaic.pipeline.refinement import RefinementSpec
 from astromosaic.storage.project import (
     FileReference,
@@ -79,6 +80,8 @@ class ProjectSettings(_SettingsDialog):
             f"{crop.x}, {crop.y}, {crop.width}, {crop.height}" if crop else "",
         )
         self.filter = self.field("Common filter", project.filter_name or "")
+        self.filter.setPlaceholderText(DEFAULT_SKY_BAND)
+        self.filter.setToolTip("Assign a known label to panels without a filter or band override.")
         self.assume = QCheckBox("Declare a common surface-brightness scale")
         self.assume.setToolTip("Use this for already-linear panels that share a brightness scale.")
         self.assume.setChecked(project.assume_surface_brightness)

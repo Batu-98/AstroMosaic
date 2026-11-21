@@ -29,7 +29,7 @@ The panel control table opens in **Overview**. Choose **Optics**, **Files**, or 
 
 Choose **TAN** or **ZEA** under **Mosaic Settings → Sky projection**. Set a new composition placement after changing the projection. [Sky projection](phase-5b.md)
 
-Choose an available **Sky band** for a band-specific preview and export. Assign a filter label with **Panel Settings → Sky band override**. [Per-band workflow](phase-5c.md)
+Choose an available **Sky band** for a band-specific preview and export. Panels without a filter label or declared common filter use the `Unspecified` band. Assign a known label with **Panel Settings → Sky band override**. [Per-band workflow](phase-5c.md)
 
 Choose **XISF mosaic** in the export dialog for a single file containing linear samples and coverage. **Add Panels** can reopen the exported sky image or another supported uncompressed XISF file. [XISF interchange](phase-5a.md)
 
