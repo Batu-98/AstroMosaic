@@ -276,6 +276,17 @@ This register tracks unresolved decisions, problems, and risks. It is not a work
 - **Closure condition:** Explain the failure in the desktop log and verify a reopened preview that includes each panel and their common coverage.
 - **Resolution:** 2026-11-21. The Command Panel identifies the missing settings. A separate project with linear-light visual copies and a fitted grid previewed both panels on native CPU and OpenGL. The source and portable CLI validated the project. The original file hashes matched.
 
+### Q-025 - Identify the local Windows build after source changes
+
+- **Status / priority:** Resolved / P1
+- **Opened / updated:** 2026-11-21 / 2026-11-21
+- **Affected phase:** Local Windows desktop builds and handoff.
+- **Impact and evidence:** The earlier `0.1.0b2` executable came from a snapshot that preceded the Command Panel startup and sky preview diagnostic fixes. The merged source still reported the same version.
+- **Current assumption:** Use the desktop title, versioned runtime folder and recorded source commit to identify a local beta. [Windows build workflow](docs/windows-release.md#build-portable-windows-packages)
+- **Next action / responsibility:** Verify the title and the affected workflows on each successor build used for handoff.
+- **Closure condition:** Provide a separately identified executable from the merged source and verify both desktop changes in the packaged runtime.
+- **Resolution:** 2026-11-21. Local beta 3 reports its own title and carries the source revision and launcher hash. The Command Panel and preview checks passed on native Windows CPU and OpenGL.
+
 ## New Entry Template
 
 ```markdown
