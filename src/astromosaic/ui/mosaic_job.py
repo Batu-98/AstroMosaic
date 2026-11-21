@@ -109,8 +109,6 @@ class PanelInspectionJob(_ProjectJob[tuple[PanelInspection, ...]]):
 
 class PlateSolveJob(_ProjectJob[None]):
     label = "plate solve"
-    progress_label = "Solving"
-    progress_units = "panels"
 
     def __init__(
         self,
@@ -153,7 +151,7 @@ class PlateSolveJob(_ProjectJob[None]):
                 self.eligibility_seconds = monotonic() - started
             self.total = len(indices)
             if self.total:
-                self._progress(0, self.total)
+                self.progress.emit(0, self.total)
             for done, index in enumerate(indices, 1):
                 context.check_cancelled()
                 outcome = solve_project_panel(
@@ -165,7 +163,7 @@ class PlateSolveJob(_ProjectJob[None]):
                     job_budget=self.batch_budget,
                 )
                 self.outcomes.append(outcome)
-                self._progress(done, self.total)
+                self.progress.emit(done, self.total)
                 if self.batch_budget is not None and outcome.status == "budget-exhausted":
                     self.batch_budget.check()
                     if outcome.budget is not None and outcome.budget["limiting_scope"] == "job":

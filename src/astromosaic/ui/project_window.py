@@ -874,6 +874,8 @@ class ProjectWindow(QMainWindow):
         job.finished.connect(self._finished)
         self._set_running()
         self.progress.setValue(0)
+        if isinstance(job, PlateSolveJob):
+            self.progress.setRange(0, 0)
         self._report_operation(message)
         job.start()
 
@@ -903,8 +905,12 @@ class ProjectWindow(QMainWindow):
 
     @Slot(object, object)
     def _progress(self, done: int, total: int) -> None:
-        self.progress.setValue((100 * done) // total)
         job = self.job
+        if isinstance(job, PlateSolveJob):
+            if done < total and self.cancel_button.isEnabled():
+                self.status.setText(f"Solving panel {done + 1:,} of {total:,}…")
+            return
+        self.progress.setValue((100 * done) // total)
         if job is not None and self.cancel_button.isEnabled():
             self.status.setText(f"{job.progress_label} {done:,} / {total:,} {job.progress_units}.")
 
@@ -952,6 +958,7 @@ class ProjectWindow(QMainWindow):
         self._solve_outcomes = {outcome.index: outcome for outcome in job.outcomes}
         self._refresh(self.panels.currentIndex().row())
         completed = len(job.outcomes)
+        self.progress.setRange(0, 100)
         if job.total:
             self.progress.setValue(100 * completed // job.total)
         summary = f"{solved} solved, {completed - solved} failed."

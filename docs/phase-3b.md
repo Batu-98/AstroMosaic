@@ -55,7 +55,7 @@ On Windows 11 x64, separate desktop processes checked and restored the real Gaia
 
 ## Desktop Plate Solving
 
-1. Set the local solver paths and choose **Plate Solve** in the Panels controls. The job uses the selected sky layer inputs, each panel's optical hints and sky mask, and the saved backend settings. It shows how many panels need a WCS and reports progress as they finish. It reuses validated embedded WCS and sidecars.
+1. Set the local solver paths and choose **Plate Solve** in the Panels controls. The job uses the selected sky layer inputs, each panel's optical hints and sky mask, and the saved backend settings. The progress bar animates while the job is running. After checking for reusable embedded WCS and sidecars, the status shows the active panel and the number of panels to solve.
 2. Plate Solve starts directly from a saved or untitled project. A saved project writes new sidecars in a sibling folder such as `Night.astromosaic.wcs`. An untitled project writes them in the `wcs` subfolder of the local AstroMosaic application data directory. Saving the project retains links to previously written sidecars. Include those files when transferring the project. Each completed solution is written atomically with its source and sky mask identity.
 3. Read each attempted panel's result in the list and hover over the row to see the solver attempts and errors. **Cancel Job** finishes cleanup and attaches any completed results. Choose **Plate Solve** again to retry panels that still need a valid WCS. Preview and export use the attached WCS. Save the project to keep the links across sessions. [Desktop regression](../tests/integration/test_desktop_plate_solve.py)
 

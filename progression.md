@@ -971,6 +971,13 @@ The table is a status summary, not a replacement for the full exit gates in Sect
 - **Related** Q-024, Q-025 and [Windows build verification](docs/windows-release.md#verification-status).
 - **Next** Use beta 4 for the automatic band workflow and retain the real TIFF check for subsequent Windows packaging.
 
+### 2026-11-21 - Plate Solve - Show activity while solving a panel
+
+- **Changed** Enabled a busy progress bar during eligibility checks and solving. The status names the active panel in the batch and advances at every panel boundary. Assigned version `0.1.0b5` for the Windows handoff.
+- **Verified** The new assertion reproduced the fixed 0% bar on the earlier code. After the fix, 19 targeted tests passed, including cancellation with partial outcomes and a retry. Ruff, mypy and the Poetry lock check passed.
+- **Related** Q-026 and [desktop plate solving](docs/phase-3b.md#desktop-plate-solving).
+- **Next** Verify the animation during a real solve in the portable Windows runtime.
+
 ## Entry Template
 
 Copy this format into a new entry immediately above this template, preserving chronological order:

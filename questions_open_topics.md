@@ -288,6 +288,16 @@ This register tracks unresolved decisions, problems, and risks. It is not a work
 - **Closure condition:** Provide a separately identified executable from the merged source and verify both desktop changes in the packaged runtime.
 - **Resolution:** 2026-11-21. Local beta 3 reports its own title and carries the source revision and launcher hash. The Command Panel and preview checks passed on native Windows CPU and OpenGL.
 
+### Q-026 - Plate Solve activity before the first panel finishes
+
+- **Status / priority:** Investigating / P2
+- **Opened / updated:** 2026-11-21 / 2026-11-21
+- **Affected phase:** Phase 3.1C desktop plate solving.
+- **Impact and evidence:** The desktop bar showed 0% until the first panel produced an outcome. A single-panel solve could look idle throughout its search. The desktop regression reproduced this display while the worker was active.
+- **Current assumption:** Animate the bar during preparation and solves and report the active panel's position in the eligible batch. The solver does not report a within-panel completion fraction.
+- **Next action / responsibility:** Verify the updated widget with real offline solves in the Windows bundle.
+- **Closure condition:** Single-panel and batch solves show activity. The batch labels advance and cancellation preserves completed outcomes.
+
 ## New Entry Template
 
 ```markdown
