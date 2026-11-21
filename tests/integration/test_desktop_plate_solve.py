@@ -202,6 +202,7 @@ def test_desktop_plate_solve_skips_reusable_wcs_and_retries_unsolved_panels(
             )
         )
         assert "Panel 3 of 3 · panel-5.fits" in window.status.text()
+        assert window.command_panel.progress.isHidden()
         assert window.progress.width() > window.width() // 2 and window.progress.height() >= 24
         assert window.progress_elapsed.isVisible()
         in_progress = window.progress.value()

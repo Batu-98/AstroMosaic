@@ -176,6 +176,7 @@ class CommandPanel(QWidget):
         self.progress.setAccessibleName("Command progress")
         self.progress.setRange(0, 100)
         self.progress.setValue(0)
+        self.progress.hide()
         feedback.addWidget(self.progress)
         layout.addLayout(feedback)
 
@@ -200,6 +201,7 @@ class CommandPanel(QWidget):
         enabled = self._available and not self.is_running
         self.entry.setEnabled(enabled)
         self.run_button.setEnabled(enabled)
+        self.progress.setVisible(self.is_running)
 
     @Slot()
     def _previous(self) -> None:
