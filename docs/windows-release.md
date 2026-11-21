@@ -30,6 +30,8 @@ Get-FileHash -Algorithm SHA256 "dist/*-${releaseVersion}-windows-x64.zip"
 
 The builder includes the application license, `THIRD_PARTY_NOTICES.md`, wheel and supplemental notices in `ThirdParty`, and a list of the bundled native files. The index uses the PyInstaller archive, bundled extension modules and installed wheel metadata to record component versions for each launcher. Review the inventory when the lockfile, Python provider or PyInstaller build changes. [Build script](../packaging/build-windows.ps1) · [Supplemental notice provenance](../packaging/notices/README.md)
 
+Give each successive local beta its own version and folder. Record the exact source commit with the executable and verify the version in the desktop title and the CLI output. Open the executable from its matching folder so Windows loads the bundled `_internal` runtime.
+
 ## Third-party source and runtime materials
 
 | Shipped component | Release materials |
@@ -51,6 +53,6 @@ Download public DSS reference images from their archives for optional reproducti
 
 ## Verification status
 
-The initial source beta is tagged `v0.1.0b1`. The current development version on `main` is `0.1.0b2`. The Phase 6E local verification record and ZIPs in `.tooling/phase6e-20261119/artifacts/` identify the tested `0.1.0b1` build and its SHA-256 hashes. [Phase 6E evidence](phase-6.md#local-windows-lifecycle-and-package-results) · [GitHub releases](https://github.com/Batu-98/AstroMosaic/releases)
+The initial source beta is tagged `v0.1.0b1`. The current development version on `main` is `0.1.0b3`. The Phase 6E local verification record and ZIPs in `.tooling/phase6e-20261119/artifacts/` identify the tested `0.1.0b1` build and its SHA-256 hashes. [Phase 6E evidence](phase-6.md#local-windows-lifecycle-and-package-results) · [GitHub releases](https://github.com/Batu-98/AstroMosaic/releases)
 
 The local `0.1.0b2` development bundles in `.tooling/plate-solve-phase7-20261121/artifacts/` use a hashed working-tree snapshot and the locked dependencies. The desktop starts Plate Solve directly in untitled projects. The standard CLI provides the manual terrain fit. A separate experimental CLI also bundles the measured headless OpenCV wheel for automatic terrain matching. The tagged release build, fresh Windows 11 x64 acceptance and native redistribution review remain open. [Desktop solve workflow](phase-3b.md#desktop-plate-solving) · [Phase 7 commands](phase-7.md#run-the-automatic-terrain-fit) · [Clean-machine check](phase-3f.md#pending-clean-machine-check)

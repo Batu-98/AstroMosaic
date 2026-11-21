@@ -9,8 +9,8 @@ Use this file for concise development history and handoff state. Detailed techni
 - **Current stage:** [Phases 6A–6D](docs/phase-6.md) and [local 6E](docs/phase-6.md#local-windows-lifecycle-and-package-results) passed on Windows. [Phases 7A–7C](docs/phase-7.md#7c-real-observation-results) froze the real controls and verified the manual fit and optional matching. [Phase 7D](docs/phase-7.md#7d-real-observation-results) completed the calibrated comparison. The camera-rotation candidates miss the held-out target, so translation and similarity remain the supported terrain models. Clean-machine acceptance and review of the native distribution remain open. Linux and macOS support is deferred.
 - **Available artifacts:** The local 0.1.0b2 desktop, standard CLI and experimental SIFT CLI ZIPs and checksums are in `.tooling/plate-solve-phase7-20261121/artifacts/`. The 0.1.0b1 Phase 6E archives remain in `.tooling/phase6e-20261119/artifacts/`. The [application test guide](docs/application-tests.md) and [extended cases](docs/application-tests-extension.md) describe the ignored real-observation fixtures. [Release guide](docs/windows-release.md#verification-status)
 - **Implementation / verification:** Eight corrected lifecycle sequences and 54 scientific outputs passed across source and portable CPU and OpenGL desktop and CLI. The regular packaged launcher opened and exported M17. Both CLIs repeated the 14 real solve cases. Twenty real-observation tests, Ruff and mypy passed. The preceding Phase 5 Windows baseline passed 179 tests, and the [dense ASTAP follow-up](docs/phase-36-results.md#dense-astap-catalog-verification) passed 42 targeted regressions.
-- **Version control:** The current development version on `main` is `0.1.0b2`. The first published source beta uses the annotated Git tag `v0.1.0b1`. [AstroMosaic GitHub repository](https://github.com/Batu-98/AstroMosaic)
-- **Next action:** Start 7E with validated translation and similarity geometry, tile sampling, and compatibility for saved translations. Keep the 7C SIFT provider optional pending clean-machine checks and native distribution review under Q-005. The tagged `0.1.0b2` release build and fresh Windows acceptance remain open. [Release verification status](docs/windows-release.md#verification-status)
+- **Version control:** The current development version on `main` is `0.1.0b3`. The first published source beta uses the annotated Git tag `v0.1.0b1`. [AstroMosaic GitHub repository](https://github.com/Batu-98/AstroMosaic)
+- **Next action:** Start 7E with validated translation and similarity geometry, tile sampling, and compatibility for saved translations. Keep the 7C SIFT provider optional pending clean-machine checks and native distribution review under Q-005. Tagged release packaging and fresh Windows acceptance remain open. [Release verification status](docs/windows-release.md#verification-status)
 - **Open dependencies:** Q-003 tracks reference data and frozen criteria. Q-010 tracks real-scene diagnostics and the proposed terrain models. Q-016 tracks astrometry. Q-005, Q-009 and Q-020 track distribution and format work. Q-008 tracks deferred platforms and Q-011 deferred visual fill. Resolved Q-022 and Q-023 record the Windows lifecycle and ZEA results.
 
 ## Phase Overview
@@ -935,6 +935,13 @@ The table is a status summary, not a replacement for the full exit gates in Sect
 - **Verified** All 207 tests passed on native Windows with OpenGL and the isolated SIFT provider. The desktop checks used the second display. The standard environment passed seven terrain checks with four optional provider checks skipped. Ruff, mypy, the Poetry lock check and local documentation link checks passed.
 - **Related** Q-003, Q-010, Q-012 and Q-024.
 - **Next** Use the verified translation and similarity controls for Phase 7E. Include the desktop diagnostic checks in the next Windows package verification.
+
+### 2026-11-21 - Windows build - Assigned beta 3 to the merged desktop fixes
+
+- **Changed** Set the development version to `0.1.0b3` for a new local Windows build from the merged source.
+- **Verified** The older `0.1.0b2` executable matches its archived launcher. Its source snapshot precedes the Command Panel startup and sky preview diagnostic changes.
+- **Related** Q-012, Q-024 and the [Windows build workflow](docs/windows-release.md#build-portable-windows-packages).
+- **Next** Build from this source revision and verify the title, Command Panel and Build Preview in the resulting Windows package.
 
 ## Entry Template
 
