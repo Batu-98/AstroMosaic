@@ -19,6 +19,7 @@ from astromosaic.cli.render_options import (
     render_options,
     with_render_reporting,
 )
+from astromosaic.cli.solve_options import add_solve_options, solve_options
 
 if TYPE_CHECKING:
     from astromosaic.core.job import JobContext
@@ -26,7 +27,6 @@ if TYPE_CHECKING:
 
 def _run_solve(arguments: argparse.Namespace, job: JobContext) -> tuple[dict[str, object], int]:
     from astromosaic.astrometry.solve import (
-        SolveOptions,
         SolveResult,
         panel_budget,
         solve_panel,
@@ -36,21 +36,10 @@ def _run_solve(arguments: argparse.Namespace, job: JobContext) -> tuple[dict[str
     from astromosaic.core import SourceFingerprint
     from astromosaic.io import open_panel
 
-    options = SolveOptions(
-        gaia_catalog=arguments.gaia_catalog,
-        gaia_index=arguments.gaia_index,
-        astap=arguments.astap,
-        astap_catalog=arguments.astap_catalog,
-        astap_database=arguments.astap_database,
+    options = replace(
+        solve_options(arguments),
         position=tuple(arguments.hint) if arguments.hint is not None else None,
         scale_arcsec=arguments.scale,
-        timeout_seconds=arguments.timeout,
-        total_seconds=arguments.total_budget,
-        job_seconds=arguments.job_budget,
-        revalidate=arguments.revalidate,
-        strict_edges=arguments.require_edge_validation,
-        max_working_bytes=arguments.memory_mib * 1024**2,
-        max_scratch_bytes=arguments.scratch_mib * 1024**2,
     )
     budget = panel_budget(options)
     context = budget.context(job)
@@ -168,44 +157,9 @@ def main(argv: list[str] | None = None, *, context: JobContext | None = None) ->
     solve.add_argument("--panel", type=int, help="One-based panel number in the saved project.")
     solve.add_argument("-o", "--output", type=Path, help="Save a new JSON WCS sidecar on success.")
     solve.add_argument("--sky-mask", type=Path, help="Binary FITS sky mask in source coordinates.")
-    solve.add_argument("--gaia-catalog", type=Path, help="Local Seiza Gaia DR3 catalog file.")
-    solve.add_argument("--gaia-index", type=Path, help="Matching local Gaia DR3 blind index.")
-    solve.add_argument("--astap", type=Path, help="Local ASTAP executable.")
-    solve.add_argument("--astap-catalog", type=Path, help="Local ASTAP star catalog directory.")
-    solve.add_argument(
-        "--astap-database",
-        default="auto",
-        choices=("auto", "d05", "d20", "d50", "d80"),
-        help="Use Automatic selection or pin an installed D-series catalog.",
-    )
+    add_solve_options(solve)
     solve.add_argument("--hint", nargs=2, type=float, metavar=("RA", "DEC"), help="ICRS degrees.")
     solve.add_argument("--scale", type=float, metavar="ARCSEC", help="Approximate pixel scale.")
-    solve.add_argument(
-        "--timeout", type=float, default=60, help="Upper limit per native attempt, in seconds."
-    )
-    solve.add_argument(
-        "--total-budget",
-        type=float,
-        default=120,
-        metavar="SECONDS",
-        help="Panel time budget including preparation, validation and sidecar publication (120).",
-    )
-    solve.add_argument(
-        "--job-budget",
-        type=float,
-        metavar="SECONDS",
-        help="Optional overall job deadline. Takes precedence if it expires first.",
-    )
-    solve.add_argument(
-        "--revalidate", action="store_true", help="Require a new catalog-validated WCS."
-    )
-    solve.add_argument(
-        "--require-edge-validation",
-        action="store_true",
-        help="Require a new WCS with supported held-out field-edge accuracy.",
-    )
-    solve.add_argument("--memory-mib", type=int, default=64, help="Working buffer budget in MiB.")
-    solve.add_argument("--scratch-mib", type=int, default=1024, help="ASTAP staging limit in MiB.")
     mosaic = commands.add_parser("mosaic", help="Render a linear mosaic with resolved WCS.")
     mosaic.add_argument(
         "panels", nargs="+", type=Path, help="Linear inputs with a common channel layout."
@@ -217,7 +171,7 @@ def main(argv: list[str] | None = None, *, context: JobContext | None = None) ->
     mosaic.add_argument("--progress", action="store_true", help="Report tile progress to stderr.")
     add_project_commands(
         commands.add_parser(
-            "project", help="Create, inspect, fit or export saved AstroMosaic projects."
+            "project", help="Create, inspect, solve, prepare or export saved AstroMosaic projects."
         )
     )
     arguments = parser.parse_args(argv)

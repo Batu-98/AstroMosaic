@@ -23,6 +23,28 @@ poetry run astromosaic project validate output/session.astromosaic -o output/ses
 
 Validation opens the saved sky inputs and checks fingerprints, effective masks and WCS, the common channel layout and calibration, the output grid and the refinement prerequisites. With `-o`, it also checks the proposed output directory, path occupancy, format compatibility and preliminary byte limit. The render checks actual coverage, measures refinement and enforces the writer's exact limits. `astromosaic project create --help` lists the shared render settings.
 
+## Prepare a Project Without the Desktop
+
+Project preparation writes new `.astromosaic` files. The input project, original images and existing sidecars remain available for other runs. Use the same local ASTAP and Gaia flags as the single-panel `solve` command. `project solve` reuses valid WCS by default, respects saved masks and optical hints, and attaches qualified results directly to the new project. `--panel` limits the job to the specified one-based sky panel and can be repeated. `--revalidate` requests a new fit. Use `--progress --json` for panel counts and the ordered outcomes. Unsolved panels return an error and cancellation returns 130. In both cases keep the input project and retry at the same output path. A successful save includes the referenced WCS files in an `astromosaic-wcs-*` folder beside the manifest.
+
+```powershell
+astromosaic project relink "Night.astromosaic" --panel '1=D:\Images\Panel A.fits' -o "Moved.astromosaic" --json
+astromosaic project solve "Moved.astromosaic" --astap "C:\ASTAP\astap_cli.exe" --astap-catalog "C:\ASTAP\catalog" -o "Solved.astromosaic" --progress --json
+astromosaic project export "Solved.astromosaic" -o "Sky.fits" --progress --json
+```
+
+For mixed projects, `project create --label-mask PANEL=PATH` imports a mono label raster at the source mask editor's grid dimensions. The source dimensions are used as-is up to a longest edge of 384 pixels. Larger sources use the same aspect-preserving rounded grid as the editor. Supply valid labels of `0` for unclassified, `1` for sky and `2` for foreground. Use `--foreground-only PANEL` to exclude a labeled ground panel from sky work. A binary `--sky-mask` remains available for sky-only masking. [Sky masks](phase-3d.md)
+
+```powershell
+astromosaic project align-foreground "Solved.astromosaic" -o "Aligned.astromosaic" --json
+astromosaic project propose-placement "Aligned.astromosaic" -o "Placed.astromosaic" --json
+astromosaic project export "Placed.astromosaic" --layer composition -o "Composition.tiff" --json
+```
+
+When the shared horizon lacks support, enter measured geometry using `project set-placement`. Supply `--offset X Y` and `--seam ROW` in sky-grid pixels. Optional `--rotation` in degrees, `--scale`, `--overlap` in percent and `--crop-bottom` in rows match the desktop composition fields. The saved foreground masks and alignment determine the valid canvas. The [Phase 7 fit command](phase-7.md#run-a-manual-terrain-fit) reports measured ground control-point candidates. Saving and rendering those terrain poses is part of [Phase 7E](phase-7.md).
+
+Verify the headless pipeline with a moved source, a catalog solve, reopen and export. Exercise mask import, foreground alignment and both placement paths with masked observations. Verify output collisions, cancellation during solve and manifest publication, and cleanup before retry. The saved file is the publication boundary for each preparation command. [CLI regressions](../tests/portability/test_project_cli.py) · [Live desktop commands](phase-4c.md#control-the-active-project-without-dialogs)
+
 ## Export a Saved Layer
 
 Use `project export` with a saved project and a new destination. It uses the same renderer and saved settings as the desktop. The default layer is `sky`. Use `--layer foreground` for the saved foreground alignment or `--layer composition` for the saved placement, crop and seam. Use FITS for mono, or TIFF or XISF for mono and RGB. [XISF workflow](phase-5a.md#use-the-format)
@@ -36,7 +58,7 @@ Press Ctrl+C to cancel an active export. Windows automation can send `CTRL_BREAK
 
 ## Result Contract
 
-`--json` writes one UTF-8 JSON object to stdout after the command runs. The object includes `schema_version` (1), `command`, `status` and `project`. Success reports include `panels`. Validation also reports `layer`, `width`, `height` and `channels`. Errors and interruptions include a `message`. Stderr diagnostics are newline-delimited JSON objects with `schema_version`, `event`, `level` and `message`.
+`--json` writes one UTF-8 JSON object to stdout after the command runs. The object includes `schema_version` (1), `command`, `status` and `project`. Creation reports the panel count, and validation reports `panels`, `layer`, `width`, `height` and `channels`. Preparation reports include the output project path. `project solve` reports `reused` and `outcomes`. Its optional progress records use `stage` set to `solve`, with `completed_panels` and `total_panels`. Errors and interruptions include a `message`. Stderr diagnostics are newline-delimited JSON objects with `schema_version`, `event`, `level` and `message`.
 
 Export reports include `layer` and `output`. A successful export also includes `width`, `height`, `covered_pixels`, `tiles`, `peak_reserved_bytes`, `rejected_coordinates` and `backend`. The rejection count covers unsuccessful mappings and layer clipping for evaluated panel candidates. `common_pixels` counts common coverage for compositions and is null for the other layers. `refinement` contains the fit report when available, including rejected overlap fits.
 

@@ -67,6 +67,8 @@ Set `--center`, `--size`, and `--scale` for your field. The `mosaic` and `projec
 
 Use `astromosaic project create` to save a sky project that the desktop can reopen. Use `astromosaic project validate` to check the saved sky layer. Use `astromosaic project export` to render a saved sky, foreground or composition layer. Project commands accept `--json` for scripts. Pass `--progress` to report export progress. [Project commands](phase-4a.md) · [Python and PowerShell batch examples](phase-4a.md#run-a-batch)
 
+Use `project solve` to save a new project with its solved WCS attached. The preparation commands also relink moved inputs, align foreground masks, and save proposed or explicit composition placement. In the desktop Command Panel, `session save "Night.astromosaic"` saves the active project directly and `session export -o "Sky.fits"` uses its current settings. [Headless preparation](phase-4a.md#prepare-a-project-without-the-desktop) · [Live session controls](phase-4c.md#control-the-active-project-without-dialogs)
+
 Use `astromosaic project bands` to list a saved project's filter groups. Pass `--band FILTER` to `project validate` or `project export` to work with one band on the saved grid. Add a `band` to each job in a batch list to export several bands. [Per-band workflow](phase-5c.md)
 
 Use `astromosaic project fit-foreground` to evaluate terrain correspondences against a saved project's ground masks. Supply `--points` for manual correspondences or `--automatic` with the optional SIFT backend. [Manual terrain fit](phase-7.md#run-a-manual-terrain-fit) · [Automatic terrain fit](phase-7.md#run-the-automatic-terrain-fit)

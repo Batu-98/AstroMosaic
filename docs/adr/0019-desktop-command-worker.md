@@ -15,4 +15,6 @@ Use the existing desktop worker thread to wait on the pipe and reap the child pr
 
 ## Consequences
 
-Each command starts with fresh process state and uses the saved project and the engine's existing resource limits. The Windows desktop executable can start its own command worker with the bundled runtime. Command output and recall history are bounded and kept in the window for the session. The panel accepts AstroMosaic arguments and uses the console CLI's exit codes. [Panel workflow and acceptance](../phase-4c.md)
+Each CLI command starts with fresh process state and uses the saved project and the engine's existing resource limits. The Windows desktop executable can start its own command worker with the bundled runtime. Command output and recall history are bounded and kept in the window for the session. The panel's CLI commands accept AstroMosaic arguments and use the console CLI's exit codes. [Panel workflow and acceptance](../phase-4c.md)
+
+The `session` commands target the in-memory desktop project. The desktop applies those commands on the UI thread using the same project methods as its menu actions. Explicit paths and discard or replacement flags provide the choices a dialog would collect. The existing desktop jobs still run the long operations and report their outcomes. File-based commands continue to run in the isolated worker process. [Live session workflow](../phase-4c.md#control-the-active-project-without-dialogs)

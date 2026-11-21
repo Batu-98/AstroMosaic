@@ -11,6 +11,7 @@ from astropy.io import fits
 
 from astromosaic.cli import main
 from astromosaic.cli import project as project_cli
+from astromosaic.core.job import JobContext, MosaicCancelled
 from astromosaic.pipeline.smoke import write_smoke_panel
 from astromosaic.storage.project import load_project
 
@@ -365,3 +366,195 @@ def test_project_json_keeps_wcs_diagnostics_off_stdout(
         event["event"] == "diagnostic" and "Inconsistent SIP distortion" in event["message"]
         for event in events
     )
+
+
+def test_cli_relinks_a_saved_project_and_reuses_its_wcs(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    source = tmp_path / "Panel source.fits"
+    write_smoke_panel(source)
+    manifest = tmp_path / "Night.astromosaic"
+    assert main(_create_args(manifest, source)) == 0
+    before = manifest.read_bytes()
+    moved = source.with_name("Panel moved.fits")
+    source.rename(moved)
+    relinked = tmp_path / "Relinked.astromosaic"
+    capsys.readouterr()
+    assert (
+        main(
+            [
+                "project",
+                "relink",
+                str(manifest),
+                "--panel",
+                f"1={moved}",
+                "-o",
+                str(relinked),
+                "--json",
+            ]
+        )
+        == 0
+    )
+    assert json.loads(capsys.readouterr().out)["relinked"] == [1]
+    assert load_project(relinked).panels[0].source.path == moved
+
+    ready = tmp_path / "Ready.astromosaic"
+    assert main(["project", "solve", str(relinked), "-o", str(ready), "--json"]) == 0
+    report = json.loads(capsys.readouterr().out)
+    assert report["reused"] == [1] and not report["outcomes"]
+    assert load_project(ready) == load_project(relinked)
+    assert not list(tmp_path.glob("astromosaic-wcs-*")) and manifest.read_bytes() == before
+
+
+@pytest.mark.parametrize("ending", ["solved", "failed", "cancelled", "cancelled-at-publish"])
+def test_project_solve_publishes_only_complete_results(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    ending: str,
+) -> None:
+    from astromosaic.astrometry.solve import SolveOptions, SolveResult, write_solution
+    from astromosaic.astrometry.solve_budget import SolveBudget
+    from astromosaic.geometry import read_panel_geometry
+    from astromosaic.io import open_panel
+    from astromosaic.storage import project as storage
+
+    sources = tuple(tmp_path / f"Panel {number}.fits" for number in (1, 2))
+    for source in sources:
+        write_smoke_panel(source)
+    manifest = tmp_path / "Night.astromosaic"
+    assert main(_create_args(manifest, *sources)) == 0
+    capsys.readouterr()
+    destination = tmp_path / "Solved night.astromosaic"
+    original = [path.read_bytes() for path in (manifest, *sources)]
+    paths = []
+
+    def solve(
+        index: int,
+        panel: storage.ProjectPanel,
+        options: SolveOptions,
+        directory: Path,
+        context: JobContext,
+        *,
+        job_budget: SolveBudget | None,
+    ) -> storage.PanelSolveOutcome:
+        assert options.revalidate and job_budget is not None
+        if index == 1 and ending == "failed":
+            return storage.PanelSolveOutcome(index, error="No match.")
+        if index == 1 and ending == "cancelled":
+            raise MosaicCancelled("Cancelled between panels.")
+        path = directory / f"panel-{index + 1}.wcs.json"
+        with open_panel(panel.source.path) as source:
+            geometry = read_panel_geometry(source.header, 16, 12)
+            write_solution(path, source, SolveResult(geometry, "existing-wcs", ()), context)
+        paths.append(path)
+        return storage.PanelSolveOutcome(
+            index, "existing-wcs", storage.FileReference.capture(path), status="solved"
+        )
+
+    monkeypatch.setattr(storage, "solve_project_panel", solve)
+    arguments = [
+        "project",
+        "solve",
+        str(manifest),
+        "-o",
+        str(destination),
+        "--job-budget",
+        "60",
+        "--revalidate",
+        "--progress",
+        "--json",
+    ]
+    context = JobContext(
+        is_cancelled=lambda: ending == "cancelled-at-publish" and destination.exists()
+    )
+    code = main(arguments, context=context)
+    captured = capsys.readouterr()
+    report = json.loads(captured.out)
+    assert report["outcomes"][0]["panel"] == 1 and report["outcomes"][0]["status"] == "solved"
+    assert json.loads(captured.err.splitlines()[1])["completed_panels"] == 1
+    assert [path.read_bytes() for path in (manifest, *sources)] == original
+    assert not list(tmp_path.rglob("*.part"))
+    if ending == "solved":
+        assert code == 0 and report["status"] == "ok"
+        assert [panel.wcs_sidecar for panel in load_project(destination).panels] == [
+            storage.FileReference.capture(path) for path in paths
+        ]
+        output = tmp_path / "Sky.fits"
+        assert main(["project", "export", str(destination), "-o", str(output)]) == 0
+        assert np.any(fits.getdata(output, 1) > 0)
+    else:
+        expected = (1, "error") if ending == "failed" else (130, "cancelled")
+        assert (code, report["status"]) == expected
+        assert not destination.exists() and not list(tmp_path.glob("astromosaic-wcs-*"))
+
+
+def test_cli_prepares_and_exports_a_mixed_project_from_explicit_masks_and_placement(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    source = tmp_path / "mixed.fits"
+    write_smoke_panel(source)
+    labels = np.ones((12, 16), dtype=np.uint8)
+    labels[8:] = 2
+    mask_path = tmp_path / "source labels.fits"
+    fits.writeto(mask_path, labels)
+    project = tmp_path / "masked.astromosaic"
+    assert main([*_create_args(project, source), "--label-mask", f"1={mask_path}"]) == 0
+    saved = load_project(project)
+    assert saved.sky_indices() == (0,) and len(saved.foreground_inputs()) == 1
+    assert saved.panels[0].source_mask is not None
+    np.testing.assert_array_equal(saved.panels[0].source_mask.grid(), labels)
+    before = (project.read_bytes(), source.read_bytes(), mask_path.read_bytes())
+    capsys.readouterr()
+
+    ground = tmp_path / "aligned.astromosaic"
+    assert main(["project", "align-foreground", str(project), "-o", str(ground), "--json"]) == 0
+    assert json.loads(capsys.readouterr().out)["panels"] == 1
+    placed = tmp_path / "placed.astromosaic"
+    assert (
+        main(
+            [
+                "project",
+                "set-placement",
+                str(ground),
+                "-o",
+                str(placed),
+                "--offset",
+                "0",
+                "7",
+                "--seam",
+                "8",
+                "--crop-bottom",
+                "1",
+                "--json",
+            ]
+        )
+        == 0
+    )
+    assert json.loads(capsys.readouterr().out)["placement"]["sky_crop_bottom"] == 1
+    output = tmp_path / "composition.fits"
+    assert (
+        main(
+            [
+                "project",
+                "export",
+                str(placed),
+                "--layer",
+                "composition",
+                "-o",
+                str(output),
+                "--json",
+            ]
+        )
+        == 0
+    )
+    assert json.loads(capsys.readouterr().out)["covered_pixels"] > 0
+    assert np.any(fits.getdata(output, 1) > 0)
+    assert before == (project.read_bytes(), source.read_bytes(), mask_path.read_bytes())
+
+    invalid = tmp_path / "wrong-size.fits"
+    fits.writeto(invalid, labels[:, :-1])
+    undo = tmp_path / "invalid.astromosaic"
+    assert main([*_create_args(undo, source), "--label-mask", f"1={invalid}"]) == 1
+    assert "mono label mask with 16 x 12" in json.loads(capsys.readouterr().out)["message"]
+    assert not undo.exists()

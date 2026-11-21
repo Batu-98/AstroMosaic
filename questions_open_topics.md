@@ -299,6 +299,16 @@ This register tracks unresolved decisions, problems, and risks. It is not a work
 - **Closure condition:** Single-panel and batch solves show activity. The batch labels advance and cancellation preserves completed outcomes.
 - **Resolution:** 2026-11-21. Beta 5 rendered distinct animation frames during real single-panel and batch M13 solves in the packaged runtime. Cancellation preserved the first WCS, retry solved the remaining panel, and revalidation animated with CPU and OpenGL previews active. [Windows build verification](docs/windows-release.md#verification-status)
 
+### Q-027 - Dialog-free project lifecycle and headless preparation
+
+- **Status / priority:** Investigating / P1
+- **Opened / updated:** 2026-11-21 / 2026-11-21
+- **Affected phase:** Phase 4A headless automation and Phase 4C desktop commands.
+- **Impact and evidence:** The Command Panel could run CLI jobs against saved files. First save, open, relink and closing a dirty desktop project required GUI input. The standalone solver could produce a sidecar for one panel, and batch scripts needed a separate way to attach results to an existing project.
+- **Current assumption:** Use explicit session paths and write new manifests for file-based preparation. Accept supplied label masks and numeric placement with the existing geometry validators. Phase 7E tracks saving and rendering terrain control-point geometry.
+- **Next action / responsibility:** Verify the workflows on both Windows launchers with the M13 and Paranal observations.
+- **Closure condition:** The live project can be saved, reopened and exported without dialogs. The standalone CLI can relink, solve and prepare mixed-layer projects from supplied paths, and failures preserve the inputs and permit retry.
+
 ## New Entry Template
 
 ```markdown

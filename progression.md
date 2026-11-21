@@ -985,6 +985,13 @@ The table is a status summary, not a replacement for the full exit gates in Sect
 - **Related** Q-026 and [Windows build verification](docs/windows-release.md#verification-status).
 - **Next** Retain the active-panel and cancellation checks for subsequent desktop builds.
 
+### 2026-11-21 - Phase 4 follow-up - Add dialog-free project operations
+
+- **Changed** Audited file dialogs and the saved-project CLI boundary. Added Command Panel `session` commands for the live project and headless preparation for moved sources, plate solving, labeled masks, foreground alignment and composition placement. Assigned version `0.1.0b6` for the Windows handoff.
+- **Verified** Source regressions exercised first save, occupied filenames, unsaved changes, export from the active project, relink and close without a dialog. CLI regressions covered reopen, WCS reuse, successful publication, failure and cancellation cleanup, label import and composition export.
+- **Related** Q-027, [headless preparation](docs/phase-4a.md#prepare-a-project-without-the-desktop) and [live desktop commands](docs/phase-4c.md#control-the-active-project-without-dialogs).
+- **Next** Run the complete source suite and verify the new CLI and session workflows in portable Windows builds.
+
 ## Entry Template
 
 Copy this format into a new entry immediately above this template, preserving chronological order:

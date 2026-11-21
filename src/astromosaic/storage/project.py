@@ -651,6 +651,14 @@ def default_composition(project: MosaicProject) -> CompositionSpec:
     return CompositionSpec(LayerPlacement((0.0, y)), seam_y=y - 0.5)
 
 
+def validate_composition(project: MosaicProject, spec: CompositionSpec) -> None:
+    sky = project.render.output_region()
+    ground = project.current_foreground()
+    if ground is None:
+        raise ValueError("Align the current foreground panels first.")
+    spec.frame((sky.width, sky.height), (ground.canvas.width, ground.canvas.height))
+
+
 def propose_project_composition(project: MosaicProject, context: JobContext) -> CompositionSpec:
     with (
         _project_foreground(project, context) as ground,
@@ -736,7 +744,15 @@ def _encode_mask(mask: SourceMask | None) -> dict[str, object] | None:
     return {"source_size": mask.source_size, "labels": b64encode(mask.labels).decode("ascii")}
 
 
-def save_project(path: Path, project: MosaicProject, *, replace_existing: bool = False) -> None:
+def save_project(
+    path: Path,
+    project: MosaicProject,
+    *,
+    replace_existing: bool = False,
+    context: JobContext | None = None,
+) -> None:
+    if context is not None:
+        context.check_cancelled()
     if path.suffix.lower() != ".astromosaic":
         raise ValueError("The project filename must end in .astromosaic.")
     if any(
@@ -789,7 +805,10 @@ def save_project(path: Path, project: MosaicProject, *, replace_existing: bool =
     )
     if len(payload) > _MAX_MANIFEST_BYTES:
         raise ValueError("The project manifest exceeds its size limit.")
-    with atomic_binary_file(path, replace_existing=replace_existing) as stream:
+    publish_check = context.check_cancelled if context is not None else None
+    with atomic_binary_file(
+        path, replace_existing=replace_existing, publish_check=publish_check
+    ) as stream:
         stream.write(payload)
 
 

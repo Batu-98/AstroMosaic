@@ -32,6 +32,7 @@ from astromosaic.storage.project import (
     MosaicProject,
     ProjectPanel,
     default_composition,
+    validate_composition,
 )
 
 PANEL_FILES = "Linear panels (*.fits *.fit *.fts *.tif *.tiff *.xisf);;All files (*)"
@@ -287,9 +288,5 @@ class CompositionSettings(_SettingsDialog):
         )
         if placement != self.initial.placement or seam != self.initial.seam_y:
             spec = replace(spec, reference_panel=None, placement_rms_px=None)
-        sky = self.project.render.output_region()
-        ground = self.project.current_foreground()
-        if ground is None:
-            raise ValueError("Align the current foreground panels first.")
-        spec.frame((sky.width, sky.height), (ground.canvas.width, ground.canvas.height))
+        validate_composition(self.project, spec)
         return spec
