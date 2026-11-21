@@ -1,4 +1,4 @@
-"""Read terrain observations and report the headless foreground fit."""
+"""Read terrain observations, report the fit, and optionally save the aligned project."""
 
 from __future__ import annotations
 
@@ -34,6 +34,9 @@ def add_fit_command(commands: ArgumentParser) -> None:
     )
     commands.add_argument("--anchor", type=int, help="One-based project panel to hold fixed.")
     commands.add_argument("--progress", action="store_true", help="Report fit progress to stderr.")
+    commands.add_argument(
+        "-o", "--output", type=Path, help="Save the accepted fit to a new .astromosaic project."
+    )
 
 
 def _position(value: object, label: str) -> XY:
@@ -105,12 +108,21 @@ def _fit_report(fit: ControlPointFit) -> dict[str, object]:
 
 def fit_project_points(arguments: Namespace, result: dict[str, object], context: JobContext) -> str:
     from astromosaic.storage.project import (
+        apply_project_ground_fit,
         fit_project_foreground_features,
         fit_project_foreground_points,
         load_project,
+        save_project,
     )
 
     context.check_cancelled()
+    destination: Path | None = arguments.output
+    if destination is not None:
+        result["output"] = str(destination)
+        if destination.suffix.lower() != ".astromosaic":
+            raise ValueError("The project filename must end in .astromosaic.")
+        if destination.exists() or destination.is_symlink():
+            raise FileExistsError(f"The output file already exists: {destination}")
     project = load_project(arguments.path)
     budget = project.render.max_working_bytes
     anchor = arguments.anchor - 1 if arguments.anchor is not None else None
@@ -131,6 +143,8 @@ def fit_project_points(arguments: Namespace, result: dict[str, object], context:
             ],
         }
         fit = automatic.fit
+        points = (*automatic.points, *holdouts)
+        provider = f"OpenCV SIFT {automatic.backend_version}"
     else:
         if arguments.holdout:
             raise ValueError("--holdout requires --automatic.")
@@ -138,6 +152,7 @@ def fit_project_points(arguments: Namespace, result: dict[str, object], context:
         fit = fit_project_foreground_points(
             project, points, context, model=arguments.model, anchor=anchor
         )
+        provider = "manual"
     result["fit"] = _fit_report(fit)
     if fit.status != "accepted":
         groups = " | ".join(", ".join(str(panel + 1) for panel in group) for group in fit.groups)
@@ -150,7 +165,12 @@ def fit_project_points(arguments: Namespace, result: dict[str, object], context:
         if arguments.automatic:
             detail += " Review matching diagnostics or supply --points for manual recovery."
         raise ValueError(f"Ground point fit {fit.status}. Panel groups {groups}.{detail}")
-    return (
+    message = (
         f"Fitted {fit.model} for {len(fit.poses)} foreground panels "
         f"with panel {fit.anchor + 1} fixed."
     )
+    if destination is not None:
+        updated = apply_project_ground_fit(project, fit, points, provider, context)
+        save_project(destination, updated, context=context, replace_existing=False)
+        message += " Saved the aligned project copy."
+    return message

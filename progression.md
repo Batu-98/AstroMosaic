@@ -5,12 +5,12 @@ Use this file for concise development history and handoff state. Detailed techni
 ## Current State
 
 - **Last updated:** 2026-11-21
-- **Active baseline:** Python-first architecture revision 3.12 adds [Phase 7 delivery stages](astro_mosaic_python_first_architecture_en.md#105-phase-7-delivery-stages). [ADR-0023](docs/adr/0023-terrain-control-point-registration.md) proposes a terrain control-point fit. [ADR-0017](docs/adr/0017-astap-first-validated-solving.md) records the solver policy. See [ADR-0003](docs/adr/0003-windows-first-platform-scope.md) for Windows scope, [ADR-0006](docs/adr/0006-dual-fits-and-tiff-workflow.md) for formats, and [ADR-0007](docs/adr/0007-sky-and-foreground-mosaics.md) for mixed panels.
+- **Active baseline:** Python-first architecture revision 3.12 adds [Phase 7 delivery stages](astro_mosaic_python_first_architecture_en.md#105-phase-7-delivery-stages). [ADR-0023](docs/adr/0023-terrain-control-point-registration.md) records the translation and similarity decision. [ADR-0017](docs/adr/0017-astap-first-validated-solving.md) records the solver policy. See [ADR-0003](docs/adr/0003-windows-first-platform-scope.md) for Windows scope, [ADR-0006](docs/adr/0006-dual-fits-and-tiff-workflow.md) for formats, and [ADR-0007](docs/adr/0007-sky-and-foreground-mosaics.md) for mixed panels.
 - **Current stage:** [Phases 6A–6D](docs/phase-6.md) and [local 6E](docs/phase-6.md#local-windows-lifecycle-and-package-results) passed on Windows. [Phases 7A–7C](docs/phase-7.md#7c-real-observation-results) froze the real controls and verified the manual fit and optional matching. [Phase 7D](docs/phase-7.md#7d-real-observation-results) completed the calibrated comparison. The camera-rotation candidates miss the held-out target, so translation and similarity remain the supported terrain models. Clean-machine acceptance and review of the native distribution remain open. Linux and macOS support is deferred.
 - **Available artifacts:** The verified beta 7 desktop and console are in `dist/AstroMosaic-0.1.0b7-windows-x64/` and `dist/astromosaic-cli-0.1.0b7-windows-x64/` with their build records. Earlier local betas remain in their versioned folders. The [application test guide](docs/application-tests.md) and [extended cases](docs/application-tests-extension.md) describe the ignored real-observation fixtures. [Release guide](docs/windows-release.md#verification-status)
 - **Implementation / verification:** Beta 7 verified the original two-panel sky preview in the bundled Windows CPU and OpenGL runtimes. Both covered 109,331 preview samples with 23,020 shared samples. All 219 source tests passed across offscreen and native Windows checks. Ruff, mypy and the Poetry lock check passed. The earlier Phase 6 verification contains eight corrected lifecycle sequences and 54 scientific outputs across source and portable desktop and CLI. [Windows preview evidence](docs/phase-3c.md#windows-verification)
 - **Version control:** The current development version on `main` is `0.1.0b7`. The first published source beta uses the annotated Git tag `v0.1.0b1`. [AstroMosaic GitHub repository](https://github.com/Batu-98/AstroMosaic)
-- **Next action:** Start 7E with validated translation and similarity geometry, tile sampling, and compatibility for saved translations. Keep the 7C SIFT provider optional pending clean-machine checks and native distribution review under Q-005. Tagged release packaging and fresh Windows acceptance remain open. [Release verification status](docs/windows-release.md#verification-status)
+- **Next action:** Verify the 7E geometry and version 7 project manifests in locked Windows bundles. Keep the 7C SIFT provider optional pending clean-machine checks and native distribution review under Q-005. Tagged release packaging and fresh Windows acceptance remain open. [7E source results](docs/phase-7.md#7e-source-results)
 - **Proposed follow-up** [Phase 8](docs/phase-8.md) covers full-resolution photo export and selectable color, brightness, lens and vignetting methods. Q-029 tracks the proposed acceptance data and backend choices.
 - **Open dependencies:** Q-003 tracks reference data and frozen criteria. Q-010 tracks real-scene diagnostics and the proposed terrain models. Q-016 tracks astrometry. Q-005, Q-009 and Q-020 track distribution and format work. Q-008 tracks deferred platforms and Q-011 deferred visual fill. Resolved Q-022 and Q-023 record the Windows lifecycle and ZEA results.
 
@@ -49,7 +49,7 @@ The table is a status summary, not a replacement for the full exit gates in Sect
 | 5B - ZEA sky projection | Complete | Saved projection, longitude wrap, projection domain, preview and export agreement, and copied Windows workflows passed. |
 | 5C - Per-band output | Complete | Saved membership, band-local units and channels, common geometry, independent exports, and Windows desktop, CLI and batch checks passed. |
 | 6 - Real-observation reliability | Local 6A–6E checks passed | The real references, native lifecycle, and source and portable product comparison are recorded. Fresh Windows acceptance remains open for the named 6E build. |
-| 7 - Terrain panorama registration | 7A–7D evaluated locally | Integrate the verified translation and similarity geometry. Retain the negative and legacy controls and verify saved model, sky independence, and Windows exports. |
+| 7 - Terrain panorama registration | 7A–7D evaluated locally, 7E source checks passed | Verify saved model, legacy translation, sky independence and Windows exports in the bundled runtime. The 7F review workflow and fresh Windows checks follow. |
 
 ## Journal Rules
 
@@ -1041,6 +1041,13 @@ The table is a status summary, not a replacement for the full exit gates in Sect
 - **Verified** Reviewed the proposed methods against the current beta 7 processing contract, published PTGui behavior, Mosaic Master source and the ICC and lens references. Checked the outline and document links.
 - **Related** Q-029 and [proposed ADR-0026](docs/adr/0026-configurable-color-photometry-and-optics.md).
 - **Next** Freeze the 8A contracts and reference data when the owner schedules Phase 8. Use the two original sRGB TIFFs for the 8B photo export acceptance.
+
+### 2026-11-21 - Phase 7E - Integrated saved terrain poses and tile rendering
+
+- **Changed** Added an output option to the terrain-fit command and integrated accepted translations and similarities with the shared foreground renderer, horizon placement and version 7 manifests. Assigned version `0.1.0b8` for the Windows handoff.
+- **Verified** The nine real control-point checks passed. The independent Oxford Boat bilinear comparison, unpruned render, legacy ALPACA coverage, invalidation and cancellation, and Paranal sky parity and composition passed. The focused project and layer checks and scoped mypy checks passed.
+- **Related** Q-003, Q-010 and [7E source results](docs/phase-7.md#7e-source-results).
+- **Next** Build the locked beta and repeat the saved alignment workflow with the Windows launchers.
 
 ## Entry Template
 

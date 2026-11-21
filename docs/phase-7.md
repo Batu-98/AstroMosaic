@@ -159,7 +159,7 @@ From the checkout root, replay with `OPENBLAS_NUM_THREADS=1` and `.venv/Scripts/
 
 ### Run a manual terrain fit
 
-`project fit-foreground` reads a saved project's active ground masks and a versioned JSON file. It reports a candidate pose for each panel in the selected anchor's pixel grid. Geometry persistence and rendering are part of 7E. [Project and headless CLI](guide.md#run-the-headless-cli)
+`project fit-foreground` reads a saved project's active ground masks and a versioned JSON file. It reports a candidate pose for each panel in the selected anchor's pixel grid. Add `--output` to save an accepted fit for [foreground rendering](#save-and-render-a-terrain-fit). [Project and headless CLI](guide.md#run-the-headless-cli)
 
 ```powershell
 astromosaic project fit-foreground scene.astromosaic --points terrain.json --model auto --anchor 1 --json
@@ -186,7 +186,7 @@ Panel numbers follow the saved project and start at one. Positions use zero-base
 
 Pair initialization uses median translation or a bounded, deterministic similarity search. A pair needs at least 75% of its training points within 2 source px in both directions. Similarity requires at least 8 px RMS spread along the narrower dimension of both point sets. The accepted scale range is 0.5 to 2 for a pair and for each pose relative to the anchor. The fit initializes the graph from those edges and robustly refines the panel poses together. Each edge reports the P95 of the larger of the two directional point errors. Held-out points never enter the solve. Each pose applies `scale × rotation × source position + shift`. Positive angles turn clockwise with image Y increasing downward.
 
-A successful JSON report has exit code 0 and includes poses, per-point residuals, rejected links, and groups. Point errors use the input panel order. The residual basis identifies an independent pair fit or the anchored graph fit. A rejected fit returns code 1 and includes available diagnostics. Cancellation returns 130. The command reads the source files and project without writing a fit to either.
+A successful JSON report has exit code 0 and includes poses, per-point residuals, rejected links, and groups. Point errors use the input panel order. The residual basis identifies an independent pair fit or the anchored graph fit. A rejected fit returns code 1 and includes available diagnostics. Cancellation returns 130. Without `--output`, the command only reports the fit.
 
 ### 7B real-observation results
 
@@ -224,7 +224,7 @@ poetry run astromosaic project fit-foreground data/application-tests/phase7a/oxf
 
 The local experimental Windows CLI also includes the measured wheel. Use its `astromosaic-cli.exe` in place of `poetry run astromosaic` in the command above. [Local development builds](windows-release.md#verification-status)
 
-Add `--holdout PATH` to score independent correspondences using the [version 1 point format](#run-a-manual-terrain-fit). Each audit row must have `held_out: true`. The matcher reserves a 24-source-pixel neighborhood around every audit observation and checks the refined points against the same exclusion. An audited fit requires an anchored residual for every audit point. The command is read-only. [SIFT API](https://docs.opencv.org/4.13.0/d7/d60/classcv_1_1SIFT.html) · [Measured headless wheel](https://pypi.org/project/opencv-python-headless/4.13.0.92/)
+Add `--holdout PATH` to score independent correspondences using the [version 1 point format](#run-a-manual-terrain-fit). Each audit row must have `held_out: true`. The matcher reserves a 24-source-pixel neighborhood around every audit observation and checks the refined points against the same exclusion. An audited fit requires an anchored residual for every audit point. Add `--output` to save the accepted pose and the observations used by the fit. [SIFT API](https://docs.opencv.org/4.13.0/d7/d60/classcv_1_1SIFT.html) · [Measured headless wheel](https://pypi.org/project/opencv-python-headless/4.13.0.92/)
 
 The `matching` result adds the backend version, peak working reservation, per-panel support and feature counts, per-pair filtering and patch counts, and the submitted source coordinates. It also reports unavailable pairs when nothing reaches the shared fitter. Use `--progress` to send fit progress to stderr. Use `--points` to fit independent manual correspondences or review and edit the returned coordinates in the manual input format. Point IDs starting with `auto:` identify automatic proposals and are reserved for the matcher in audit files.
 
@@ -301,6 +301,25 @@ The local full report is stored in ignored `output/application-tests/phase7d/rot
 4. Save the selected model, point and mask revisions, source references, camera assumptions, anchor, fit status and transform with explicit schema compatibility. Read earlier translation records with their original interpretation. Invalidate derived geometry when relevant inputs change. Keep provisional or rejected fits from replacing the last good project alignment and preserve source hashes. [Project persistence](../src/astromosaic/storage/project.py)
 
 **Acceptance** Source and portable readers reproduce the accepted geometry, independent coverage and applicable WCS. Older saved translations render within their existing bounds. Changed point and mask inputs invalidate the appropriate geometry, and cancelled or failed attempts preserve previous verified state and leave clean destinations for retry.
+
+### Save and render a terrain fit
+
+```powershell
+astromosaic project fit-foreground scene.astromosaic --points terrain.json --anchor 2 --output aligned.astromosaic --json
+astromosaic project export aligned.astromosaic --layer foreground --output foreground.tiff --json
+```
+
+`--output` requires a new project filename. Open that project in the desktop and select **Foreground** to preview or export the saved fit. For mixed scenes, propose or set the composition placement again after changing the terrain geometry. The usual brightness requirements apply at render time.
+
+Project manifest version 7 stores the anchor, model, poses, accepted fit status, provider, source references, and a snapshot of control-point observations. It stores the maximum available held-out P95 across accepted edges. The fit key binds the snapshot to the active ground masks and source fingerprints. To use an updated point file, run the fit again. Both models assume a planar image-space mapping. The solver uses source-pixel landmarks without lens calibration or celestial WCS. Earlier translation records retain their original canvas and schema when saved.
+
+### 7E source results
+
+- **Oxford Boat** The accepted similarity with panel 2 fixed reopened from a version 7 manifest and rendered masked float32 FITS. CFITSIO coverage and samples agreed with an independent original-pixel bilinear comparison. Footprint selection and complete traversal produced identical FITS bytes.
+- **ALPACA** CFITSIO reopened the legacy 80,158-sample coverage byte for byte after a version 4 save and reopen. The version 7 landmark translation also reopened and exported. Rejected and cancelled attempts preserved the existing project and a retry produced the intended new project.
+- **Paranal** Control points on the two real panorama crops used their known crop offset. Shared-horizon placement and TIFF composition reopened with the expected contribution codes. The sky TIFF bytes, including WCS, samples and coverage, agreed before and after realignment. This is a pipeline control from one panorama. Oxford and ALPACA supply the independent exposure checks.
+
+Run the real replay with `python -m pytest -q tests/integration/test_ground_control_points.py`. The regressions also verify that editing the saved point snapshot or ground mask invalidates the cached pose.
 
 ## 7F Ship the Review Workflow and Verify Windows
 

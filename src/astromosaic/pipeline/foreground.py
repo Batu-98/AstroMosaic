@@ -13,6 +13,7 @@ from scipy.signal import fftconvolve
 from astromosaic.astrometry.registration import components, robust_linear_fit
 from astromosaic.core import Region, Tile
 from astromosaic.core.job import JobContext
+from astromosaic.geometry.image import LayerPlacement
 from astromosaic.io import PanelSource
 from astromosaic.pipeline.masking import read_thumbnail
 
@@ -48,10 +49,20 @@ class ForegroundAlignmentRejected(ValueError):
 class GroundPanel:
     index: int
     shift: tuple[float, float]
+    scale: float = 1.0
+    rotation_deg: float = 0.0
 
     def __post_init__(self) -> None:
-        if self.index < 0 or any(not isfinite(value) for value in self.shift):
+        if (
+            self.index < 0
+            or any(not isfinite(value) for value in (*self.shift, self.rotation_deg))
+            or not 0.5 <= self.scale <= 2.0
+        ):
             raise ValueError("Invalid foreground panel transform.")
+
+    @property
+    def placement(self) -> LayerPlacement:
+        return LayerPlacement(self.shift, self.rotation_deg, self.scale)
 
 
 @dataclass(frozen=True, slots=True)
@@ -78,15 +89,20 @@ class ForegroundAlignment:
     canvas: Region
     panels: tuple[GroundPanel, ...]
     overlaps: tuple[GroundOverlap, ...]
+    anchor: int | None = None
 
     def __post_init__(self) -> None:
         indices = tuple(panel.index for panel in self.panels)
         known = set(indices)
+        anchor = next((panel for panel in self.panels if panel.index == self.anchor), None)
+        if self.anchor is None and self.panels:
+            anchor = self.panels[0]
         if (
             min(*self.source_size, self.canvas.width, self.canvas.height) < 1
             or not indices
             or tuple(sorted(known)) != indices
-            or self.panels[0].shift != (0.0, 0.0)
+            or anchor is None
+            or anchor.placement != LayerPlacement()
             or any(not known.issuperset(edge.panels) for edge in self.overlaps)
         ):
             raise ValueError("Invalid saved foreground alignment.")

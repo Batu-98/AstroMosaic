@@ -273,7 +273,7 @@ Foreground stitching stores translations. The composition similarity transform p
 
 ### Terrain control-point diagnostics
 
-`project fit-foreground` reads the saved editable ground masks and runs with either supplied `--points` or `--automatic` with the optional SIFT provider. Manual points use version 1 JSON, one-based panel numbers and zero-based `[x, y]` coordinates. Automatic matching can use separate `--holdout` points. The command evaluates translation, similarity or automatic model selection and can keep a requested `--anchor` fixed. The report includes poses, groups, per-link and per-point outcomes, and automatic matching evidence when applicable. Weak or disconnected fits produce a failure report. The fit is diagnostic. The current renderable alignment comes from the translation workflow. [Manual terrain fit](phase-7.md#run-a-manual-terrain-fit) · [Automatic terrain fit](phase-7.md#run-the-automatic-terrain-fit) · [Phase 7E geometry and persistence](phase-7.md#7e-integrate-geometry-rendering-and-persistence)
+`project fit-foreground` reads the saved editable ground masks and runs with either supplied `--points` or `--automatic` with the optional SIFT provider. Manual points use version 1 JSON, one-based panel numbers and zero-based `[x, y]` coordinates. Automatic matching can use separate `--holdout` points. The command evaluates translation, similarity or automatic model selection and can keep a requested `--anchor` fixed. The report includes poses, groups, per-link and per-point outcomes, and automatic matching evidence when applicable. Weak or disconnected fits produce a failure report. Supply `--output` to save an accepted fit to a new project for foreground or composition rendering. [Manual terrain fit](phase-7.md#run-a-manual-terrain-fit) · [Automatic terrain fit](phase-7.md#run-the-automatic-terrain-fit) · [Save and render](phase-7.md#save-and-render-a-terrain-fit)
 
 ## Preview and Display
 
@@ -354,7 +354,7 @@ The default render limits are a maximum tile side of 128, a working budget of 64
 | `project align-foreground` | Fit image-space translation from saved editable ground masks and save a new project. |
 | `project propose-placement` | Use a shared horizon to compute placement and save a new project. |
 | `project set-placement` | Apply numeric placement, seam and crop settings to a project copy with a current ground alignment. |
-| `project fit-foreground` | Evaluate supplied or automatic terrain control points and report the fit. |
+| `project fit-foreground` | Fit supplied or automatic terrain control points and optionally save the alignment. |
 | `project export` | Render a saved `sky`, `foreground` or `composition` layer to a new image. `--band` selects a sky band and `--progress` reports completed tile progress. |
 
 The command panel accepts quoted paths, keeps Windows backslashes and strips an optional AstroMosaic launcher name. Enter or **Run** submits the command. Up and Down recall recent commands, with up to 100 commands and the latest 2,000 output blocks kept in the session. Hidden panels continue to collect desktop summaries. Ordinary CLI commands operate on saved files and send output and progress back from their separate process. [Console and desktop parity](phase-4c.md#desktop-workflow) · [Worker decision](adr/0019-desktop-command-worker.md) · [CLI parser](../src/astromosaic/cli/__init__.py) · [Project command parser](../src/astromosaic/cli/project.py)

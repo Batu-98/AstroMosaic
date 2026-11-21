@@ -1,7 +1,7 @@
 # ADR-0023 - Fit foreground geometry from terrain control points
 
 - **Date** 2026-11-19
-- **Status** Proposed for Phase 7.
+- **Status** Accepted for Phase 7E translation and similarity. Camera rotation remains experimental.
 
 ## Context
 

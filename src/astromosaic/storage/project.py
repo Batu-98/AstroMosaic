@@ -8,11 +8,13 @@ from contextlib import ExitStack, contextmanager
 from dataclasses import asdict, dataclass, replace
 from hashlib import sha256
 from importlib.metadata import version
-from math import isfinite
+from math import ceil, floor, isfinite
 from pathlib import Path
 from stat import S_ISREG
 from typing import Any, Literal, TypedDict
 from uuid import uuid4
+
+import numpy as np
 
 from astromosaic.astrometry.hints import PanelOptics, positive_header_number, read_optics
 from astromosaic.astrometry.solve import (
@@ -37,6 +39,7 @@ from astromosaic.core.masks import (
     bounded_grid,
 )
 from astromosaic.geometry import read_panel_geometry
+from astromosaic.geometry.footprint import MAX_FOOTPRINT_COORDINATE
 from astromosaic.geometry.image import CompositionSpec, LayerPlacement
 from astromosaic.io import PanelSource, SkyMask, open_panel
 from astromosaic.io.atomic import atomic_binary_file
@@ -44,6 +47,7 @@ from astromosaic.io.fits import optional_header_text
 from astromosaic.pipeline.control_points import (
     ControlPointFit,
     GroundControlPoint,
+    Model,
     ModelChoice,
     fit_ground_control_points,
 )
@@ -78,6 +82,7 @@ from astromosaic.pipeline.refinement import RefinementSpec, validate_refinement_
 _TAN_SCHEMA_VERSION = 4
 _PROJECTION_SCHEMA_VERSION = 5
 _BAND_SCHEMA_VERSION = 6
+_TERRAIN_SCHEMA_VERSION = 7
 _MAX_MANIFEST_BYTES = 4 * 1024**2
 type Layer = Literal["sky", "foreground", "composition"]
 type _GroundInputs = tuple[tuple[int, SourceMask], ...]
@@ -167,13 +172,35 @@ class ProjectPanel:
 
 
 @dataclass(frozen=True, slots=True)
+class TerrainFitEvidence:
+    model: Model
+    provider: str
+    points: tuple[GroundControlPoint, ...]
+    held_out_p95_px: float | None
+    status: Literal["accepted"] = "accepted"
+
+    def __post_init__(self) -> None:
+        if self.model not in ("translation", "similarity") or self.status != "accepted":
+            raise ValueError("Invalid saved terrain fit.")
+        error = self.held_out_p95_px
+        if not self.provider or (error is not None and (not isfinite(error) or error < 0)):
+            raise ValueError("Invalid saved terrain fit evidence.")
+
+
+@dataclass(frozen=True, slots=True)
 class SavedForeground:
     input_key: str
     alignment: ForegroundAlignment
+    terrain: TerrainFitEvidence | None = None
 
     def __post_init__(self) -> None:
         if len(self.input_key) != 64 or any(c not in "0123456789abcdef" for c in self.input_key):
             raise ValueError("Invalid foreground input fingerprint.")
+        if (self.terrain is None) != (self.alignment.anchor is None):
+            raise ValueError("A saved terrain fit requires an explicit anchor.")
+        if self.terrain is None or self.terrain.model == "translation":
+            if any(p.scale != 1 or p.rotation_deg != 0 for p in self.alignment.panels):
+                raise ValueError("Translations require unit scale and zero rotation.")
 
 
 @dataclass(frozen=True, slots=True)
@@ -205,22 +232,40 @@ class MosaicProject:
             and FOREGROUND in panel.source_mask.labels
         )
 
-    def foreground_key(self, inputs: _GroundInputs) -> str:
-        digest = sha256(b"astromosaic-foreground-translation-v1\n")
+    def foreground_key(
+        self, inputs: _GroundInputs, terrain: TerrainFitEvidence | None = None
+    ) -> str:
+        if terrain is None:
+            digest = sha256(b"astromosaic-foreground-translation-v1\n")
+        else:
+            digest = sha256(b"astromosaic-foreground-control-points-v1\n")
+            for point in terrain.points:
+                row = (
+                    point.id,
+                    point.panels,
+                    tuple(map(float, point.left_xy)),
+                    tuple(map(float, point.right_xy)),
+                    point.held_out,
+                )
+                digest.update(json.dumps(row, allow_nan=False).encode("ascii"))
         for index, mask in inputs:
             fp = self.panels[index].source.fingerprint
             digest.update(
                 f"{index}:{fp.size_bytes}:{fp.modified_ns}:{mask.source_size}\n".encode("ascii")
             )
+            if terrain is not None:
+                digest.update(f"{mask.size}\n".encode("ascii"))
             digest.update(mask.labels.translate(bytes.maketrans(bytes((SKY,)), b"\x00")))
         return digest.hexdigest()
 
     def current_foreground(self) -> ForegroundAlignment | None:
         if self.foreground is not None:
             inputs = self.foreground_inputs()
-            if self.foreground.input_key == self.foreground_key(inputs) and tuple(
-                panel.index for panel in self.foreground.alignment.panels
-            ) == tuple(i for i, _ in inputs):
+            if self.foreground.input_key == self.foreground_key(
+                inputs, self.foreground.terrain
+            ) and tuple(panel.index for panel in self.foreground.alignment.panels) == tuple(
+                i for i, _ in inputs
+            ):
                 return self.foreground.alignment
         return None
 
@@ -623,6 +668,58 @@ def fit_project_foreground_features(
         )
 
 
+def apply_project_ground_fit(
+    project: MosaicProject,
+    fit: ControlPointFit,
+    points: Sequence[GroundControlPoint],
+    provider: str,
+    context: JobContext,
+) -> MosaicProject:
+    """Prepare a replacement only for an accepted fit covering the current ground panels."""
+    inputs = project.foreground_inputs()
+    if (
+        fit.status != "accepted"
+        or tuple(pose.panel for pose in fit.poses) != tuple(index for index, _ in inputs)
+        or fit.anchor not in dict(inputs)
+    ):
+        raise ValueError("An accepted fit for the current foreground panels is required.")
+    panels = tuple(
+        GroundPanel(pose.panel, pose.shift, pose.scale, pose.rotation_deg) for pose in fit.poses
+    )
+    bounds = []
+    for (index, mask), panel in zip(inputs, panels, strict=True):
+        _check_reference("Source", project.panels[index].source, context)
+        box = mask.bounds(FOREGROUND)
+        assert box is not None
+        x, y = box.x - 0.5, box.y - 0.5
+        right, bottom = x + box.width, y + box.height
+        corners = np.array([[x, y], [right, y], [x, bottom], [right, bottom]], dtype=np.float64)
+        world = panel.placement.forward(corners)
+        if not np.isfinite(world).all() or np.max(np.abs(world)) > MAX_FOOTPRINT_COORDINATE:
+            raise ValueError("The transformed terrain exceeds the supported canvas range.")
+        bounds.append(world)
+    corners = np.vstack(bounds) + 0.5
+    left, top = map(floor, corners.min(axis=0))
+    right, bottom = map(ceil, corners.max(axis=0))
+    canvas = Region(left, top, right - left, bottom - top)
+    alignment = ForegroundAlignment(
+        dict(inputs)[fit.anchor].source_size, canvas, panels, (), anchor=fit.anchor
+    )
+    errors = [
+        edge.held_out_p95_px
+        for edge in fit.edges
+        if edge.status == "accepted" and edge.held_out_p95_px is not None
+    ]
+    terrain = TerrainFitEvidence(fit.model, provider, tuple(points), max(errors, default=None))
+    saved = SavedForeground(project.foreground_key(inputs, terrain), alignment, terrain)
+    context.check_cancelled()
+    return replace(
+        project,
+        foreground=saved,
+        composition=project.composition if project.current_foreground() == alignment else None,
+    )
+
+
 @contextmanager
 def _project_foreground(project: MosaicProject, context: JobContext) -> Iterator[ForegroundLayer]:
     alignment = project.current_foreground()
@@ -639,9 +736,13 @@ def _project_foreground(project: MosaicProject, context: JobContext) -> Iterator
             )
             for item in alignment.panels
         ]
-        if any(
-            (p.source.descriptor.width, p.source.descriptor.height) != alignment.source_size
+        expected_sizes = (
+            p.mask.source_size if alignment.anchor is not None else alignment.source_size
             for p in panels
+        )
+        if any(
+            (panel.source.descriptor.width, panel.source.descriptor.height) != size
+            for panel, size in zip(panels, expected_sizes, strict=True)
         ):
             raise ValueError("The saved foreground dimensions differ from the source panels.")
         yield ForegroundLayer(
@@ -778,6 +879,15 @@ def save_project(
         schema_version = _TAN_SCHEMA_VERSION
     if any(panel.band_override is not None for panel in project.panels):
         schema_version = _BAND_SCHEMA_VERSION
+    foreground = asdict(project.foreground) if project.foreground else None
+    if foreground is not None:
+        if foreground["terrain"] is None:
+            del foreground["terrain"]
+            del foreground["alignment"]["anchor"]
+            for panel in foreground["alignment"]["panels"]:
+                del panel["scale"], panel["rotation_deg"]
+        else:
+            schema_version = _TERRAIN_SCHEMA_VERSION
     if schema_version == _TAN_SCHEMA_VERSION:
         del render["projection"]
     data = {
@@ -788,7 +898,7 @@ def save_project(
         "filter_name": project.filter_name,
         "assume_surface_brightness": project.assume_surface_brightness,
         "refinement": asdict(project.refinement) if project.refinement else None,
-        "foreground": asdict(project.foreground) if project.foreground else None,
+        "foreground": foreground,
         "composition": asdict(project.composition) if project.composition else None,
         "panels": [
             {
@@ -894,11 +1004,49 @@ def _decode_region(value: object) -> Region:
     return Region(*(_integer(fields[key]) for key in ("x", "y", "width", "height")))
 
 
-def _decode_foreground(value: object) -> SavedForeground | None:
+def _decode_terrain(value: object) -> TerrainFitEvidence:
+    data = _object(value)
+    model, status, provider = data["model"], data["status"], data["provider"]
+    if model not in ("translation", "similarity") or status != "accepted":
+        raise ValueError("Expected an accepted translation or similarity fit.")
+    if not isinstance(provider, str) or not isinstance(data["points"], list):
+        raise ValueError("Invalid terrain fit provider or point list.")
+    points = []
+    for record in data["points"]:
+        row = _object(record)
+        name, held = row["id"], row["held_out"]
+        if not isinstance(name, str) or not isinstance(held, bool):
+            raise ValueError("Invalid terrain point ID or held-out flag.")
+        left, right = _pair(row["panels"])
+        lx, ly = _pair(row["left_xy"])
+        rx, ry = _pair(row["right_xy"])
+        points.append(
+            GroundControlPoint(
+                name,
+                (_integer(left), _integer(right)),
+                (_number(lx), _number(ly)),
+                (_number(rx), _number(ry)),
+                held,
+            )
+        )
+    error = data["held_out_p95_px"]
+    return TerrainFitEvidence(
+        model, provider, tuple(points), None if error is None else _number(error)
+    )
+
+
+def _decode_foreground(value: object, schema_version: int) -> SavedForeground | None:
     if value is None:
         return None
     data = _object(value)
     alignment = _object(data["alignment"])
+    terrain = None
+    anchor = None
+    if data.get("terrain") is not None:
+        if schema_version < _TERRAIN_SCHEMA_VERSION:
+            raise ValueError("Control-point terrain fits require project manifest version 7.")
+        terrain = _decode_terrain(data["terrain"])
+        anchor = _integer(alignment["anchor"])
     input_key = data["input_key"]
     if (
         not isinstance(input_key, str)
@@ -910,7 +1058,12 @@ def _decode_foreground(value: object) -> SavedForeground | None:
     for record in alignment["panels"]:
         panel = _object(record)
         dx, dy = _pair(panel["shift"])
-        panels.append(GroundPanel(_integer(panel["index"]), (_number(dx), _number(dy))))
+        scale, rotation = 1.0, 0.0
+        if terrain is not None:
+            scale, rotation = _number(panel["scale"]), _number(panel["rotation_deg"])
+        panels.append(
+            GroundPanel(_integer(panel["index"]), (_number(dx), _number(dy)), scale, rotation)
+        )
     for record in alignment["overlaps"]:
         edge = _object(record)
         left, right = _pair(edge["panels"])
@@ -930,7 +1083,9 @@ def _decode_foreground(value: object) -> SavedForeground | None:
             _decode_region(alignment["canvas"]),
             tuple(panels),
             tuple(overlaps),
+            anchor,
         ),
+        terrain,
     )
 
 
@@ -1028,7 +1183,7 @@ def load_project(path: Path) -> MosaicProject:
     try:
         data = _object(json.loads(payload.decode("utf-8")))
         schema_version = _integer(data["version"])
-        if not 1 <= schema_version <= _BAND_SCHEMA_VERSION:
+        if not 1 <= schema_version <= _TERRAIN_SCHEMA_VERSION:
             raise ValueError("Unsupported project manifest version.")
         if not isinstance(data["panels"], list):
             raise ValueError("Expected an ordered panel list.")
@@ -1049,7 +1204,7 @@ def load_project(path: Path) -> MosaicProject:
             filter_name,
             assume,
             _decode_refinement(data["refinement"]),
-            _decode_foreground(data["foreground"]) if schema_version >= 3 else None,
+            _decode_foreground(data["foreground"], schema_version) if schema_version >= 3 else None,
             _decode_composition(data["composition"]) if schema_version >= 3 else None,
             auto_frame_preview=auto_frame,
         )

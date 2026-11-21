@@ -84,6 +84,8 @@ class ForegroundLayer:
         _history(header, "CPU image-space foreground mosaic.")
         x, y = self.alignment.canvas.x, self.alignment.canvas.y
         header.add_history(f"Foreground canvas starts at anchor pixel ({x}, {y}).")
+        if self.alignment.anchor is not None:
+            header.add_history(f"Terrain control-point anchor: panel {self.alignment.anchor + 1}.")
         for panel in self.panels:
             fingerprint = panel.source.descriptor.fingerprint
             index = panel.transform.index + 1
@@ -94,6 +96,11 @@ class ForegroundLayer:
             header.add_history(
                 f"Ground panel {index}: shift ({dx:.8g}, {dy:.8g}) px, weight {panel.weight:g}."
             )
+            if self.alignment.anchor is not None:
+                header.add_history(
+                    f"Ground panel {index}: scale {panel.transform.scale:.8g}, "
+                    f"rotation {panel.transform.rotation_deg:.8g} deg."
+                )
         for edge in self.alignment.overlaps:
             left, right = (index + 1 for index in edge.panels)
             header.add_history(
@@ -140,13 +147,13 @@ class ForegroundLayer:
         if max(abs(dx), abs(dy), abs(canvas.x), abs(canvas.y)) > MAX_FOOTPRINT_COORDINATE:
             return None
         source = panel.source.descriptor
-        corners = raster_bounds(
-            Region(0, 0, source.width, source.height), origin=(dx - canvas.x, dy - canvas.y)
-        ).corners()
-        bounds = enclosing_bounds(corners)
-        if bounds is None or placement is None:
-            return bounds
+        source_bounds = PixelBounds(-0.5, -0.5, source.width - 0.5, source.height - 0.5)
         with np.errstate(over="ignore", invalid="ignore"):
+            corners = panel.transform.placement.forward(source_bounds.corners())
+            corners -= (canvas.x, canvas.y)
+            bounds = enclosing_bounds(corners)
+            if bounds is None or placement is None:
+                return bounds
             return enclosing_bounds(placement.forward(bounds.corners()))
 
     def try_tile(
@@ -178,8 +185,12 @@ class ForegroundLayer:
             px, py = x + self.alignment.canvas.x, y + self.alignment.canvas.y
 
             def locate(panel: ForegroundSource) -> _Coordinates:
-                dx, dy = panel.transform.shift
-                return px - dx, py - dy, usable
+                transform = panel.transform
+                if transform.scale == 1.0 and transform.rotation_deg == 0.0:
+                    dx, dy = transform.shift
+                    return px - dx, py - dy, usable
+                sx, sy = transform.placement.inverse(np.column_stack((px, py))).T
+                return sx, sy, usable
 
             return locate
 
@@ -256,7 +267,7 @@ def propose_composition(
             target += reference.correction.shift
         usable = np.isfinite(target).all(axis=1)
         canvas = ground.alignment.canvas
-        foreground = points[usable] + panel.transform.shift - (canvas.x, canvas.y)
+        foreground = panel.transform.placement.forward(points[usable]) - (canvas.x, canvas.y)
         target = target[usable]
         fit = _fit_placement(foreground, target)
         if fit is not None:

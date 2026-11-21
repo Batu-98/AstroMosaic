@@ -117,7 +117,7 @@ def add_project_commands(parser: ArgumentParser) -> None:
     for command in (validate, export):
         command.add_argument("--band", metavar="FILTER", help="Select one saved sky band.")
     fit = commands.add_parser(
-        "fit-foreground", help="Evaluate manual or automatic terrain points from a saved project."
+        "fit-foreground", help="Fit terrain control points and optionally save the alignment."
     )
     add_fit_command(fit)
     for command in (

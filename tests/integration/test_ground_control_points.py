@@ -4,19 +4,25 @@ import json
 import subprocess
 import sys
 from dataclasses import replace
+from hashlib import sha256
 from pathlib import Path
 from typing import Any
 
+import fitsio
 import numpy as np
 import pytest
+import tifffile
 
 from astromosaic.cli import main
-from astromosaic.core.job import JobContext
+from astromosaic.core.job import JobContext, MosaicCancelled
+from astromosaic.pipeline import layers
 from astromosaic.pipeline.control_points import GroundControlPoint
 from astromosaic.storage.project import (
     align_project_foreground,
     fit_project_foreground_points,
     load_project,
+    propose_project_composition,
+    render_project_layer,
     save_project,
 )
 
@@ -126,6 +132,168 @@ def test_alpaca_translation_and_cancel_leave_legacy_registration_available(
     assert json.loads(capsys.readouterr().out)["fit"]["status"] == "disconnected"
     assert project.read_bytes() == original
     assert load_project(project).current_foreground() == aligned.current_foreground()
+
+
+def test_alpaca_saved_translation_preserves_the_legacy_fit_and_exports(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _require(_ALPACA)
+    context = JobContext()
+    project = replace(load_project(_ALPACA), assume_surface_brightness=True)
+    legacy = align_project_foreground(project, context)
+    before = tmp_path / "legacy-before.fits"
+    render_project_layer(legacy, "foreground", before, context)
+    original = tmp_path / "legacy.astromosaic"
+    save_project(original, legacy)
+    manifest = original.read_bytes()
+    raw = json.loads(manifest)
+    assert raw["version"] == 4
+    assert raw["foreground"]["alignment"]["panels"][1]["shift"] == [48, 16]
+    after = tmp_path / "legacy-after.fits"
+    render_project_layer(load_project(original), "foreground", after, context)
+    assert before.read_bytes() == after.read_bytes()
+    assert int(fitsio.read(after, ext="COVERAGE").sum()) == 80_158
+
+    rows = _rows("alpaca")
+    points = _write_points(tmp_path / "points.json", rows)
+    destination = tmp_path / "translation.astromosaic"
+    args = [*_args(original, points), "-o", str(destination)]
+    cancelled = False
+
+    def stop(done: int, total: int) -> None:
+        nonlocal cancelled
+        cancelled = done == total
+
+    assert main(args, context=JobContext(is_cancelled=lambda: cancelled, on_progress=stop)) == 130
+    assert not destination.exists()
+    _write_points(points, rows[:1])
+    assert main(args) == 1
+    assert not destination.exists()
+    _write_points(points, rows)
+    assert main(args) == 0
+    saved = load_project(destination)
+    assert saved.foreground is not None and saved.foreground.terrain is not None
+    assert saved.foreground.terrain.model == "translation"
+    assert saved.current_foreground() is not None
+    translation = tmp_path / "translation.fits"
+    render_project_layer(saved, "foreground", translation, context)
+    assert int(fitsio.read(translation, ext="COVERAGE").sum()) > 75_000
+    assert main(args) == 1
+    assert json.loads(capsys.readouterr().out.splitlines()[-1])["status"] == "error"
+    assert original.read_bytes() == manifest
+
+
+def test_oxford_saved_similarity_samples_original_pixels_and_invalidates_edits(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _require(_BOAT)
+    source = load_project(_BOAT)
+    paths = [_BOAT, *(panel.source.path for panel in source.panels)]
+    hashes = [sha256(path.read_bytes()).digest() for path in paths]
+    original = tmp_path / "relative.astromosaic"
+    save_project(original, replace(source, assume_surface_brightness=True))
+    points = _write_points(tmp_path / "points.json", _rows("boat"))
+    destination = tmp_path / "similarity.astromosaic"
+    assert main([*_args(original, points), "--anchor", "2", "-o", str(destination)]) == 0
+    assert json.loads(destination.read_bytes())["version"] == 7
+    saved = load_project(destination)
+    registration = saved.foreground
+    assert registration is not None and registration.terrain is not None
+    assert registration.terrain.model == "similarity"
+    assert registration.terrain.held_out_p95_px == pytest.approx(1.15, abs=0.03)
+    alignment = saved.current_foreground()
+    assert alignment is not None and alignment.anchor == 1
+
+    context = JobContext()
+    output = tmp_path / "ground.fits"
+    render_project_layer(saved, "foreground", output, context)
+    assert "CTYPE1" not in fitsio.read_header(output)
+    pixels = fitsio.read(output)
+    coverage = fitsio.read(output, ext="COVERAGE")
+    assert np.count_nonzero(coverage) > 580_000
+    canvas = alignment.canvas
+    y, x = np.indices(pixels.shape, dtype=np.float64)
+    x += canvas.x
+    y += canvas.y
+    summed, counts = np.zeros_like(x), np.zeros(x.shape, dtype=np.uint8)
+    for panel, transform in zip(saved.panels, alignment.panels, strict=True):
+        data = tifffile.imread(panel.source.path)
+        height, width = data.shape
+        angle = np.deg2rad(transform.rotation_deg)
+        u, v = x - transform.shift[0], y - transform.shift[1]
+        sx = (np.cos(angle) * u + np.sin(angle) * v) / transform.scale
+        sy = (-np.sin(angle) * u + np.cos(angle) * v) / transform.scale
+        valid = (sx >= -0.5) & (sx < width - 0.5) & (sy >= -0.5) & (sy < height - 0.5)
+        sx, sy = np.clip(sx[valid], 0, width - 1), np.clip(sy[valid], 0, height - 1)
+        x0, y0 = sx.astype(int), sy.astype(int)
+        x1, y1 = np.minimum(x0 + 1, width - 1), np.minimum(y0 + 1, height - 1)
+        dx, dy = sx - x0, sy - y0
+        summed[valid] += (data[y0, x0] * (1 - dx) + data[y0, x1] * dx) * (1 - dy) + (
+            data[y1, x0] * (1 - dx) + data[y1, x1] * dx
+        ) * dy
+        counts[valid] += 1
+    valid = counts > 0
+    np.testing.assert_array_equal(coverage, valid)
+    np.testing.assert_allclose(pixels[valid], summed[valid] / counts[valid], rtol=1e-6, atol=1e-7)
+    assert np.isnan(pixels[~valid]).all()
+
+    monkeypatch.setattr(layers, "_footprint_reservation", lambda panels, budget: 0)
+    unpruned = tmp_path / "unpruned.fits"
+    render_project_layer(saved, "foreground", unpruned, context)
+    assert output.read_bytes() == unpruned.read_bytes()
+    cancelled = tmp_path / "cancelled.fits"
+    with pytest.raises(MosaicCancelled):
+        render_project_layer(saved, "foreground", cancelled, JobContext(is_cancelled=lambda: True))
+    assert not cancelled.exists()
+    edited = replace(registration.terrain, points=registration.terrain.points[:-1])
+    assert (
+        replace(saved, foreground=replace(registration, terrain=edited)).current_foreground()
+        is None
+    )
+    first, second = saved.panels
+    assert first.source_mask is not None
+    mask = first.source_mask
+    changed_mask = replace(mask, labels=b"\x00" + mask.labels[1:])
+    assert (
+        replace(
+            saved, panels=(replace(first, source_mask=changed_mask), second)
+        ).current_foreground()
+        is None
+    )
+    assert [sha256(path.read_bytes()).digest() for path in paths] == hashes
+
+
+def test_paranal_control_point_placement_retains_the_independent_sky(tmp_path: Path) -> None:
+    case = _DATA / "mix02-paranal/project.astromosaic"
+    _require(case)
+    original = load_project(case)
+    # Both crops come from the same real panorama. Their origins differ by 510 px in X.
+    rows = [
+        {"id": f"{x}-{y}", "panels": [1, 2], "left_xy": [x, y], "right_xy": [x - 510, y]}
+        for x, y in ((610, 848), (690, 878), (780, 894), (970, 875), (1010, 892))
+    ]
+    points = _write_points(tmp_path / "points.json", rows)
+    context = JobContext()
+    sky_before = tmp_path / "sky-before.tiff"
+    render_project_layer(original, "sky", sky_before, context)
+    destination = tmp_path / "paranal.astromosaic"
+    assert main([*_args(case, points), "--anchor", "2", "-o", str(destination)]) == 0
+    saved = load_project(destination)
+    sky_after = tmp_path / "sky-after.tiff"
+    render_project_layer(saved, "sky", sky_after, context)
+    assert sky_before.read_bytes() == sky_after.read_bytes()
+    placement = propose_project_composition(saved, context)
+    assert placement.placement_rms_px is not None and placement.placement_rms_px < 1
+    output = tmp_path / "composition.tiff"
+    render_project_layer(replace(saved, composition=placement), "composition", output, context)
+    with tifffile.TiffFile(output) as tiff:
+        page = tiff.pages[0]
+        pages = page.pages
+        assert pages is not None
+        coverage = pages[0].asarray()
+        contributions = pages[1].asarray()
+        assert set(np.unique(contributions)) >= {0, 1, 2}
+        np.testing.assert_array_equal(coverage != 0, contributions != 0)
 
 
 def test_real_boat_similarity_is_headless_and_ignores_wrong_training_match(
