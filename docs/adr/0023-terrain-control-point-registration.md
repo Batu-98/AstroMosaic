@@ -16,3 +16,7 @@ Keep foreground geometry in the shared CPU processing core. Compose the selected
 ## Consequences
 
 The plan adds a point review workflow, bounded automatic matching, transform-aware tile bounds, and a compatibility check for saved foreground geometry. New models and dependencies require measured accuracy, memory and Windows packaging evidence. Acceptance uses independently captured real data and preserves explicit rejection of unsupported overlaps. [Detailed Phase 7 plan](../phase-7.md)
+
+The 7C source CLI evaluates headless OpenCV SIFT as an optional point provider. Its matched observations and independently marked points use the same anchored fit. Oxford and La Silla passed the fit checks, and the manual path recovered sparse ALPACA ground support. Portable verification and license review govern adoption of the measured wheel. [7C measurements](../phase-7.md#7c-real-observation-results)
+
+The 7D evaluation compared rotation with fixed calibration and with separate shared focal and radial candidates. The best PASSTA candidate reached 4.13 px P95 against the 2 px limit, and the Adirondack depth control rejected a global pose. Phase 7E will integrate translation and similarity. Camera rotation remains an offline measurement until calibrated observations pass the held-out and geometry gates. [7D measurements](../phase-7.md#7d-real-observation-results)
