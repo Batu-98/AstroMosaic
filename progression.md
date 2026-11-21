@@ -1020,6 +1020,13 @@ The table is a status summary, not a replacement for the full exit gates in Sect
 - **Related** Q-028 and [ADR-0025](docs/adr/0025-automatic-sky-preview.md).
 - **Next** Run the fresh solve workflow and verify the locked beta 7 Windows package.
 
+### 2026-11-21 - Sky preview - Rechecked the PA4 ZEA case
+
+- **Changed** The PA4 crop regression exercises the visual preview with the original sRGB TIFFs and checks that scientific export rejects them.
+- **Verified** All four real PA4 ZEA tests passed. The 384 × 384 preview retains 4,869 covered samples. Pruned and all-panel sampling agree byte for byte, with identical coverage and WCS.
+- **Related** Q-028 and [Phase 6D results](docs/phase-6.md#local-zea-geometry-and-performance-results).
+- **Next** Finish the complete source and packaged preview checks.
+
 ## Entry Template
 
 Copy this format into a new entry immediately above this template, preserving chronological order:

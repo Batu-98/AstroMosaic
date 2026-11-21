@@ -179,6 +179,8 @@ The profiler timed the current shared renderer with the finite-seed guard enable
 
 Peak Windows working set and commit were 164.41 and 171.32 MiB for the guarded all-panel export and 162.96 and 170.13 MiB with selection. Full-size candidate selection cut evaluated panel/tile mappings by 75% and elapsed time by 54% in these profiled runs. The source CLI validated and exported both PA4 manifests with empty stderr. The full ZEA CLI run took 39.43 s including process startup. Its TIFF matched the selected profile, and the two-panel TAN CLI output matched the 6A TIFF, including 1,028,380 covered pixels.
 
+Beta 7 recognizes the original PA4 TIFFs as sRGB. The protected 384 × 384 case now checks byte-for-byte tile samples, the coverage mask and the output WCS through the full-resolution visual preview. It verifies candidate pruning and keeps the 4,869-sample coverage baseline. The test also verifies that scientific rendering rejects the encoded panels under the manifest's earlier common-scale declaration. [Automatic sky preview decision](adr/0025-automatic-sky-preview.md) · [PA4 regression](../tests/integration/test_real_zea_mapping.py)
+
 #### Native Preview
 
 The source desktop ran on Windows 11 x64 build 26200 with an Intel Core i5-14600K, an RTX 4070, one display, Qt 6.12.0 and one OpenBLAS thread. The OpenGL viewport created a 3.2 context. Each independent process opened the saved PA4 project in one window. **Process-cold** denotes its first preview and **process-warm** the second preview in the same window. The Windows file cache stayed under OS management. Elapsed time starts at the preview button and ends after the first final-frame paint callback. The CPU computes the proxy and final samples for both viewport backends.

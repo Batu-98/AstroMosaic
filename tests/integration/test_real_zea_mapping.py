@@ -6,7 +6,6 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-import tifffile
 from astropy import units as u
 from astropy.coordinates import ICRS, SkyCoord
 from astropy.wcs import SingularMatrixError
@@ -21,6 +20,7 @@ from astromosaic.storage.project import (
     MosaicProject,
     load_project,
     open_project_sky_panel,
+    preview_project,
     render_project,
 )
 
@@ -125,27 +125,36 @@ def test_real_pa4_zea_bounds_keep_supported_samples_and_fall_back_near_rim(
     np.testing.assert_allclose([x.item(), y.item()], [3000, 2000], atol=1e-7, rtol=0)
 
 
-def test_real_pa4_cropped_render_matches_all_panels(
+def test_real_pa4_cropped_preview_matches_all_panels(
     pa4_project: MosaicProject, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     project = replace(pa4_project, render=replace(pa4_project.render, crop=Region(0, 0, 384, 384)))
-    selected = tmp_path / "selected.tiff"
-    all_panels = tmp_path / "all-panels.tiff"
+    destination = tmp_path / "encoded.tiff"
+    with pytest.raises(ValueError, match="uses sRGB-encoded samples"):
+        render_project(project, destination, JobContext())
+    assert not destination.exists()
+
+    mappings = 0
+    map_panel = TileSky.in_panel
+
+    def count_mapping(self: TileSky, geometry: PanelGeometry, shift: tuple[float, float]):
+        nonlocal mappings
+        mappings += 1
+        return map_panel(self, geometry, shift)
+
+    monkeypatch.setattr(TileSky, "in_panel", count_mapping)
     with warnings.catch_warnings():
         warnings.simplefilter("error", RuntimeWarning)
-        optimized = render_project(project, selected, JobContext())
+        optimized = preview_project(project, JobContext(), allow_visual=True)
+        optimized_mappings, mappings = mappings, 0
         monkeypatch.setattr(mosaic, "zea_footprint", lambda *_args: None)
-        reference = render_project(project, all_panels, JobContext())
+        reference = preview_project(project, JobContext(), allow_visual=True)
 
-    assert optimized.covered_pixels == reference.covered_pixels == 4869
-    assert optimized.rejected_coordinates < reference.rejected_coordinates
-    with tifffile.TiffFile(selected) as actual, tifffile.TiffFile(all_panels) as expected:
-        actual_page, expected_page = actual.pages[0], expected.pages[0]
-        assert isinstance(actual_page, tifffile.TiffPage)
-        assert isinstance(expected_page, tifffile.TiffPage)
-        assert actual_page.description == expected_page.description
-        assert actual_page.asarray().tobytes() == expected_page.asarray().tobytes()
-        assert actual_page.pages is not None and expected_page.pages is not None
-        assert (
-            actual_page.pages[0].asarray().tobytes() == expected_page.pages[0].asarray().tobytes()
-        )
+    assert optimized.visual_only and reference.visual_only
+    assert optimized.output_size == reference.output_size == (384, 384)
+    assert optimized.output_wcs is not None and reference.output_wcs is not None
+    assert optimized.output_wcs.to_header() == reference.output_wcs.to_header()
+    assert optimized_mappings < mappings
+    assert np.count_nonzero(optimized.tile.valid) == 4869
+    np.testing.assert_array_equal(optimized.tile.valid, reference.tile.valid)
+    assert optimized.tile.pixels.tobytes() == reference.tile.pixels.tobytes()
