@@ -276,6 +276,7 @@ This register tracks unresolved decisions, problems, and risks. It is not a work
 - **Closure condition:** Explain the failure in the desktop log and verify a reopened preview that includes each panel and their common coverage.
 - **Resolution:** 2026-11-21. The Command Panel identifies the missing settings. A separate project with linear-light visual copies and a fitted grid previewed both panels on native CPU and OpenGL. The source and portable CLI validated the project. The original file hashes matched.
 - **Follow-up:** 2026-11-21. Beta 4 assigns `Unspecified` to unlabeled panels. The original project reaches brightness validation, and the packaged CPU and OpenGL backends previewed both real linear TIFF panels with their filter labels removed. [Per-band workflow](docs/phase-5c.md)
+- **Follow-up:** 2026-11-21. The latest saved project still referenced the sRGB input TIFFs and the default output grid. A separate visual preview project reused the validated linear-light copies after checking their WCS against the latest sidecars and their sampled values against the sRGB transfer. The beta 6 CLI and native OpenGL checks passed with both panels represented.
 
 ### Q-025 - Identify the local Windows build after source changes
 

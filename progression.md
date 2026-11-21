@@ -999,6 +999,13 @@ The table is a status summary, not a replacement for the full exit gates in Sect
 - **Related** Q-027 and [Windows build verification](docs/windows-release.md#verification-status).
 - **Next** Retain the dialog and atomic publication regressions. Continue the planned terrain pose persistence and rendering in [Phase 7E](docs/phase-7.md#7e-integrate-geometry-rendering-and-persistence).
 
+### 2026-11-21 - Sky preview - Recovered a saved sRGB project
+
+- **Changed** Prepared a separate visual preview project for the most recently saved copy of the two-panel TIFF project. It references the existing float32 linear-light conversions and uses a sky grid that covers both fields.
+- **Verified** Reproduced the brightness-unit failure with the beta 6 CLI. Both original TIFFs have sRGB profiles and no `BUNIT`. The current WCS sidecars and the linear copies agree on a 33 × 33 sample grid per panel. The beta 6 CLI accepted the new project, and the native second-display OpenGL preview covered 120,324 samples, including 25,786 shared by the two panels. The inputs, current manifest and attached WCS files kept their hashes.
+- **Related** Q-024 and [desktop sky preview](docs/phase-3c.md#desktop-workflow).
+- **Next** Use the prepared project for the relative visual preview.
+
 ## Entry Template
 
 Copy this format into a new entry immediately above this template, preserving chronological order:
