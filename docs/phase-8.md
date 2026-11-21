@@ -1,6 +1,6 @@
 # Phase 8 Configurable Color Photometry and Optics
 
-**Status** The 8A contract is frozen and 8B passed local Windows verification in `0.1.0b11`. Each subsequent delivery qualifies its corrections against prepared references. [Architecture and milestones](../astro_mosaic_python_first_architecture_en.md#106-phase-8-delivery-stages) · [ADR-0026](adr/0026-configurable-color-photometry-and-optics.md)
+**Status** The 8A contract is frozen. The 8B photo export passed local Windows verification in `0.1.0b11`, and the adaptive preview and crop follow-up passed in `0.1.0b12`. Each subsequent delivery qualifies its corrections against prepared references. [Architecture and milestones](../astro_mosaic_python_first_architecture_en.md#106-phase-8-delivery-stages) · [ADR-0026](adr/0026-configurable-color-photometry-and-optics.md)
 
 AstroMosaic 0.1.0b7 already frames selected sky panels from their WCS, decodes recognized sRGB TIFFs for Visual Preview and renders scientific mosaics from compatible linear inputs. Its optional scientific relative refinement currently uses mono panels. The new options extend those paths through the same bounded CPU renderer. [Current sky workflow](phase-3c.md#desktop-workflow) · [Existing relative refinement](phase-2.md#relative-refinement)
 
@@ -57,6 +57,12 @@ Source tests passed 231 cases with the previously measured OpenCV wheel availabl
 ### 8B Adaptive preview follow-up
 
 The desktop overview now uses masked area subsampling. Zoom requests full-resolution detail from the visible grid region. The crop editor shows the full grid and lets the user apply a rectangle in output pixels. A version 9 project records per-field automatic framing locks or the automatic mono refinement choices when used. Earlier manifests retain their saved grid and numeric refinement settings. The fixed 512-edge point sample defines the photo tone on the active export grid in both the desktop and CLI. [Controls and persistence](phase-3c.md#adaptive-framing-and-interactive-crop) · [Preview decision](adr/0027-adaptive-sky-preview.md)
+
+The beta 12 source suite passed 234 offscreen checks with the isolated SIFT test dependency. Four native Windows checks passed separately, including both opt-in OpenGL checks. The targeted cases verified mono match-radius bounds, valid-area averaging, exact 1:1 samples, fitting locks, live refresh after a panel edit, crop reset and cancel, and version 9 save and reopen. Ruff, scoped mypy and the lockfile check passed.
+
+The portable desktop and console were built from clean source `99491ad34bbd6cb6469c0f8f7d8bcdf35793baa8` using the Poetry lock. The copied CPU and OpenGL runtimes replayed the original pair with their saved Gaia WCS on the second display. They cancelled and rebuilt the overview, retained the fixed beta 11 tone reference, and loaded the 851 × 226 visible detail in 0.71 and 0.72 seconds respectively on the development host. The warmed full overviews took about 22 seconds with the tests running concurrently. Native framebuffer and screen captures also confirmed the OpenGL detail and the visible crop bounds.
+
+Both desktops dragged and applied the same 1137 × 889 crop at source-grid position (3890, 5096). The reopened project preserved the rectangle and the cropped photo matched the console byte for byte. Independent reopening of Preserve Tone matched all 1,010,793 coverage entries and UInt16 RGB codes against the corresponding region in the full beta 11 reference. Corner and center WCS matched to the measured precision. Nine scientific and layer references also matched on the copied console. A separate clean-machine installation and redistribution review remain open. [Windows launchers](windows-release.md#verification-status)
 
 ### 8B Local Windows package results
 

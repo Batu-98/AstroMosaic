@@ -43,6 +43,8 @@ The **Command Panel** opens at startup and records summaries of desktop operatio
 
 Build a visual sky preview from supported sRGB TIFFs to enable **Export Photo Mosaic**. Choose **Use Preview Tone** or **Preserve Tone** to write a tagged 16-bit TIFF at the full preview grid resolution. [Photo mosaic workflow and CLI](phase-8.md#8b-export-a-photo-mosaic)
 
+With **Live Sky Preview** enabled, an opened sky preview refreshes as its inputs change. Zoom for **1:1** detail and use **Edit Crop** to adjust the automatic bounds on the full grid. **Apply Crop** saves the selected pixel rectangle in the project grid for the next export. [Framing locks and crop controls](phase-3c.md#adaptive-framing-and-interactive-crop)
+
 On import or project reopen, **Panel Settings** automatically fills the available focal length and X and Y pixel sizes and shows the camera model. The readers use FITS keywords, TIFF EXIF/XMP and FITS-style metadata, and XISF instrument properties and FITS keywords. Per-panel edits override the corresponding file values. [Supported optics and units](phase-3b.md#panel-wcs-and-plate-solve-hints)
 
 ### Run the Headless CLI

@@ -336,13 +336,14 @@ This register tracks unresolved decisions, problems, and risks. It is not a work
 
 ### Q-030 - Adaptive framing and interactive preview verification
 
-- **Status / priority** Investigating / P1
+- **Status / priority** Resolved / P1
 - **Opened / updated** 2026-11-22
 - **Affected phase** Phase 8B desktop preview and saved crop follow-up.
 - **Impact and evidence** The fixed point overview could drop fine structures and enlarge aliasing at high zoom. The adaptive overview, 1:1 detail and crop editor must share the saved output geometry and retain fixed photo tone across view changes. [ADR-0027](docs/adr/0027-adaptive-sky-preview.md)
 - **Current assumption** Use bounded linear-light area samples for the overview and exact full-resolution samples for a visible bounded detail window. Preserve user locks and adopt a dragged crop explicitly.
-- **Next action / responsibility** Replay the original owner pair on native CPU and OpenGL and compare a cropped desktop photo with the copied console.
+- **Next action / responsibility** Retain the real crop and zoom replay for future native releases. Include the adaptive workflow in the clean-machine acceptance matrix.
 - **Closure condition** Verify crop editing and reopening, independent output WCS and samples, stable tone, native redraw, resource limits, cancellation and retry in source and portable Windows.
+- **Resolution** 2026-11-22. Beta 12 verified the visible crop handles and 1:1 detail on native CPU and OpenGL. The copied CLI and both desktop paths exported identical crops. Independent WCS, exact RGB and coverage matched the full-resolution reference region. [Beta 12 results](docs/phase-8.md#8b-adaptive-preview-follow-up)
 
 ## New Entry Template
 

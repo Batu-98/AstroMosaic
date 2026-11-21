@@ -53,7 +53,9 @@ Download public DSS reference images from their archives for optional reproducti
 
 ## Verification status
 
-The initial source beta is tagged `v0.1.0b1`. The current development version on `main` is `0.1.0b11`. The Phase 6E local verification record and ZIPs in `.tooling/phase6e-20261119/artifacts/` identify the tested `0.1.0b1` build and its SHA-256 hashes. [Phase 6E evidence](phase-6.md#local-windows-lifecycle-and-package-results) · [GitHub releases](https://github.com/Batu-98/AstroMosaic/releases)
+The initial source beta is tagged `v0.1.0b1`. The current development version on `main` is `0.1.0b12`. The Phase 6E local verification record and ZIPs in `.tooling/phase6e-20261119/artifacts/` identify the tested `0.1.0b1` build and its SHA-256 hashes. [Phase 6E evidence](phase-6.md#local-windows-lifecycle-and-package-results) · [GitHub releases](https://github.com/Batu-98/AstroMosaic/releases)
+
+The beta 12 launchers are in `dist/AstroMosaic-0.1.0b12-windows-x64/` and `dist/astromosaic-cli-0.1.0b12-windows-x64/`. The build records identify clean source commit `99491ad34bbd6cb6469c0f8f7d8bcdf35793baa8` and the launcher checksums. The copied desktop passed real 1:1 detail and mouse crop editing on native CPU and OpenGL. The copied console reopened the saved selection and produced the same tagged TIFF. [Adaptive preview evidence](phase-8.md#8b-adaptive-preview-follow-up)
 
 The beta 11 desktop and console are in `dist/AstroMosaic-0.1.0b11-windows-x64/` and `dist/astromosaic-cli-0.1.0b11-windows-x64/`. Each `BUILD-INFO.json` records the build time, launcher SHA-256 and source commit `e644768177da5013d9aa909621bc38a3d45756ce`. The copied CPU desktop, OpenGL session and CLI produced identical full-resolution tagged sRGB photo TIFFs. Both native display paths passed the compact layout and cancellation/retry checks. [Phase 8B results](phase-8.md#8b-local-windows-package-results)
 

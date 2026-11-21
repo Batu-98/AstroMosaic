@@ -4,12 +4,12 @@ Use this file for concise development history and handoff state. Detailed techni
 
 ## Current State
 
-- **Last updated:** 2026-11-21
+- **Last updated:** 2026-11-22
 - **Active baseline:** Python-first architecture revision 3.12 adds [Phase 7 delivery stages](astro_mosaic_python_first_architecture_en.md#105-phase-7-delivery-stages). [ADR-0023](docs/adr/0023-terrain-control-point-registration.md) records the translation and similarity decision. [ADR-0017](docs/adr/0017-astap-first-validated-solving.md) records the solver policy. See [ADR-0003](docs/adr/0003-windows-first-platform-scope.md) for Windows scope, [ADR-0006](docs/adr/0006-dual-fits-and-tiff-workflow.md) for formats, and [ADR-0007](docs/adr/0007-sky-and-foreground-mosaics.md) for mixed panels.
-- **Current stage:** [8A](docs/phase-8.md#8a-frozen-photo-export-contract) is frozen and [8B](docs/phase-8.md#8b-local-windows-package-results) passed locally. [6E](docs/phase-6.md#local-windows-lifecycle-and-package-results), [7A–7F](docs/phase-7.md#7f-local-windows-results) and the native Plate Solve progress checks also passed locally. Clean-machine acceptance and native distribution review remain open. Linux and macOS support is deferred.
-- **Available artifacts:** The verified beta 11 desktop and console are in `dist/AstroMosaic-0.1.0b11-windows-x64/` and `dist/astromosaic-cli-0.1.0b11-windows-x64/` with their build records. Earlier local betas remain in their versioned folders. The [application test guide](docs/application-tests.md) and [extended cases](docs/application-tests-extension.md) describe the ignored real-observation fixtures. [Release guide](docs/windows-release.md#verification-status)
-- **Implementation / verification:** Beta 11 writes a full-resolution 16-bit sRGB TIFF from the visual sky preview. The native CPU and OpenGL desktops and standalone console produced identical 8917 × 10259 photos. Nine real scientific products matched their references. The source suite passed 231 offscreen checks with the isolated SIFT test dependency and four native checks passed separately. Ruff, scoped mypy and the Poetry lock check passed. [Photo export results](docs/phase-8.md#8b-local-windows-package-results) · [Plate Solve progress](docs/phase-3b.md#beta-10-progress-verification)
-- **Version control:** The current development version on `main` is `0.1.0b11`. The first published source beta uses the annotated Git tag `v0.1.0b1`. [AstroMosaic GitHub repository](https://github.com/Batu-98/AstroMosaic)
+- **Current stage:** [8A](docs/phase-8.md#8a-frozen-photo-export-contract) is frozen. [8B photo export](docs/phase-8.md#8b-local-windows-package-results) and the [adaptive preview follow-up](docs/phase-8.md#8b-adaptive-preview-follow-up) passed locally. [6E](docs/phase-6.md#local-windows-lifecycle-and-package-results), [7A–7F](docs/phase-7.md#7f-local-windows-results) and the native Plate Solve progress checks also passed locally. Clean-machine acceptance and native distribution review remain open. Linux and macOS support is deferred.
+- **Available artifacts:** The verified beta 12 desktop and console are in `dist/AstroMosaic-0.1.0b12-windows-x64/` and `dist/astromosaic-cli-0.1.0b12-windows-x64/` with their build records. Earlier local betas remain in their versioned folders. The [application test guide](docs/application-tests.md) and [extended cases](docs/application-tests-extension.md) describe the ignored real-observation fixtures. [Release guide](docs/windows-release.md#verification-status)
+- **Implementation / verification:** Beta 12 adds per-field framing locks, live refresh, masked area sampling, a full-resolution view region and interactive crop. Both native desktops and the console produced the same cropped photo. Nine real scientific products matched their references. The source suite passed 234 offscreen checks with the isolated SIFT test dependency, and four native checks passed separately. Ruff, scoped mypy and the Poetry lock check passed. [Adaptive preview results](docs/phase-8.md#8b-adaptive-preview-follow-up)
+- **Version control:** The current development version on `main` is `0.1.0b12`. The first published source beta uses the annotated Git tag `v0.1.0b1`. [AstroMosaic GitHub repository](https://github.com/Batu-98/AstroMosaic)
 - **Next action:** Freeze the independent ICC patches, profile assignment and exposure matching controls for 8C. Repeat the 6E and 7F acceptance on a fresh Windows 11 x64 installation using the intended release candidate. Review the native inventory under Q-005 before public portable distribution. [Phase 8](docs/phase-8.md) · [Clean-machine gate](docs/phase-3f.md#pending-clean-machine-check)
 - **Phase 8** The first delivery covers a tagged full-resolution photo TIFF. Q-029 tracks reference data and backend choices for selectable color, brightness, lens and vignetting methods.
 - **Open dependencies:** Q-003 tracks reference data and frozen criteria. Q-010 tracks real-scene diagnostics and the proposed terrain models. Q-016 tracks astrometry. Q-005, Q-009 and Q-020 track distribution and format work. Q-008 tracks deferred platforms and Q-011 deferred visual fill. Resolved Q-022 and Q-023 record the Windows lifecycle and ZEA results.
@@ -52,6 +52,7 @@ The table is a status summary, not a replacement for the full exit gates in Sect
 | 7 - Terrain panorama registration | 7A–7F local checks passed | Repeat the intended portable candidate on a fresh Windows 11 x64 installation. PA4 and the unsupported rotation models retain their recorded outcomes. |
 | 8A - Photo export contract | Frozen for 8B | Record supported inputs, method compatibility, profile provenance, the real owner pair, and sample, WCS, cancellation and memory gates before implementation. |
 | 8B - Full-resolution photo TIFF | Local checks passed | The native CPU and OpenGL desktops and Qt-free CLI produced the same real photo. Independent reopening, scientific parity, cancellation and retry passed. |
+| 8B follow-up - Adaptive preview and crop | Local checks passed | Per-field locks, live update, area sampling, 1:1 inspection and interactive crop passed. The real crop matched the standalone export and the full reference region. |
 
 ## Journal Rules
 
@@ -1127,6 +1128,13 @@ The table is a status summary, not a replacement for the full exit gates in Sect
 - **Verified** The focused numerical and native checks covered validity-weighted overview samples, exact detail, crop handles and OpenGL drawing. The existing scientific and project controls passed their focused runs.
 - **Related** Q-030 and [ADR-0027](docs/adr/0027-adaptive-sky-preview.md).
 - **Next** Verify the original TIFF pair, finish the source suite, and build and check the portable runtime from a clean commit.
+
+### 2026-11-22 - Windows build - Verified beta 12 adaptive preview and crop
+
+- **Changed** Built the versioned Windows launchers from clean commit `99491ad34bbd6cb6469c0f8f7d8bcdf35793baa8` using the lockfile.
+- **Verified** The real pair passed native CPU and OpenGL overview, 1:1 detail, crop editing and cancellation on the secondary display. Both desktops and the copied CLI exported the same crop. Its WCS, coverage and preserved-tone codes matched the full reference region. All nine real scientific products matched their references.
+- **Related** Q-030 and [beta 12 verification](docs/phase-8.md#8b-adaptive-preview-follow-up).
+- **Next** Prepare the 8C profile and exposure references and retain clean-machine acceptance for the release candidate.
 
 ## Entry Template
 
