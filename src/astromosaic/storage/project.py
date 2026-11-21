@@ -3,7 +3,7 @@
 import json
 import os
 from base64 import b64decode, b64encode
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Sequence
 from contextlib import ExitStack, contextmanager
 from dataclasses import asdict, dataclass, replace
 from hashlib import sha256
@@ -41,6 +41,12 @@ from astromosaic.geometry.image import CompositionSpec, LayerPlacement
 from astromosaic.io import PanelSource, SkyMask, open_panel
 from astromosaic.io.atomic import atomic_binary_file
 from astromosaic.io.fits import optional_header_text
+from astromosaic.pipeline.control_points import (
+    ControlPointFit,
+    GroundControlPoint,
+    ModelChoice,
+    fit_ground_control_points,
+)
 from astromosaic.pipeline.foreground import (
     ForegroundAlignment,
     ForegroundPairDiagnostic,
@@ -48,6 +54,7 @@ from astromosaic.pipeline.foreground import (
     GroundPanel,
     align_foreground,
 )
+from astromosaic.pipeline.ground_features import GroundFeatureFit, fit_ground_features
 from astromosaic.pipeline.layers import (
     ForegroundLayer,
     ForegroundSource,
@@ -558,6 +565,54 @@ def align_project_foreground(
         foreground=SavedForeground(project.foreground_key(inputs), aligned),
         composition=project.composition if keep_placement else None,
     )
+
+
+@contextmanager
+def _point_sources(project: MosaicProject, context: JobContext) -> Iterator[dict[int, PanelSource]]:
+    inputs = project.foreground_inputs()
+    with ExitStack() as stack:
+        yield {
+            index: _open_ground_source(project, index, mask, context, stack)
+            for index, mask in inputs
+        }
+    for index, _ in inputs:
+        _check_reference("Source", project.panels[index].source, context)
+    context.check_cancelled()
+
+
+def fit_project_foreground_points(
+    project: MosaicProject,
+    points: Sequence[GroundControlPoint],
+    context: JobContext,
+    *,
+    model: ModelChoice = "auto",
+    anchor: int | None = None,
+) -> ControlPointFit:
+    """Evaluate manual points using active ground masks and verified source files."""
+    with _point_sources(project, context) as sources:
+        return fit_ground_control_points(
+            sources, points, project.render.max_working_bytes, context, model=model, anchor=anchor
+        )
+
+
+def fit_project_foreground_features(
+    project: MosaicProject,
+    context: JobContext,
+    *,
+    model: ModelChoice = "auto",
+    anchor: int | None = None,
+    holdouts: Sequence[GroundControlPoint] = (),
+) -> GroundFeatureFit:
+    """Evaluate automatic suggestions on verified, foreground-selected source files."""
+    with _point_sources(project, context) as sources:
+        return fit_ground_features(
+            sources,
+            project.render.max_working_bytes,
+            context,
+            model=model,
+            anchor=anchor,
+            holdouts=holdouts,
+        )
 
 
 @contextmanager

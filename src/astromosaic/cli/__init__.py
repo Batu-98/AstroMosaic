@@ -217,7 +217,7 @@ def main(argv: list[str] | None = None, *, context: JobContext | None = None) ->
     mosaic.add_argument("--progress", action="store_true", help="Report tile progress to stderr.")
     add_project_commands(
         commands.add_parser(
-            "project", help="Create, validate or export saved AstroMosaic projects."
+            "project", help="Create, inspect, fit or export saved AstroMosaic projects."
         )
     )
     arguments = parser.parse_args(argv)

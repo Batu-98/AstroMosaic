@@ -16,6 +16,7 @@ from threading import current_thread, main_thread
 from types import FrameType
 from typing import TYPE_CHECKING, TextIO
 
+from astromosaic.cli.ground_points import add_fit_command, fit_project_points
 from astromosaic.cli.render_options import (
     add_render_options,
     panel_assignments,
@@ -66,7 +67,11 @@ def add_project_commands(parser: ArgumentParser) -> None:
     export.add_argument("--progress", action="store_true", help="Report tile progress to stderr.")
     for command in (validate, export):
         command.add_argument("--band", metavar="FILTER", help="Select one saved sky band.")
-    for command in (create, bands, validate, export):
+    fit = commands.add_parser(
+        "fit-foreground", help="Evaluate manual or automatic terrain points from a saved project."
+    )
+    add_fit_command(fit)
+    for command in (create, bands, validate, export, fit):
         command.add_argument("--json", action="store_true", help="Emit a versioned JSON result.")
 
 
@@ -155,8 +160,15 @@ def _render_progress_event(done: int, total: int) -> None:
     _write_event("progress", stage="render", completed_pixels=done, total_pixels=total)
 
 
+def _foreground_progress(done: int, total: int, json_output: bool) -> None:
+    if json_output:
+        _write_event("progress", stage="foreground-fit", completed=done, total=total)
+    else:
+        print(f"Foreground fit: {done}/{total}", file=sys.stderr, flush=True)
+
+
 @contextmanager
-def _export_context() -> Iterator[JobContext]:
+def _interruptible_context() -> Iterator[JobContext]:
     from astromosaic.core.job import DEFAULT_JOB_CONTEXT, JobContext
 
     if current_thread() is not main_thread():
@@ -169,7 +181,7 @@ def _export_context() -> Iterator[JobContext]:
         nonlocal interrupted
         interrupted = True
 
-    # Let the renderer finish its cleanup even when the console sends repeated signals.
+    # Let the job finish its cleanup even when the console sends repeated signals.
     signals = [signal.SIGINT]
     if sys.platform == "win32":
         signals.append(signal.SIGBREAK)
@@ -192,7 +204,7 @@ def _export(arguments: Namespace, result: dict[str, object], context: JobContext
     if band is not None:
         result["band"] = band
     reporter = _render_progress_event if arguments.json else None
-    with _export_context() if context is None else nullcontext(context) as job:
+    with _interruptible_context() if context is None else nullcontext(context) as job:
         job = with_render_reporting(job, arguments.progress, reporter)
         job.check_cancelled()
         project = load_project(arguments.path)
@@ -262,6 +274,16 @@ def run_project(arguments: Namespace, *, context: JobContext | None = None) -> i
                 message = (
                     f"Validated {sky.panels} sky panel(s) for {sky.width} x {sky.height} pixels."
                 )
+            elif action == "fit-foreground":
+                with (
+                    _interruptible_context() if context is None else nullcontext(context) as fit_job
+                ):
+                    fit_job = with_render_reporting(
+                        fit_job,
+                        arguments.progress,
+                        lambda done, total: _foreground_progress(done, total, arguments.json),
+                    )
+                    message = fit_project_points(arguments, result, fit_job)
             else:
                 message = _export(arguments, result, context)
         except (KeyboardInterrupt, MosaicCancelled):

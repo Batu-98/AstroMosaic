@@ -18,16 +18,23 @@ from astromosaic.core.masks import (
 from astromosaic.io import PanelSource
 
 DETECTION_EDGE = 128
+MATCHING_EDGE = 768
 
 
 def read_thumbnail(
-    source: PanelSource, edge: int, budget: int, context: JobContext, *, binary_mask: bool = False
+    source: PanelSource,
+    edge: int,
+    budget: int,
+    context: JobContext,
+    *,
+    binary_mask: bool = False,
+    complete_support: bool = False,
 ) -> Tile:
     """Area-average valid pixels using a single decoded source tile at a time."""
     panel = source.descriptor
     width, height = panel.width, panel.height
     columns, rows = bounded_grid((width, height), edge)
-    if edge > MASK_EDGE:
+    if edge > (MATCHING_EDGE if complete_support else MASK_EDGE):
         raise ValueError("The mask thumbnail exceeds the supported grid size.")
     reserved = 128 * columns * rows
     step = 256
@@ -71,6 +78,10 @@ def read_thumbnail(
 
     context.check_cancelled()
     valid = counts > 0
+    if complete_support:
+        cell_widths = np.diff(np.arange(columns + 1, dtype=np.int64) * width // columns)
+        cell_heights = np.diff(np.arange(rows + 1, dtype=np.int64) * height // rows)
+        valid &= counts == cell_heights[:, None] * cell_widths
     pixels = np.full((rows, columns), np.nan, dtype=np.float32)
     np.divide(sums, counts, out=pixels, where=valid)
     return Tile(Region(0, 0, columns, rows), pixels, valid)
