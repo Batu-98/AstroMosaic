@@ -126,6 +126,7 @@ The viewport command checks a small projection and exits. The [Phase 0 evidence]
 | [Phase 5C per-band output](phase-5c.md) | Saved sky band assignments, individual previews and exports, and batch jobs. |
 | [Phase 6 real-observation reliability](phase-6.md) | Reference data, foreground pairing, masked solving, ZEA previews, and Windows lifecycle and release acceptance. |
 | [Phase 7 terrain panorama registration](phase-7.md) | Panorama research, manual and automatic terrain points, camera geometry, and real-data Windows acceptance. |
+| [Proposed Phase 8 color, photometry and optics](phase-8.md) | Selectable input profiles, color transforms, exposure and brightness matching, lens corrections, vignetting and photo export. |
 | [ADR-0001](adr/0001-python-first-baseline.md) | Records which architecture is active and which decisions remain unverified. |
 
 All project Markdown, source comments, identifiers, logs, and default application text are written in English.

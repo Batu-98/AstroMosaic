@@ -323,6 +323,16 @@ This register tracks unresolved decisions, problems, and risks. It is not a work
 - **Closure condition** Both original panels solve and appear in the preview with measurable overlap. The saved grid changes only on explicit adoption and scientific export still rejects the encoded panels.
 - **Resolution** 2026-11-21. Source OpenGL and bundled CPU and OpenGL each solved both originals and built the preview. The bundled runs matched 109,331 valid samples and 23,020 common samples. Explicit grid adoption and scientific rejection passed, and the inputs retained their hashes. [Windows workflow verification](docs/phase-3c.md#windows-verification)
 
+### Q-029 - Configurable color photometry and optics
+
+- **Status / priority** Open / P1
+- **Opened / updated** 2026-11-21
+- **Affected phase** Proposed Phase 8 photo export and configurable corrections.
+- **Impact and evidence** Beta 7 previews the original sRGB TIFFs at a fitted sky grid. A complete photo output path needs tagged full-resolution export. Additional fits need measurements that isolate color encoding, exposure, optics and sky gradients. [Beta 7 evidence](docs/phase-3c.md#windows-verification)
+- **Current assumption** Deliver the sRGB photo case first using the existing color transfer, then qualify ICC conversion and named brightness and optical methods. Keep Phase 7 terrain geometry and current scientific calibration gates as regression controls. [Method catalog](docs/phase-8.md)
+- **Next action / responsibility** Confirm the Phase 8 stages and freeze 8A reference data. Identify representative ICC profiles, a matched flat and calibrated lens sample, and a stable exposure bracket sequence. Review the Windows ICC backend and lens data distribution terms under Q-005.
+- **Closure condition** Each shipped method exposes its data requirements, effective settings and fit diagnostics. Verify source preservation, desktop/CLI parity, reproducible tagged photo export and scientific output parity on the frozen cases.
+
 ## New Entry Template
 
 ```markdown

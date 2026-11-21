@@ -11,6 +11,7 @@ Use this file for concise development history and handoff state. Detailed techni
 - **Implementation / verification:** Beta 7 verified the original two-panel sky preview in the bundled Windows CPU and OpenGL runtimes. Both covered 109,331 preview samples with 23,020 shared samples. All 219 source tests passed across offscreen and native Windows checks. Ruff, mypy and the Poetry lock check passed. The earlier Phase 6 verification contains eight corrected lifecycle sequences and 54 scientific outputs across source and portable desktop and CLI. [Windows preview evidence](docs/phase-3c.md#windows-verification)
 - **Version control:** The current development version on `main` is `0.1.0b7`. The first published source beta uses the annotated Git tag `v0.1.0b1`. [AstroMosaic GitHub repository](https://github.com/Batu-98/AstroMosaic)
 - **Next action:** Start 7E with validated translation and similarity geometry, tile sampling, and compatibility for saved translations. Keep the 7C SIFT provider optional pending clean-machine checks and native distribution review under Q-005. Tagged release packaging and fresh Windows acceptance remain open. [Release verification status](docs/windows-release.md#verification-status)
+- **Proposed follow-up** [Phase 8](docs/phase-8.md) covers full-resolution photo export and selectable color, brightness, lens and vignetting methods. Q-029 tracks the proposed acceptance data and backend choices.
 - **Open dependencies:** Q-003 tracks reference data and frozen criteria. Q-010 tracks real-scene diagnostics and the proposed terrain models. Q-016 tracks astrometry. Q-005, Q-009 and Q-020 track distribution and format work. Q-008 tracks deferred platforms and Q-011 deferred visual fill. Resolved Q-022 and Q-023 record the Windows lifecycle and ZEA results.
 
 ## Phase Overview
@@ -1033,6 +1034,13 @@ The table is a status summary, not a replacement for the full exit gates in Sect
 - **Verified** Source OpenGL and packaged CPU and OpenGL each solved the original TIFFs and previewed both panels in an untitled project. The packaged runs matched 109,331 valid samples and 23,020 shared samples on the second display. Both launchers report beta 7. Source checks passed 217 offscreen tests and two native OpenGL tests. Ruff, mypy and the Poetry lock check passed.
 - **Related** Resolved Q-028. [Windows build record](docs/windows-release.md#verification-status) · [Preview workflow](docs/phase-3c.md#desktop-workflow).
 - **Next** Retain the preview and export boundary regressions. The planned terrain work continues in Phase 7E, with clean-machine and public distribution checks tracked separately.
+
+### 2026-11-21 - Phase 8 - Proposed configurable color photometry and optics
+
+- **Changed** Added a method catalog and staged acceptance for photo export, profile conversion, exposure and brightness matching, lens geometry and vignetting. Linked the proposal from the active architecture.
+- **Verified** Reviewed the proposed methods against the current beta 7 processing contract, published PTGui behavior, Mosaic Master source and the ICC and lens references. Checked the outline and document links.
+- **Related** Q-029 and [proposed ADR-0026](docs/adr/0026-configurable-color-photometry-and-optics.md).
+- **Next** Freeze the 8A contracts and reference data when the owner schedules Phase 8. Use the two original sRGB TIFFs for the 8B photo export acceptance.
 
 ## Entry Template
 

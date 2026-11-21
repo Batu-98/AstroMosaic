@@ -493,6 +493,10 @@ Start 7A when the Phase 6A terrain references and 6B diagnostic checks are ready
 | 7E | Shared rendering and compatible persistence | Compose transforms in the tile sampler, check independent sky and ground coverage, and reopen both new and earlier saved geometry. |
 | 7F | Point review and Windows delivery | Verify manual editing, preview, cancellation and independent exports across native Windows source and portable launchers on the real reference set. |
 
+### 10.6 Proposed Phase 8 Delivery Stages
+
+Phase 8 proposes selectable profile, color conversion, exposure, brightness, lens geometry and vignetting methods. Its first deliverable is full-resolution photo export from the current sRGB sky preview. Later stages qualify optical profiles, flats, overlap fits and bracketed-exposure experiments with independent measurements. The delivery gates cover scientific output parity, bounded sampling, saved project compatibility and desktop/CLI automation. [Detailed Phase 8 method catalog and acceptance](docs/phase-8.md) · [Proposed ADR-0026](docs/adr/0026-configurable-color-photometry-and-optics.md)
+
 ## 11. Validation and Acceptance Criteria
 
 **Phase 6 and 7 test data requirement.** Use real observational data exclusively for reproductions, automated and manual regressions, benchmarks, and acceptance in both phases. Establish truth from catalog matches, independently measured corresponding points, archive reference products, and independent sample and WCS checks. Keep source lineage for any calibrated or cropped copy. [Phase 6 data and provenance](docs/phase-6.md#test-data-requirement) · [Phase 7 real-data measurements](docs/phase-7.md#real-data-and-acceptance-measurements)
