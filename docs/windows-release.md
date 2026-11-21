@@ -53,7 +53,9 @@ Download public DSS reference images from their archives for optional reproducti
 
 ## Verification status
 
-The initial source beta is tagged `v0.1.0b1`. The current development version on `main` is `0.1.0b7`. The Phase 6E local verification record and ZIPs in `.tooling/phase6e-20261119/artifacts/` identify the tested `0.1.0b1` build and its SHA-256 hashes. [Phase 6E evidence](phase-6.md#local-windows-lifecycle-and-package-results) · [GitHub releases](https://github.com/Batu-98/AstroMosaic/releases)
+The initial source beta is tagged `v0.1.0b1`. The current development version on `main` is `0.1.0b8`. The Phase 6E local verification record and ZIPs in `.tooling/phase6e-20261119/artifacts/` identify the tested `0.1.0b1` build and its SHA-256 hashes. [Phase 6E evidence](phase-6.md#local-windows-lifecycle-and-package-results) · [GitHub releases](https://github.com/Batu-98/AstroMosaic/releases)
+
+The beta 8 desktop and console are in `dist/AstroMosaic-0.1.0b8-windows-x64/` and `dist/astromosaic-cli-0.1.0b8-windows-x64/`. Their build records identify source commit `3ab8e3eb8f899da31722316ec06002d0e74a4c0f` and the launcher checksums. The console saved and exported the real Oxford and ALPACA fits, and the desktop CPU and OpenGL previews reopened the Oxford fit on the second display. The Oxford exports matched across the two launchers and source. Fresh Windows acceptance and redistribution review remain open. [Phase 7E evidence](phase-7.md#7e-local-windows-package-results)
 
 The beta 7 desktop and console are in `dist/AstroMosaic-0.1.0b7-windows-x64/` and `dist/astromosaic-cli-0.1.0b7-windows-x64/`. Their build records identify clean source commit `023595ec62f4d634da64ebb7f37e0f0744a0021d` and the launcher checksums. The launchers report version `0.1.0b7`. The bundled desktop solved the two original owner TIFFs and built the fitted sRGB preview in an untitled project on native CPU and OpenGL. Existing saved projects can enable **Auto Frame**. Scientific rendering requires compatible linear sources, including when a common scale is declared. [Beta 7 workflow and evidence](phase-3c.md#windows-verification)
 

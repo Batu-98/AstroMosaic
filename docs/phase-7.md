@@ -1,6 +1,6 @@
 # Phase 7 Terrain Panorama Registration
 
-**Status** The 7A–7D checks ran on the Windows 11 x64 development host. Oxford Boat and La Silla passed independent automatic-fit checks, and the existing and manual translation paths cover ALPACA. The 7D experiment improved PASSTA and PA4 reprojection errors with camera rotation, but both cases still exceed the frozen tolerance. Translation and similarity are the supported models for 7E. The scientific sky pipeline continues to use its own masks and celestial WCS. [Phase 6 handoff](phase-6.md#handoff-to-phase-7a) · [Geometry decision](adr/0023-terrain-control-point-registration.md)
+**Status** Phases 7A–7E passed the applicable local checks on Windows 11 x64. Beta 8 renders saved translation and similarity fits. The 7D camera-rotation experiments remain outside the frozen tolerance. Phase 7F covers desktop point review and fresh Windows acceptance. [Phase 6 handoff](phase-6.md#handoff-to-phase-7a) · [Geometry decision](adr/0023-terrain-control-point-registration.md)
 
 ## Research Findings
 
@@ -320,6 +320,12 @@ Project manifest version 7 stores the anchor, model, poses, accepted fit status,
 - **Paranal** Control points on the two real panorama crops used their known crop offset. Shared-horizon placement and TIFF composition reopened with the expected contribution codes. The sky TIFF bytes, including WCS, samples and coverage, agreed before and after realignment. This is a pipeline control from one panorama. Oxford and ALPACA supply the independent exposure checks.
 
 Run the real replay with `python -m pytest -q tests/integration/test_ground_control_points.py`. The regressions also verify that editing the saved point snapshot or ground mask invalidates the cached pose.
+
+### 7E local Windows package results
+
+The locked beta 8 console saved and reopened Oxford Boat with 588,021 covered foreground samples. The FITS bytes matched the source renderer. It exported 80,158 covered samples for the legacy ALPACA project and 79,948 for its landmark translation. Adirondack refused publication. The Paranal composition reopened with 1,457,089 covered samples and matching contributions. Its sky TIFF, the original project manifests and the observation files retained their hashes.
+
+The production desktop title reported beta 8. The packaged desktop workflow on the secondary LS24DG30X displayed 196,771 covered Oxford preview samples in both CPU and OpenGL modes. Both exports matched the console FITS bytes. The source suite passed 220 offscreen tests and the two opt-in native tests. An isolated source SIFT run also saved the three-panel Oxford fit with 0.97 px held-out P95. The source and packaged console rendered that manifest to identical FITS with 860,445 covered samples. [Local build records](windows-release.md#verification-status)
 
 ## 7F Ship the Review Workflow and Verify Windows
 
