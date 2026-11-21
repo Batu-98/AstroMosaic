@@ -29,7 +29,12 @@ from astromosaic.pipeline.masking import (
     read_thumbnail,
     suggest_foreground,
 )
-from astromosaic.pipeline.mosaic import MosaicResult, PreviewFrame
+from astromosaic.pipeline.mosaic import (
+    MosaicResult,
+    PreviewFrame,
+    SkyCalibrationError,
+    SkyCalibrationRequirement,
+)
 from astromosaic.storage.project import (
     Layer,
     MosaicProject,
@@ -58,6 +63,7 @@ class BackgroundJob[Result](QThread):
         super().__init__(parent)
         self.result: Result | None = None
         self.error: str | None = None
+        self.calibration_requirement: SkyCalibrationRequirement | None = None
         self.cancelled = False
         self._cancel = Event()
         self._last_update = 0.0
@@ -78,6 +84,8 @@ class BackgroundJob[Result](QThread):
             self.cancelled = True
         except (OSError, RuntimeError, ValueError) as error:
             self.error = str(error)
+            if isinstance(error, SkyCalibrationError):
+                self.calibration_requirement = error.requirement
         except Exception as error:
             logging.getLogger(__name__).error("Unexpected job error (%s).", type(error).__name__)
             self.error = f"Unexpected job error ({type(error).__name__})."

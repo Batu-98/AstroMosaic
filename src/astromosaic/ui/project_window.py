@@ -6,7 +6,7 @@ from importlib.metadata import version
 from pathlib import Path
 from typing import cast
 
-from PySide6.QtCore import QSettings, QSignalBlocker, Qt, QTimer, Slot
+from PySide6.QtCore import QSettings, QSignalBlocker, QStandardPaths, Qt, QTimer, Slot
 from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -29,6 +29,7 @@ from PySide6.QtWidgets import (
 from astromosaic.astrometry.hints import PanelOptics
 from astromosaic.astrometry.solve import read_solution_diagnostics
 from astromosaic.display import DisplayFrame, highlight_overlap
+from astromosaic.pipeline.mosaic import SkyCalibrationRequirement
 from astromosaic.storage.project import (
     FileReference,
     Layer,
@@ -80,6 +81,12 @@ _Job = (
     | PlateSolveJob
 )
 _LAYERS: tuple[Layer, ...] = ("sky", "foreground", "composition")
+_CALIBRATION_GUIDANCE: dict[SkyCalibrationRequirement, str] = {
+    "filter": "Set Common filter in Mosaic Settings for unlabeled panels. "
+    "For different filters, select a Sky band.",
+    "brightness": "Use linear panels with compatible brightness units. For linear panels on a "
+    "shared scale, select Declare a common surface-brightness scale in Mosaic Settings.",
+}
 
 
 class ProjectWindow(QMainWindow):
@@ -139,9 +146,8 @@ class ProjectWindow(QMainWindow):
         command_dock = QDockWidget("Command Panel", self)
         command_dock.setWidget(self.command_panel)
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, command_dock)
-        command_dock.hide()
-        command_dock.visibilityChanged.connect(self._focus_command_panel)
         self.command_panel_action = command_dock.toggleViewAction()
+        self.command_panel_action.triggered.connect(self._focus_command_panel)
         tools_menu.addAction(self.command_panel_action)
         self.revalidate_solve_action = panel_menu.addAction(
             "Revalidate Plate Solution", self._revalidate_plate_solve
@@ -266,8 +272,11 @@ class ProjectWindow(QMainWindow):
         footer.addWidget(self.status, 1)
         footer.addWidget(self.progress)
         layout.addLayout(footer)
-        self.panels.properties.invalidEdit.connect(self.status.setText)
+        self.panels.properties.invalidEdit.connect(self._invalid_panel_edit)
         self._refresh()
+        self.resizeDocks(
+            [command_dock], [command_dock.minimumSizeHint().height()], Qt.Orientation.Vertical
+        )
 
     def _refresh(self, selected: int = -1) -> None:
         if self._solved_panels is not self.project.panels:
@@ -485,7 +494,7 @@ class ProjectWindow(QMainWindow):
     def _new(self) -> None:
         if self._confirm_discard():
             self._set_project(MosaicProject(), None)
-            self.status.setText("New project.")
+            self._report_operation("New project.")
 
     def _open(self) -> None:
         if not self._confirm_discard():
@@ -496,7 +505,7 @@ class ProjectWindow(QMainWindow):
         try:
             path = Path(name)
             self._set_project(load_project(path), path)
-            self.status.setText(f"Opened {path.name}.")
+            self._report_operation(f"Opened {path.name}.")
         except (OSError, ValueError) as error:
             self._error("Open failed", error)
 
@@ -541,7 +550,7 @@ class ProjectWindow(QMainWindow):
             return False
         self.project_path, self._saved = path, self.project
         self._refresh(self.panels.currentIndex().row())
-        self.status.setText(f"Saved {path.name}.")
+        self._report_operation(f"Saved {path.name}.")
         return True
 
     def _add(self) -> None:
@@ -560,10 +569,11 @@ class ProjectWindow(QMainWindow):
             self.project = replace(self.project, panels=self.project.panels + tuple(additions))
             self._refresh(start)
             if additions:
+                self._report_operation(f"Added {len(additions)} panel(s).")
                 indices = tuple(range(start, len(self.project.panels)))
                 self._launch_job(ForegroundJob(self.project, indices, self), "Checking foreground…")
             else:
-                self.status.setText("Panels already added.")
+                self._report_operation("Panels already added.")
         except (OSError, ValueError) as error:
             self._error("Add failed", error)
 
@@ -577,7 +587,7 @@ class ProjectWindow(QMainWindow):
             try:
                 self.project = self.project.relink_panel(index, Path(name))
                 self._refresh(index)
-                self.status.setText(f"Relinked {Path(name).name}.")
+                self._report_operation(f"Relinked {Path(name).name}.")
             except (OSError, ValueError) as error:
                 self._error("Relink failed", error)
 
@@ -586,6 +596,7 @@ class ProjectWindow(QMainWindow):
         panels = self.project.panels
         self.project = replace(self.project, panels=panels[:index] + panels[index + 1 :])
         self._refresh(index)
+        self._report_operation(f"Removed {panels[index].source.path.name}.")
 
     def _panel_settings(self) -> None:
         index = self.panels.currentIndex().row()
@@ -612,7 +623,7 @@ class ProjectWindow(QMainWindow):
             self._panel_dialog = None
             dialog.deleteLater()
 
-    def _update_panel(self, index: int, panel: ProjectPanel) -> None:
+    def _update_panel(self, index: int, panel: ProjectPanel, *, summary: str | None = None) -> None:
         panels = self.project.panels
         previous = panels[index]
         if panel == previous:
@@ -630,6 +641,11 @@ class ProjectWindow(QMainWindow):
             if self._solved_panels is panels:
                 self._solved_panels = self.project.panels
         self._refresh(index)
+        self._report_operation(summary or f"Updated settings for {panel.source.path.name}.")
+
+    @Slot(str)
+    def _invalid_panel_edit(self, detail: str) -> None:
+        self._report_operation("Invalid panel edit.", detail=detail)
 
     def _check_foreground(self) -> None:
         index = self.panels.currentIndex().row()
@@ -645,8 +661,9 @@ class ProjectWindow(QMainWindow):
     def _open_mask_editor(self, *, propose: bool) -> None:
         index = self.panels.currentIndex().row()
         if index >= 0 and not self._is_running():
+            name = self.project.panels[index].source.path.name
             self._launch_job(
-                MaskEditorJob(self.project, index, propose, self), "Preparing sky mask…"
+                MaskEditorJob(self.project, index, propose, self), f"Preparing sky mask for {name}…"
             )
 
     def _settings(self) -> None:
@@ -660,17 +677,20 @@ class ProjectWindow(QMainWindow):
                     self._error("Invalid mosaic settings", error)
                     continue
                 self._refresh(self.panels.currentIndex().row())
+                summary = "Mosaic settings applied."
                 if previous.composition is not None and self.project.composition is None:
-                    self.status.setText("Set the composition placement for the new sky projection.")
+                    summary += " Set the composition placement for the new sky projection."
+                self._report_operation(summary)
                 break
         finally:
             dialog.deleteLater()
 
     def _plate_solve_settings(self) -> None:
         dialog = PlateSolveSettings(self)
+        dialog.operation_summary.connect(self.command_panel.append_summary)
         try:
             if dialog.exec():
-                self.status.setText("Saved local plate solve settings.")
+                self._report_operation("Saved local plate solve settings.")
         finally:
             dialog.deleteLater()
 
@@ -708,7 +728,7 @@ class ProjectWindow(QMainWindow):
                     attempts = saved_attempts
             except (OSError, ValueError) as error:
                 if outcome is None:
-                    self.status.setText(str(error))
+                    self._report_operation("Could not read plate solve details.", detail=str(error))
                     return
                 has_wcs = False
                 quality = {}
@@ -728,15 +748,22 @@ class ProjectWindow(QMainWindow):
         if self._is_running() or not self.project.sky_indices():
             return
         if self.project_path is None:
-            chosen = QFileDialog.getExistingDirectory(self, "Choose Folder for WCS Sidecars")
-            if not chosen:
+            local_data = QStandardPaths.writableLocation(
+                QStandardPaths.StandardLocation.AppLocalDataLocation
+            )
+            if not local_data:
+                self._report_operation("Could not locate local application data for WCS sidecars.")
                 return
-            directory = Path(chosen)
+            directory = Path(local_data) / "wcs"
         else:
             directory = self.project_path.with_name(f"{self.project_path.name}.wcs")
         options = replace(load_plate_solve_settings(), revalidate=selected_panel is not None)
         job = PlateSolveJob(self.project, options, directory, self, selected_panel=selected_panel)
-        self._launch_job(job, "Finding sky panels that need a WCS…")
+        message = "Preparing plate solve for sky panels that need a WCS…"
+        if selected_panel is not None:
+            name = self.project.panels[selected_panel].source.path.name
+            message = f"Revalidating plate solution for {name}…"
+        self._launch_job(job, message)
 
     def _start(self) -> None:
         if self._is_running() or not self.project.panels:
@@ -755,9 +782,10 @@ class ProjectWindow(QMainWindow):
             path = path.with_suffix(
                 {_FITS_FILTER: ".fits", _XISF_FILTER: ".xisf"}.get(selected, ".tiff")
             )
+        layer = self._layer()
         self._launch_job(
-            MosaicJob(self.project, path, self, self._layer(), band=self._sky_band()),
-            "Preparing mosaic…",
+            MosaicJob(self.project, path, self, layer, band=self._sky_band()),
+            f"Preparing {layer} mosaic export to {path.name}…",
         )
 
     def _clear_preview(self) -> None:
@@ -836,7 +864,7 @@ class ProjectWindow(QMainWindow):
                 self.project = replace(self.project, composition=composition)
                 self._refresh(self.panels.currentIndex().row())
                 self.layer_box.setCurrentIndex(_LAYERS.index("composition"))
-                self.status.setText("Composition settings applied.")
+                self._report_operation("Composition settings applied.")
                 break
         finally:
             dialog.deleteLater()
@@ -847,7 +875,7 @@ class ProjectWindow(QMainWindow):
         job.finished.connect(self._finished)
         self._set_running()
         self.progress.setValue(0)
-        self.status.setText(message)
+        self._report_operation(message)
         job.start()
 
     @Slot(bool)
@@ -901,13 +929,13 @@ class ProjectWindow(QMainWindow):
             text = f"Saved {job.destination.name} · {job.result.covered_pixels:,} covered pixels."
             if job.result.common_pixels is not None:
                 text += f" Both layers cover {job.result.common_pixels:,} pixels."
-            self.status.setText(text)
+            self._report_operation(text)
         elif job.cancelled:
             self.progress.setValue(0)
-            self.status.setText("Mosaic cancelled.")
+            self._report_operation("Mosaic cancelled.")
         else:
             self.progress.setValue(0)
-            self.status.setText(f"Mosaic failed. {job.error or 'No result was returned.'}")
+            self._report_render_failure("Mosaic failed.", job)
             self._refresh(self.panels.currentIndex().row())
         job.deleteLater()
         self._finish_close_if_ready()
@@ -933,13 +961,13 @@ class ProjectWindow(QMainWindow):
             f"Eligibility check {job.eligibility_seconds:.2f} s."
         )
         if job.cancelled:
-            self.status.setText(f"Plate solve cancelled. {summary}")
+            self._report_operation(f"Plate solve cancelled. {summary}")
         elif job.error is not None:
-            self.status.setText(f"Plate solve stopped. {summary} {job.error}")
+            self._report_operation(f"Plate solve stopped. {summary}", detail=job.error)
         elif not job.total:
-            self.status.setText("All sky panels already have a usable WCS.")
+            self._report_operation("All sky panels already have a usable WCS.")
         else:
-            self.status.setText(f"Plate solve finished. {summary}")
+            self._report_operation(f"Plate solve finished. {summary}")
 
     def _finish_preview(self, job: PreviewJob) -> None:
         if job.result is not None:
@@ -951,18 +979,20 @@ class ProjectWindow(QMainWindow):
                 if job.result.has_coverage
                 else "No coverage at this preview resolution."
             )
+            if job.layer == "sky" and not job.result.has_coverage:
+                text += " Set a grid that covers the sky panels in Mosaic Settings."
             if job.result.common_coverage is not None:
                 text += (
                     f" Both layers cover {int(job.result.common_coverage.sum()):,} preview samples."
                 )
-            self.status.setText(text)
+            self._report_operation(text)
         else:
             self._clear_preview()
             self.progress.setValue(0)
             if job.cancelled:
-                self.status.setText("Preview cancelled.")
+                self._report_operation("Preview cancelled.")
             else:
-                self.status.setText(f"Preview failed. {job.error or 'No result was returned.'}")
+                self._report_render_failure("Preview failed.", job)
                 self._refresh(self.panels.currentIndex().row())
 
     def _finish_layer_job(self, job: ForegroundAlignmentJob | CompositionProposalJob) -> None:
@@ -976,11 +1006,12 @@ class ProjectWindow(QMainWindow):
         if job.result is None:
             self.progress.setValue(0)
             label = job.label.capitalize()
-            self.status.setText(
-                f"{label} cancelled."
-                if job.cancelled
-                else f"{label} failed. {job.error or 'No result was returned.'}{details}"
-            )
+            if job.cancelled:
+                self._report_operation(f"{label} cancelled.")
+            else:
+                self._report_operation(
+                    f"{label} failed.", detail=(job.error or "No result was returned.") + details
+                )
             return
         if isinstance(job, ForegroundAlignmentJob):
             self.project = job.result
@@ -997,7 +1028,7 @@ class ProjectWindow(QMainWindow):
         self._refresh(self.panels.currentIndex().row())
         self.layer_box.setCurrentIndex(_LAYERS.index(layer))
         self.progress.setValue(100)
-        self.status.setText(message + details)
+        self._report_operation(message + details)
 
     def _finish_foreground_check(self, job: ForegroundJob) -> None:
         if job.result is None:
@@ -1007,17 +1038,18 @@ class ProjectWindow(QMainWindow):
         self._refresh(self.panels.currentIndex().row())
         self.progress.setValue(100)
         if problems:
-            self.status.setText(
-                f"Foreground check failed for {len(problems)} panel(s). {problems[0]}"
+            self._report_operation(
+                f"Foreground check failed for {len(problems)} panel(s).", detail=problems[0]
             )
         else:
-            self.status.setText(f"Checked {len(job.indices)} panel(s) for foreground.")
+            self._report_operation(f"Checked {len(job.indices)} panel(s) for foreground.")
 
     def _finish_mask_editor(self, job: MaskEditorJob) -> None:
         if job.result is None:
             self._mask_job_status(job)
             return
         if self._close_after_job:
+            self._report_operation("Sky mask editing cancelled.")
             return
         self.progress.setValue(100)
         panel = self.project.panels[job.index]
@@ -1035,29 +1067,29 @@ class ProjectWindow(QMainWindow):
         finally:
             dialog.deleteLater()
         if not accepted:
-            self.status.setText("Sky mask editing cancelled.")
+            self._report_operation("Sky mask editing cancelled.")
             return
         if (panel.sky_mask is not None and mask is not None and mask == job.result.saved) or (
             panel.sky_mask is None and mask == panel.source_mask
         ):
-            self.status.setText("Sky mask kept.")
+            self._report_operation("Sky mask kept.")
             return
-        self._update_panel(job.index, replace(panel, source_mask=mask, sky_mask=None))
         message = "Sky mask applied." if mask is not None else "Sky mask removed."
         previous = panel.source_mask.sky_fingerprint if panel.source_mask is not None else None
         current = mask.sky_fingerprint if mask is not None else None
         if panel.wcs_sidecar is not None and (panel.sky_mask is not None or previous != current):
             message += " Recompute or clear the WCS sidecar for the new mask revision."
-        self.status.setText(message)
+        self._update_panel(
+            job.index, replace(panel, source_mask=mask, sky_mask=None), summary=message
+        )
 
     def _mask_job_status(self, job: ForegroundJob | MaskEditorJob) -> None:
         self.progress.setValue(0)
         name = job.label.capitalize()
-        self.status.setText(
-            f"{name} cancelled."
-            if job.cancelled
-            else f"{name} failed. {job.error or 'No result was returned.'}"
-        )
+        if job.cancelled:
+            self._report_operation(f"{name} cancelled.")
+        else:
+            self._report_operation(f"{name} failed.", detail=job.error or "No result was returned.")
 
     def _cancel(self) -> None:
         if self.job is not None:
@@ -1065,7 +1097,19 @@ class ProjectWindow(QMainWindow):
             self.cancel_button.setEnabled(False)
             self.status.setText(f"Cancelling {self.job.label}…")
 
+    def _report_operation(self, summary: str, *, detail: str = "") -> None:
+        self.status.setText(f"{summary} {detail}" if detail else summary)
+        self.command_panel.append_summary(summary)
+
+    def _report_render_failure(self, summary: str, job: MosaicJob | PreviewJob) -> None:
+        requirement = job.calibration_requirement
+        if requirement is not None:
+            self._report_operation(f"{summary} {_CALIBRATION_GUIDANCE[requirement]}")
+        else:
+            self._report_operation(summary, detail=job.error or "No result was returned.")
+
     def _error(self, title: str, error: Exception) -> None:
+        self.command_panel.append_summary(f"{title}.")
         box = QMessageBox(self)
         box.setIcon(QMessageBox.Icon.Warning)
         box.setWindowTitle(title)

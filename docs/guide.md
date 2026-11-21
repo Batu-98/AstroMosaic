@@ -39,7 +39,7 @@ After **Layers → Align Foreground**, use **Foreground Alignment Details** to i
 
 Use **Tools → Plate Solve Settings** to choose and check the local ASTAP CLI and Gaia paths. For an ASTAP installation, select `astap_cli.exe` and the folder containing its catalog tiles. Fresh ASTAP settings use **Automatic**. Set the per-panel, per-attempt and optional batch limits there. Select **Plate Solve** and save the project to retain the results. **Panel → Plate Solve Details** shows effective hints, the catalog, the result of each attempt and measured regional errors when available. **Panel → Revalidate Plate Solution** requests a fresh catalog fit. [Desktop plate solving](phase-3b.md#desktop-plate-solving) · [Masked solve results](phase-6.md#local-masked-solve-results)
 
-Open **Tools → Command Panel** to run AstroMosaic CLI commands such as `project validate` and `project export` inside the desktop app. The panel shows command output and render progress and supports cancellation and session history. [Command panel workflow](phase-4c.md#desktop-workflow)
+The **Command Panel** opens at startup and records summaries of desktop operations alongside CLI output. Use **Tools → Command Panel** to toggle it. The panel runs commands such as `project validate` and `project export` and supports render progress, cancellation and session history. [Command panel workflow](phase-4c.md#desktop-workflow)
 
 On import or project reopen, **Panel Settings** automatically fills the available focal length and X and Y pixel sizes and shows the camera model. The readers use FITS keywords, TIFF EXIF/XMP and FITS-style metadata, and XISF instrument properties and FITS keywords. Per-panel edits override the corresponding file values. [Supported optics and units](phase-3b.md#panel-wcs-and-plate-solve-hints)
 
@@ -68,6 +68,8 @@ Set `--center`, `--size`, and `--scale` for your field. The `mosaic` and `projec
 Use `astromosaic project create` to save a sky project that the desktop can reopen. Use `astromosaic project validate` to check the saved sky layer. Use `astromosaic project export` to render a saved sky, foreground or composition layer. Project commands accept `--json` for scripts. Pass `--progress` to report export progress. [Project commands](phase-4a.md) · [Python and PowerShell batch examples](phase-4a.md#run-a-batch)
 
 Use `astromosaic project bands` to list a saved project's filter groups. Pass `--band FILTER` to `project validate` or `project export` to work with one band on the saved grid. Add a `band` to each job in a batch list to export several bands. [Per-band workflow](phase-5c.md)
+
+Use `astromosaic project fit-foreground` to evaluate terrain correspondences against a saved project's ground masks. Supply `--points` for manual correspondences or `--automatic` with the optional SIFT backend. [Manual terrain fit](phase-7.md#run-a-manual-terrain-fit) · [Automatic terrain fit](phase-7.md#run-the-automatic-terrain-fit)
 
 Use `solve` to reuse a validated WCS or try the configured local ASTAP CLI followed by Gaia. New solutions must pass catalog match and RMS checks within the default 120-second panel budget. Install the catalogs and the ASTAP CLI separately. [Offline solver setup](phase-2.md#offline-solvers) · [Plate solve validation](phase-36-results.md)
 

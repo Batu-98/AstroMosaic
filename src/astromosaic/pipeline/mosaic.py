@@ -6,7 +6,7 @@ from dataclasses import dataclass, replace
 from importlib.metadata import version
 from math import isfinite
 from pathlib import Path
-from typing import Protocol
+from typing import Literal, Protocol
 
 import numpy as np
 from astropy import units as u
@@ -44,6 +44,17 @@ _TILE_FIXED_BYTES = 64 * 1024
 _FOOTPRINT_BYTES_PER_PANEL = 256
 _PROXY_EDGE = 160
 _PREVIEW_EDGE = 512
+
+
+type SkyCalibrationRequirement = Literal["filter", "brightness"]
+
+
+class SkyCalibrationError(ValueError):
+    """Identify a sky metadata problem that can be addressed in project settings."""
+
+    def __init__(self, requirement: SkyCalibrationRequirement, message: str) -> None:
+        super().__init__(message)
+        self.requirement = requirement
 
 
 @dataclass(frozen=True, slots=True)
@@ -152,7 +163,9 @@ def _set_calibration(
     ]
     band = declared_filter or filters[0]
     if not band or any(label != band for label in filters):
-        raise ValueError("Expected a common FILTER. Use --filter to declare missing metadata.")
+        raise SkyCalibrationError(
+            "filter", "Expected a common FILTER. Use --filter to declare missing metadata."
+        )
 
     labels = [panel.unit for panel in descriptors if panel.unit is not None]
     units = [u.Unit(label, format="fits", parse_strict="silent") for label in labels]
@@ -165,7 +178,9 @@ def _set_calibration(
         len(units) != len(sources)
         or not any(units[0].is_equivalent(candidate) for candidate in brightness_units)
     ):
-        raise ValueError("Expected a surface-brightness BUNIT or --assume-surface-brightness.")
+        raise SkyCalibrationError(
+            "brightness", "Expected a surface-brightness BUNIT or --assume-surface-brightness."
+        )
 
     header["FILTER"] = band
     if labels:

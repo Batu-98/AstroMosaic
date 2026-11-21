@@ -143,6 +143,11 @@ class CommandPanel(QWidget):
         self._available = available
         self._update_input()
 
+    @Slot(str)
+    def append_summary(self, message: str) -> None:
+        prefix = "\n" if self.output.document().lastBlock().text() else ""
+        self._append(f"{prefix}{message}\n")
+
     def _update_input(self) -> None:
         enabled = self._available and not self.is_running
         self.entry.setEnabled(enabled)
@@ -241,9 +246,7 @@ class CommandPanel(QWidget):
             message = f"Command failed (exit code {job.result})."
         else:
             message = f"Command failed. {job.error or 'No exit code was returned.'}"
-        if self.output.document().lastBlock().text():
-            self._append("\n")
-        self._append(f"{message}\n")
+        self.append_summary(message)
         self.status.setText(message)
         self.progress.setRange(0, 100)
         self.progress.setValue(100 if job.result == 0 else 0)

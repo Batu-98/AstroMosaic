@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from PySide6.QtCore import QSettings, Qt, Slot
+from PySide6.QtCore import QSettings, Qt, Signal, Slot
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -94,6 +94,8 @@ class _SolverPathCheck(BackgroundJob[tuple[str, str]]):
 
 
 class PlateSolveSettings(QDialog):
+    operation_summary = Signal(str)
+
     def __init__(self, parent: QWidget) -> None:
         super().__init__(parent)
         self.setWindowTitle("Plate Solve Settings")
@@ -229,7 +231,9 @@ class PlateSolveSettings(QDialog):
         self._fields.setEnabled(False)
         self.save_button.setEnabled(False)
         self.check_button.setEnabled(False)
-        self.message.setText("Checking local solver paths…")
+        message = "Checking local solver paths…"
+        self.message.setText(message)
+        self.operation_summary.emit(message)
         self._job.start()
 
     @Slot()
@@ -238,6 +242,7 @@ class PlateSolveSettings(QDialog):
         assert job is not None
         job.deleteLater()
         if self._dismiss_pending:
+            self.operation_summary.emit("Local solver path check cancelled.")
             super().reject()
             return
         self._fields.setEnabled(True)
@@ -245,9 +250,11 @@ class PlateSolveSettings(QDialog):
         self.check_button.setEnabled(True)
         if job.result is None:
             self.message.setText(job.error or "The path check did not complete.")
+            self.operation_summary.emit("Local solver path check failed.")
         else:
             gaia, astap = job.result
             self.message.setText(f"ASTAP\n{astap}\n\nGaia DR3\n{gaia}")
+            self.operation_summary.emit("Local solver path check completed.")
 
     def accept(self) -> None:
         if self._job is not None:
@@ -256,6 +263,7 @@ class PlateSolveSettings(QDialog):
             _save_plate_solve_settings(self._options())
         except OSError as error:
             self.message.setText(str(error))
+            self.operation_summary.emit("Could not save local plate solve settings.")
             return
         super().accept()
 

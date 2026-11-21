@@ -85,12 +85,17 @@ def test_command_panel_runs_saved_projects_and_cleans_cancelled_exports(
         QTest.keyClick(panel.entry, Qt.Key.Key_Return)
         assert panel.is_running
 
-    window._set_project(project, manifest)
     window.show()
     try:
-        assert not panel.isVisible()
+        assert panel.isVisible() and window.command_panel_action.isChecked()
+        window.command_panel_action.trigger()
+        assert not panel.isVisible() and not window.command_panel_action.isChecked()
+        new, *_ = window._file_actions
+        new.trigger()
+        window._set_project(project, manifest)
         window.command_panel_action.trigger()
         assert panel.isVisible() and str(directory) in panel.directory_label.text()
+        assert panel.output.toPlainText().splitlines() == ["New project."]
         window.activateWindow()
         panel.entry.setFocus()
 

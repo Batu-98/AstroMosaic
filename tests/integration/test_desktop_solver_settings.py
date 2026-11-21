@@ -122,6 +122,11 @@ def test_desktop_saves_solver_paths_and_reopens_them(
             scoped.setattr(PlateSolveSettings, "exec", drive_dialog)
             window.plate_solve_settings_action.trigger()
         assert window.status.text() == "Saved local plate solve settings."
+        assert window.command_panel.output.toPlainText().splitlines() == [
+            "Checking local solver paths…",
+            "Local solver path check completed.",
+            "Saved local plate solve settings.",
+        ]
         assert plate_solve_settings.load_plate_solve_settings() == expected
         assert window.project == window._saved
 

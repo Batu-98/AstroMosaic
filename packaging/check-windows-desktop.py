@@ -384,8 +384,7 @@ def check_commands(window: ProjectWindow, directory: Path) -> dict[str, object]:
     manifest = directory / "Mixed.astromosaic"
     window._set_project(load_project(manifest), manifest)
     panel = window.command_panel
-    window.command_panel_action.trigger()
-    assert window.command_panel_action.isChecked()
+    assert panel.isVisible() and window.command_panel_action.isChecked()
     assert str(directory) in panel.directory_label.text()
 
     def start(command: str) -> None:

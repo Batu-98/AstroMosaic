@@ -179,7 +179,7 @@ Use the existing Qt-free CLI as the local automation interface. Make commands di
 
 Use the saved `.astromosaic` manifest as the reusable job description. Provide commands to create a sky project from panel paths and render settings, check a saved project's inputs and settings before rendering, and export a selected sky, foreground, or composite layer from saved state. Project jobs use the same headless validation, renderer, resource budgets, and cancellation as desktop jobs. Require an explicit export destination, preserve source images, and publish completed outputs atomically. Provide PowerShell and Python examples that call the CLI to run projects in batch and read their results.
 
-Add a desktop terminal panel for the same AstroMosaic commands, with session history, output, progress, and cancellation. Run jobs off the UI thread. [Automation decision](docs/adr/0016-local-automation.md) · [Desktop command worker](docs/adr/0019-desktop-command-worker.md)
+Open the desktop terminal panel at startup. Show AstroMosaic command output and concise summaries of desktop operations in the same bounded session log, including while the panel is hidden. Provide command history, progress, and cancellation. Run jobs off the UI thread. [Automation decision](docs/adr/0016-local-automation.md) · [Desktop command worker](docs/adr/0019-desktop-command-worker.md)
 
 ## 6. Processing Pipeline
 
@@ -454,7 +454,7 @@ The owner authorized starting [Phase 4A](docs/phase-4a.md) from the locally veri
 | --- | --- | --- |
 | 4A | Headless project automation and scripts | On Windows 11 x64, use the installed CLI and portable console launcher to create and validate a sky project, run a batch of saved FITS and TIFF projects, and reproduce a saved mixed-project export with matching pixels, coverage, and applicable WCS. Verify that scripts can parse results and progress, detect missing inputs and occupied output paths, and cancel a render without publishing a partial export. The workflow runs without Qt. |
 | 4B | [Large mosaics and improved blends](docs/phase-4b.md) | Run 12-panel 6000 x 4000 FITS and TIFF jobs, including RGB and a mixed sky and foreground case, with enforced memory limits and incremental export. Verify output-tile correctness, seamless halo boundaries, bounded queue growth, and measured quality improvement for any optional multiband blend. |
-| 4C | [Desktop command panel](docs/phase-4c.md) | Validate a saved project and export from the panel using the same commands and results as the standalone CLI. Verify command history, progress, and cancellation with partial-output cleanup while the Windows desktop stays responsive. |
+| 4C | [Desktop command panel](docs/phase-4c.md) | Validate a saved project and export from the panel using the same commands and results as the standalone CLI. Verify default visibility, desktop operation summaries while hidden, command history, progress, and cancellation with partial-output cleanup while the Windows desktop stays responsive. |
 
 ### 10.3 Phase 5 Delivery Stages
 

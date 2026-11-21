@@ -9,7 +9,13 @@ from astropy.io import fits
 
 from astromosaic.core import Region, Tile
 from astromosaic.io.fits import FitsTileSource
-from astromosaic.pipeline.mosaic import JobContext, MosaicCancelled, RenderSpec, render_mosaic
+from astromosaic.pipeline.mosaic import (
+    JobContext,
+    MosaicCancelled,
+    RenderSpec,
+    SkyCalibrationError,
+    render_mosaic,
+)
 from astromosaic.pipeline.smoke import write_smoke_panel
 
 SPEC = RenderSpec((359.999, 20.0), (9, 7), 7.2, tile_size=3)
@@ -122,10 +128,12 @@ def test_incomplete_wcs_and_panel_metadata_require_explicit_input(tmp_path: Path
     missing = tmp_path / "missing-labels.fits"
     fits.writeto(missing, pixels, header=header)
     output = tmp_path / "mosaic.fits"
-    with pytest.raises(ValueError, match="common FILTER"):
+    with pytest.raises(SkyCalibrationError, match="common FILTER") as missing_filter:
         render_mosaic([missing], output, SPEC)
-    with pytest.raises(ValueError, match="surface-brightness BUNIT"):
+    assert missing_filter.value.requirement == "filter"
+    with pytest.raises(SkyCalibrationError, match="surface-brightness BUNIT") as missing_brightness:
         render_mosaic([missing], output, SPEC, filter_name="L")
+    assert missing_brightness.value.requirement == "brightness"
 
     pixel_flux = tmp_path / "pixel-flux.fits"
     header["BUNIT"] = "Jy/pix"

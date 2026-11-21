@@ -80,6 +80,7 @@ class ProjectSettings(_SettingsDialog):
         )
         self.filter = self.field("Common filter", project.filter_name or "")
         self.assume = QCheckBox("Declare a common surface-brightness scale")
+        self.assume.setToolTip("Use this for already-linear panels that share a brightness scale.")
         self.assume.setChecked(project.assume_surface_brightness)
         self.form.addRow(self.assume)
         self.background = QComboBox()

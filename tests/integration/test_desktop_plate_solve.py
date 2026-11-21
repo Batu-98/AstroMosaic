@@ -28,7 +28,7 @@ def test_desktop_plate_solve_skips_reusable_wcs_and_retries_unsolved_panels(
     stub_solve_evidence: None,
 ) -> None:
     pytest.importorskip("PySide6")
-    from PySide6.QtCore import QEventLoop, Qt, QTimer
+    from PySide6.QtCore import QEventLoop, QStandardPaths, Qt, QTimer
     from PySide6.QtWidgets import QApplication, QFileDialog
 
     from astromosaic.ui import project_window
@@ -137,11 +137,23 @@ def test_desktop_plate_solve_skips_reusable_wcs_and_retries_unsolved_panels(
     monkeypatch.setattr(solve._PanelSolve, "coordinates", coordinates)
     monkeypatch.setattr(solve, "search_gaia", gaia)
     monkeypatch.setattr(solve, "solve_astap", astap)
-    sidecars = tmp_path / "solutions"
-    sidecars.mkdir()
-    manifest = tmp_path / "night.astromosaic"
+    local_data = tmp_path / "local data"
+    sidecars = local_data / "wcs"
+    manifest = tmp_path / "projects" / "night.astromosaic"
+    manifest.parent.mkdir()
     output = tmp_path / "result.fits"
-    monkeypatch.setattr(QFileDialog, "getExistingDirectory", lambda *args: str(sidecars))
+    folder_requests: list[str] = []
+
+    def record_folder_request(_parent: object, title: str, *args: object) -> str:
+        folder_requests.append(title)
+        return ""
+
+    def writable_location(location: QStandardPaths.StandardLocation) -> str:
+        assert location == QStandardPaths.StandardLocation.AppLocalDataLocation
+        return str(local_data)
+
+    monkeypatch.setattr(QFileDialog, "getExistingDirectory", record_folder_request)
+    monkeypatch.setattr(QStandardPaths, "writableLocation", writable_location)
     monkeypatch.setattr(
         QFileDialog,
         "getSaveFileName",
@@ -169,12 +181,16 @@ def test_desktop_plate_solve_skips_reusable_wcs_and_retries_unsolved_panels(
     try:
         window.show()
         window._set_project(project, None)
+        window.command_panel_action.trigger()
         window.plate_solve_button.click()
+        assert not folder_requests and window.job is not None
         wait_for(lambda: waiting.is_set() and " / 3 panels" in window.status.text())
         window.cancel_button.click()
         wait_for(lambda: window.job is None and window._inspection_job is None)
         assert window.progress.value() == 66
         assert window.status.text() == "Plate solve cancelled. 1 solved, 1 failed."
+        window.command_panel_action.trigger()
+        assert window.status.text() in window.command_panel.output.toPlainText().splitlines()
         assert window.panels.cell(3, "Solve result").data() == "Gaia DR3"
         assert "ASTAP found no match." in window.panels.cell(4, "Solve result").data(
             Qt.ItemDataRole.ToolTipRole
@@ -182,6 +198,8 @@ def test_desktop_plate_solve_skips_reusable_wcs_and_retries_unsolved_panels(
         assert window.project.panels[4].wcs_sidecar == panels[4].wcs_sidecar
         assert window.project.panels[5].wcs_sidecar is None
         assert len(list(sidecars.glob("*.wcs.json"))) == 1
+        first_solution = window.project.panels[3].wcs_sidecar
+        assert first_solution is not None and first_solution.path.parent == sidecars
 
         window._file_actions[2].trigger()
         assert load_project(manifest) == window.project
@@ -189,11 +207,12 @@ def test_desktop_plate_solve_skips_reusable_wcs_and_retries_unsolved_panels(
         window.plate_solve_button.click()
         wait_for(lambda: window.job is None and window._inspection_job is None)
         assert window.status.text() == "Plate solve finished. 2 solved, 0 failed."
+        assert window.status.text() in window.command_panel.output.toPlainText().splitlines()
         assert window.project.panels[3].wcs_sidecar == load_project(manifest).panels[3].wcs_sidecar
         assert window.project.panels[1].wcs_sidecar == panels[1].wcs_sidecar
         assert window.panels.cell(5, "Solve result").data() == "ASTAP hinted"
         assert [index for index, backend in calls if backend == "gaia"] == [3, 4, 5]
-        assert len(list((tmp_path / "night.astromosaic.wcs").glob("*.wcs.json"))) == 2
+        assert len(list(manifest.with_name("night.astromosaic.wcs").glob("*.wcs.json"))) == 2
         assert old_sidecar.read_text(encoding="utf-8") == "{}"
 
         assert window._save()
@@ -207,6 +226,7 @@ def test_desktop_plate_solve_skips_reusable_wcs_and_retries_unsolved_panels(
         window.start_button.click()
         wait_for(lambda: window.job is None)
         assert output.is_file(), window.status.text()
+        assert not folder_requests
         assert [path.read_bytes() for path in paths] == originals
         assert not list(tmp_path.rglob("*.part"))
     finally:

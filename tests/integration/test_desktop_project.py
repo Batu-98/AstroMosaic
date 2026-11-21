@@ -22,7 +22,7 @@ from astromosaic.core.masks import FOREGROUND, MASK_EDGE, SKY, UNCLASSIFIED, Sou
 from astromosaic.geometry import tan_output_wcs
 from astromosaic.io import PanelSource, open_panel
 from astromosaic.pipeline.masking import read_thumbnail
-from astromosaic.pipeline.mosaic import MosaicResult, PreviewFrame, RenderSpec
+from astromosaic.pipeline.mosaic import MosaicResult, PreviewFrame, RenderSpec, SkyCalibrationError
 from astromosaic.pipeline.smoke import write_smoke_panel
 from astromosaic.storage.project import (
     FileReference,
@@ -200,6 +200,16 @@ def test_desktop_project_roundtrip_progress_cancel_and_retry(
         assert load_project(manifest).panels[0].source.path == moved
         assert window.project.panels[0].optics == PanelOptics(500)
 
+        def missing_filter(*_args: object) -> None:
+            raise SkyCalibrationError("filter", "Expected a common FILTER.")
+
+        with monkeypatch.context() as patch:
+            patch.setattr(mosaic_job, "preview_project", missing_filter)
+            click(window.preview_button)
+            until(lambda: window.job is None)
+        assert "Set Common filter in Mosaic Settings" in window.status.text()
+        assert window.status.text() in window.command_panel.output.toPlainText().splitlines()
+
         with monkeypatch.context() as patch:
             patch.setattr(mosaic_job, "preview_project", pause_preview)
             click(window.preview_button)
@@ -247,6 +257,27 @@ def test_desktop_project_roundtrip_progress_cancel_and_retry(
             assert any("Input 1: sky mask" in line for line in panel.header["HISTORY"])
         assert moved.read_bytes() == original
         assert not list(tmp_path.glob("*.part"))
+
+        click(window.start_button)
+        until(lambda: window.job is None)
+        assert "output file already exists" in window.status.text()
+        log = window.command_panel.output.toPlainText()
+        for summary in (
+            "Added 2 panel(s).",
+            "Checked 2 panel(s) for foreground.",
+            "Updated settings for light.fits.",
+            "Mosaic settings applied.",
+            "Saved Session.astromosaic.",
+            "Opened Session.astromosaic.",
+            f"Relinked {moved.name}.",
+            "Preview cancelled.",
+            "Sky preview",
+            "Mosaic cancelled.",
+            "Saved mosaic.tiff",
+        ):
+            assert summary in log
+        assert log.splitlines()[-1] == "Mosaic failed."
+        assert str(tmp_path) not in log
 
         # Closing during a render waits asynchronously for cancellation and cleanup.
         save_target = tmp_path / "closing.tiff"
