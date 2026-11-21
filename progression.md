@@ -6,11 +6,11 @@ Use this file for concise development history and handoff state. Detailed techni
 
 - **Last updated:** 2026-11-21
 - **Active baseline:** Python-first architecture revision 3.12 adds [Phase 7 delivery stages](astro_mosaic_python_first_architecture_en.md#105-phase-7-delivery-stages). [ADR-0023](docs/adr/0023-terrain-control-point-registration.md) records the translation and similarity decision. [ADR-0017](docs/adr/0017-astap-first-validated-solving.md) records the solver policy. See [ADR-0003](docs/adr/0003-windows-first-platform-scope.md) for Windows scope, [ADR-0006](docs/adr/0006-dual-fits-and-tiff-workflow.md) for formats, and [ADR-0007](docs/adr/0007-sky-and-foreground-mosaics.md) for mixed panels.
-- **Current stage:** [Phases 6A–6D](docs/phase-6.md) and [local 6E](docs/phase-6.md#local-windows-lifecycle-and-package-results) passed on Windows. [Phase 7E](docs/phase-7.md#7e-local-windows-package-results) integrates the translation and similarity geometry evaluated in 7A–7D. The 7F desktop review workflow, clean-machine acceptance and native distribution review remain open. Linux and macOS support is deferred.
-- **Available artifacts:** The verified beta 8 desktop and console are in `dist/AstroMosaic-0.1.0b8-windows-x64/` and `dist/astromosaic-cli-0.1.0b8-windows-x64/` with their build records. Earlier local betas remain in their versioned folders. The [application test guide](docs/application-tests.md) and [extended cases](docs/application-tests-extension.md) describe the ignored real-observation fixtures. [Release guide](docs/windows-release.md#verification-status)
-- **Implementation / verification:** Beta 8 source and portable CLI and desktop produced identical Oxford Boat foreground FITS exports. The legacy ALPACA export, separate Paranal sky and composition, and real rejection checks passed. Source passed 220 offscreen and two native OpenGL tests. Ruff, scoped mypy and the Poetry lock check passed. [7E evidence](docs/phase-7.md#7e-local-windows-package-results)
-- **Version control:** The current development version on `main` is `0.1.0b8`. The first published source beta uses the annotated Git tag `v0.1.0b1`. [AstroMosaic GitHub repository](https://github.com/Batu-98/AstroMosaic)
-- **Next action:** Run the 7F desktop review, lifecycle and export workflows in locked beta 9 bundles. Keep the 7C SIFT provider optional pending clean-machine checks and native distribution review under Q-005. Tagged release packaging and fresh Windows acceptance remain open. [7F plan](docs/phase-7.md#7f-ship-the-review-workflow-and-verify-windows)
+- **Current stage:** [Phases 6A–6D](docs/phase-6.md), [local 6E](docs/phase-6.md#local-windows-lifecycle-and-package-results), and [local 7A–7F](docs/phase-7.md#7f-local-windows-results) passed on Windows. Clean-machine acceptance and native distribution review remain open. Linux and macOS support is deferred.
+- **Available artifacts:** The verified beta 9 desktop and console are in `dist/AstroMosaic-0.1.0b9-windows-x64/` and `dist/astromosaic-cli-0.1.0b9-windows-x64/` with their build records. Earlier local betas remain in their versioned folders. The [application test guide](docs/application-tests.md) and [extended cases](docs/application-tests-extension.md) describe the ignored real-observation fixtures. [Release guide](docs/windows-release.md#verification-status)
+- **Implementation / verification:** Beta 9 renders the edited Oxford foreground and Paranal sky and composition identically through the copied console and native CPU and OpenGL desktop. The editor passed cancellation, close, reopen and retry. The full source run passed 227 offscreen tests, and nine native tests passed including the two opt-in OpenGL checks. Ruff, scoped mypy and the Poetry lock check passed. [7F evidence](docs/phase-7.md#7f-local-windows-results)
+- **Version control:** The current development version on `main` is `0.1.0b9`. The first published source beta uses the annotated Git tag `v0.1.0b1`. [AstroMosaic GitHub repository](https://github.com/Batu-98/AstroMosaic)
+- **Next action:** Repeat the 6E and 7F acceptance on a fresh Windows 11 x64 installation using the intended release candidate. Review the native inventory under Q-005 before public portable distribution. When the owner schedules the proposed Phase 8, freeze its 8A contracts and references. [Clean-machine gate](docs/phase-3f.md#pending-clean-machine-check) · [Phase 8](docs/phase-8.md)
 - **Proposed follow-up** [Phase 8](docs/phase-8.md) covers full-resolution photo export and selectable color, brightness, lens and vignetting methods. Q-029 tracks the proposed acceptance data and backend choices.
 - **Open dependencies:** Q-003 tracks reference data and frozen criteria. Q-010 tracks real-scene diagnostics and the proposed terrain models. Q-016 tracks astrometry. Q-005, Q-009 and Q-020 track distribution and format work. Q-008 tracks deferred platforms and Q-011 deferred visual fill. Resolved Q-022 and Q-023 record the Windows lifecycle and ZEA results.
 
@@ -49,7 +49,7 @@ The table is a status summary, not a replacement for the full exit gates in Sect
 | 5B - ZEA sky projection | Complete | Saved projection, longitude wrap, projection domain, preview and export agreement, and copied Windows workflows passed. |
 | 5C - Per-band output | Complete | Saved membership, band-local units and channels, common geometry, independent exports, and Windows desktop, CLI and batch checks passed. |
 | 6 - Real-observation reliability | Local 6A–6E checks passed | The real references, native lifecycle, and source and portable product comparison are recorded. Fresh Windows acceptance remains open for the named 6E build. |
-| 7 - Terrain panorama registration | 7A–7E local checks passed | Add the 7F point review workflow. Verify real positive, mixed and negative cases, lifecycle and independent exports on native and fresh Windows. |
+| 7 - Terrain panorama registration | 7A–7F local checks passed | Repeat the intended portable candidate on a fresh Windows 11 x64 installation. PA4 and the unsupported rotation models retain their recorded outcomes. |
 
 ## Journal Rules
 
@@ -1062,6 +1062,13 @@ The table is a status summary, not a replacement for the full exit gates in Sect
 - **Verified** Nine native tests passed with the second display and OpenGL, including the six editor regressions. Oxford passed manual edits and retry. ALPACA and La Silla passed the fit gates. Adirondack and PA4 remained disconnected. Paranal composition and sky parity passed. Ruff, scoped mypy and the lock check passed.
 - **Related** Q-003, Q-010 and [desktop point review](docs/phase-7.md#review-and-edit-control-points-in-the-desktop).
 - **Next** Build the locked beta and repeat the desktop lifecycle, exports and frozen CLI controls in the copied Windows runtimes.
+
+### 2026-11-21 - Windows build - Verified beta 9 terrain review locally
+
+- **Changed** Built both launchers from clean commit `ba8d217ed22688f6f4c48296cc040a6bc18d5eda` using the Poetry lock. Recorded build time, launcher hashes and real-data results in the versioned directories.
+- **Verified** The copied native CPU and OpenGL runtimes on the second display passed point review, save and reopen, cancellation, close during render and retry. Oxford produced 588,078 covered foreground samples at 1.23 px held-out P95. Paranal sky and composition matched the console, ALPACA legacy export retained 80,158 samples, and the La Silla, Adirondack and six-panel PA4 outcomes matched the source checks. The full offscreen and opt-in native suites passed.
+- **Related** Q-003, Q-005, Q-010 and [7F local results](docs/phase-7.md#7f-local-windows-results).
+- **Next** Run the shared 6E and 7F matrix on a fresh Windows installation. No separate Windows test environment was available on the development host.
 
 ## Entry Template
 

@@ -1,6 +1,6 @@
 # Phase 7 Terrain Panorama Registration
 
-**Status** Phases 7A–7E passed the applicable local checks on Windows 11 x64. Phase 7F adds desktop review for translation and similarity fits. The 7D camera-rotation experiments remain outside the frozen tolerance. Fresh Windows acceptance remains open. [Phase 6 handoff](phase-6.md#handoff-to-phase-7a) · [Geometry decision](adr/0023-terrain-control-point-registration.md)
+**Status** Phases 7A–7E and the local 7F source and portable workflows passed on Windows 11 x64. Beta 9 adds desktop review for translation and similarity fits. The 7D camera-rotation experiments remain outside the frozen tolerance. Fresh Windows acceptance remains open. [Phase 6 handoff](phase-6.md#handoff-to-phase-7a) · [Geometry decision](adr/0023-terrain-control-point-registration.md)
 
 ## Research Findings
 
@@ -347,3 +347,25 @@ The project stores disabled observations in manifest version 8. Readers of versi
 ### 7F source replay
 
 Run `python -m pytest -q tests/integration/test_terrain_editor.py tests/integration/test_ground_control_points.py` with the real fixtures prepared in [7A](#frozen-7a-references) and [7B](#7b-real-observation-results). The Oxford test drives source-pixel clicks, draft edits, rejection, cancellation, retry, save and reopen. ALPACA and La Silla verify translation and shared terrain. Adirondack and PA4 verify real rejected links and disconnected groups. Paranal verifies independent sky and composition from the known crop offset. Set `QT_QPA_PLATFORM=windows` and `ASTROMOSAIC_TEST_OPENGL=1` for native OpenGL. The native tests select the second monitor when it is available.
+
+### 7F local Windows results
+
+The full source suite passed 227 offscreen tests, with two opt-in OpenGL tests skipped in that run. The native pass ran both opt-in tests and the editor workflow for nine checks. The desktop copied runtimes repeated Oxford point edits, saved and reopened a disabled observation, cancelled a trial and retried, closed during real tile rendering and retried the foreground export to the same destination. The copied console and both desktop backends produced byte-identical foreground, sky and composition products in the tested cases. Source observations and the original manifests retained their hashes.
+
+| Real control | Local beta 9 outcome |
+| --- | --- |
+| Oxford Boat | The translation matcher rejected the two-panel link. The edited similarity with panel 2 fixed gave 1.23 px held-out P95. The native CPU and OpenGL preview each covered 196,781 samples. CFITSIO reopened 588,078 samples in the matching CLI and desktop FITS exports. |
+| ESO ALPACA | The landmark translation gave 1.43 px held-out P95. The legacy saved translation exported 80,158 covered samples. The disjoint reference was rejected. |
+| ESO La Silla | The independent nightscape held-out P95 was 0.94 px. Both the source editor and the copied console accepted the fit. |
+| Adirondack | The two panels remained disconnected at the frozen depth control. The copied console refused publication. |
+| PA4 | The selected observations on panel pair 02–03 had no joint saved ground support. On 04–05 the two usable pairs were held out. On 05–06 two training pairs and two held-out pairs had joint support, leaving the link underconstrained. The reviewed project retained six singleton groups covering panels 02–07. |
+| ESO Paranal crops | The independent sky TIFF matched byte for byte across the review and composition workflow. Reopened TIFF products contained 1,138,045 sky samples and 1,457,089 composition samples. The mask gap preserved separate sky and foreground contribution codes. |
+
+The replay used Windows 11 Pro x64 build 26200, an Intel Core i5-14600K, CPython 3.13.18, and native Qt 6.12.0 on the secondary LS24DG30X display at 1920 × 1080 and 1× device scale. The primary display was a G274QPF E2. The two-panel Oxford trial used 850 × 680 mono rasters, 18 saved pairs including one disabled pair, a 64 MiB render budget, 128-pixel output tiles and one OpenBLAS thread. Review uses one background worker and at most two previews with a 384 px longest edge. The original-pixel detail tile is capped at 256 px per side. The optional source SIFT provider retains the [7C limits](#run-the-automatic-terrain-fit).
+
+| Copied desktop | First pair view | First / repeated fit | Peak resident / commit |
+| --- | ---: | ---: | ---: |
+| CPU | 0.042 s | 0.048 / 0.041 s | 232.32 / 199.64 MiB |
+| OpenGL | 0.034 s | 0.046 / 0.041 s | 367.89 / 393.19 MiB |
+
+Timings are from fresh desktop processes and same-process repeats with the normal Windows file cache. Memory peaks cover the complete Oxford and Paranal desktop sequence, including preview and export. The Oxford render reserved 17.09 MiB. The [local build records](windows-release.md#verification-status) identify the binaries. The ignored `.tooling/terrain-0.1.0b9/` directory contains the native replay, screenshots, and full measurements. The combined 6E and 7F clean-machine check awaits a separate Windows 11 x64 installation.

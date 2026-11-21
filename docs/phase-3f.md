@@ -40,3 +40,5 @@ The regular packaged desktop launcher also opened on the second monitor, showed 
 ## Pending Clean-Machine Check
 
 The checks used copied runtime files on the development host. A separate Windows 11 x64 installation check remains open. Windows Sandbox and Hyper-V were disabled on the available host. Repeat the portable launch and export on a fresh Windows installation to check for system dependencies that might already exist on the development host.
+
+The beta 9 copied-runtime checks also ran on the development host. Use the same candidate for the clean-machine [6E lifecycle](phase-6.md#6e-verify-native-lifecycle-and-windows-packages) and [7F terrain review](phase-7.md#7f-ship-the-review-workflow-and-verify-windows) checks.

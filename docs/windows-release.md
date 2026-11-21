@@ -53,7 +53,9 @@ Download public DSS reference images from their archives for optional reproducti
 
 ## Verification status
 
-The initial source beta is tagged `v0.1.0b1`. The current development version on `main` is `0.1.0b8`. The Phase 6E local verification record and ZIPs in `.tooling/phase6e-20261119/artifacts/` identify the tested `0.1.0b1` build and its SHA-256 hashes. [Phase 6E evidence](phase-6.md#local-windows-lifecycle-and-package-results) · [GitHub releases](https://github.com/Batu-98/AstroMosaic/releases)
+The initial source beta is tagged `v0.1.0b1`. The current development version on `main` is `0.1.0b9`. The Phase 6E local verification record and ZIPs in `.tooling/phase6e-20261119/artifacts/` identify the tested `0.1.0b1` build and its SHA-256 hashes. [Phase 6E evidence](phase-6.md#local-windows-lifecycle-and-package-results) · [GitHub releases](https://github.com/Batu-98/AstroMosaic/releases)
+
+The beta 9 desktop and console are in `dist/AstroMosaic-0.1.0b9-windows-x64/` and `dist/astromosaic-cli-0.1.0b9-windows-x64/`. Their build records identify source commit `ba8d217ed22688f6f4c48296cc040a6bc18d5eda` and the launcher checksums. The copied desktop runtimes verified control-point editing, version 8 reopen, cancelled jobs and retry on both preview backends. Oxford foreground and Paranal sky and composition matched the copied console byte for byte. A separate Windows installation and native redistribution review remain open. [Phase 7F results](phase-7.md#7f-local-windows-results)
 
 The beta 8 desktop and console are in `dist/AstroMosaic-0.1.0b8-windows-x64/` and `dist/astromosaic-cli-0.1.0b8-windows-x64/`. Their build records identify source commit `3ab8e3eb8f899da31722316ec06002d0e74a4c0f` and the launcher checksums. The console saved and exported the real Oxford and ALPACA fits, and the desktop CPU and OpenGL previews reopened the Oxford fit on the second display. The Oxford exports matched across the two launchers and source. Fresh Windows acceptance and redistribution review remain open. [Phase 7E evidence](phase-7.md#7e-local-windows-package-results)
 
