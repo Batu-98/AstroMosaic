@@ -41,13 +41,16 @@ from astromosaic.storage.project import (
 def test_photo_desktop_session_and_cli_share_the_fitted_grid_and_tone(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
 ) -> None:
+    import os
+
     pytest.importorskip("PySide6")
     from PySide6.QtCore import QEvent, QSettings
     from PySide6.QtWidgets import QApplication, QFileDialog
 
     from astromosaic.ui.project_window import ProjectWindow
 
-    monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
+    if "QT_QPA_PLATFORM" not in os.environ:
+        monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
     app = QApplication.instance()
     if not isinstance(app, QApplication):
         app = QApplication([])
@@ -89,6 +92,9 @@ def test_photo_desktop_session_and_cli_share_the_fitted_grid_and_tone(
             sleep(0.005)
 
     try:
+        secondary = next((screen for screen in app.screens() if screen != app.primaryScreen()), None)
+        if secondary is not None:
+            window.move(secondary.availableGeometry().center() - window.rect().center())
         window.show()
         window._open_project(manifest)
         wait_idle()
@@ -98,6 +104,12 @@ def test_photo_desktop_session_and_cli_share_the_fitted_grid_and_tone(
         assert window.preview_title.text() == "Visual Preview"
         assert window.start_button.text() == "Export Photo Mosaic…"
         assert window._preview_grid is not None and window.project.render == project.render
+        window.resize(630, 760)
+        app.processEvents()
+        assert window.band_box.isVisible()
+        if app.platformName() == "windows":
+            for button in (window.settings_button, window.preview_button, window.start_button):
+                assert button.width() >= button.sizeHint().width()
         window.viewport.midtones.setValue(41)
         monkeypatch.setattr(QFileDialog, "getSaveFileName", lambda *a, **kw: (str(desktop), ""))
         window.start_button.click()

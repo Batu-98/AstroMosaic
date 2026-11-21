@@ -230,6 +230,17 @@ class ProjectWindow(QMainWindow):
         self.auto_frame_check.toggled.connect(self._set_auto_frame)
         preview_header.addWidget(self.auto_frame_check)
         preview_header.addStretch()
+        self.band_label = QLabel("Sky band")
+        self.band_box = QComboBox()
+        self.band_box.setAccessibleName("Sky band")
+        self.band_box.setSizeAdjustPolicy(
+            QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
+        )
+        self.band_box.setMinimumContentsLength(12)
+        self.band_label.setBuddy(self.band_box)
+        self.band_box.currentIndexChanged.connect(self._layer_changed)
+        preview_header.addWidget(self.band_label)
+        preview_header.addWidget(self.band_box)
         self.use_preview_grid_button = QPushButton("Use Preview Grid")
         self.use_preview_grid_button.setToolTip(
             "Use this framing as the saved sky grid for export."
@@ -265,19 +276,12 @@ class ProjectWindow(QMainWindow):
         self.layer_box.setAccessibleName("Mosaic layer")
         self.layer_box.setToolTip("Choose the layer to preview and export.")
         self.layer_box.currentIndexChanged.connect(self._layer_changed)
-        self.band_label = QLabel("Sky band")
-        self.band_box = QComboBox()
-        self.band_box.setAccessibleName("Sky band")
-        self.band_label.setBuddy(self.band_box)
-        self.band_box.currentIndexChanged.connect(self._layer_changed)
         self.overlap_check = QCheckBox("Highlight Overlap")
         self.overlap_check.toggled.connect(self._paint_display)
         actions.addWidget(self.settings_button)
         actions.addWidget(self.overlap_check)
         actions.addStretch()
         actions.addWidget(self.layer_box)
-        actions.addWidget(self.band_label)
-        actions.addWidget(self.band_box)
         actions.addWidget(self.preview_button)
         actions.addWidget(self.start_button)
         layout.addLayout(actions)
@@ -439,7 +443,7 @@ class ProjectWindow(QMainWindow):
         self.placement_action.setEnabled(idle and ground is not None and sky)
         self.composition_action.setEnabled(idle and ground is not None and sky)
         self.layer_box.setEnabled(idle and bool(self.project.panels))
-        show_band = layer == "sky" and self.band_box.count() > 1
+        show_band = layer == "sky" and self.band_box.count() > 2
         self.band_label.setVisible(show_band)
         self.band_box.setVisible(show_band)
         self.band_box.setEnabled(idle and show_band)
