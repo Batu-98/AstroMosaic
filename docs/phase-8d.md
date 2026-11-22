@@ -1,0 +1,41 @@
+# Phase 8D Advanced Matching Reference
+
+The first 8D checkpoint freezes data, spatial splits and comparison limits for Advanced photo brightness matching. The offline diagnostic compares global linked RGB corrections with a Standard-style sequential baseline on the same observations. The 8D delivery gate also requires measured optical calibration and production integration. [Phase 8 delivery stages](phase-8.md#delivery-stages)
+
+## Frozen controls
+
+Use the original `tests/20.TIF` and its `768 × 512` detector crop starting at `(2048, 1408)`. The diagnostic checks the original SHA-256 before and after sampling. It decodes the real RGB samples independently, injects known linked gains and backgrounds into overlapping virtual panels, and quantizes the observations to UInt16. Background planes use normalized virtual detector coordinates. The chain has edges A–B and B–C. The cycle adds A–C and injects a plane. D and E overlap each other in both controls and have no path to A. A provides the reference scale. The disconnected group retains identity corrections.
+
+Use the existing PA4 sky manifest for real panels 19–22 on its saved `2097 × 2071` ZEA grid. Sample every eighth output pixel through the saved WCS and sky selections. Exclude saturated source support and samples above 0.075 linear luminance. The diagnostic records source and sidecar hashes, shared sample counts, candidate decisions and final test errors. These four frames provide independent exposures and a real chain at the saved grid scale. Use the existing native-scale stellar geometry gate before accepting an optical correction. [PA4 fixture documentation](application-tests.md) · [Phase 8 geometry qualification](phase-8.md#lens-geometry)
+
+## Selection and acceptance
+
+- Assign whole 64-pixel blocks to fit, model selection or final test with `(block_y + 2 × block_x) modulo 5`. Use remainder 0 for final test, 1 for selection and 2–4 for fitting. A shared location keeps its split across all edges. Require at least 128 samples from at least two blocks in each split to qualify an edge.
+- Compare Off, a Standard-style fit using the same splits, global gain and offset, and global gain with an additive plane. Weight each edge equally before robust reweighting. The reference solve uses a 64 MiB dense-fit reservation, a minimum scaled singular-value ratio of 0.015, gains in `[0.25, 4]`, and absolute full-field background bounded by 0.1 in normalized linear units.
+- Select a model using mean per-edge selection RGB P95. The offset and plane candidates require 5% and 15% relative improvement respectively, a further absolute reduction above `2e-6`, and no per-edge regression beyond the larger of 5% or `2e-6`. Score the selected model on the untouched final blocks. Keep per-edge scores available when the aggregate improves.
+- In the controls, require relative gain error at most 1%, offset and slope errors within `2e-4`, final overlap and diffuse RGB P95 at most `3e-5`, and stellar aperture-flux error at most 1%. Use the held-out C aperture centered at crop pixel `(739, 220)`. Require the same graph, method and values under a different panel order.
+
+Before enabling a production Advanced mode, reproduce improvement over Standard on an independently exposed network with qualified geometry and check stellar flux, diffuse signal, coverage and memory. Include a weak-support case, verify saved-project behavior and run the native preview and copied CLI export from the same build.
+
+## Local results
+
+| Case | Selected model | Largest final overlap RGB P95 | Diffuse RGB P95 | Stellar aperture error |
+| --- | --- | ---: | ---: | ---: |
+| Controlled chain | Standard | 2.37e-6 | 1.46e-6 | 0.00222% |
+| Controlled cycle | Gain and plane | 2.29e-6 | 1.43e-6 | 0.000584% |
+| PA4 real chain | Off | 0.03355 | — | — |
+
+The cycle's Standard-style baseline reached 0.00516 on its worst final edge. In PA4, the reference component spans the three adjacent edges. Standard's largest final P95 was 0.03355. Both global candidates exceeded the supported coefficient bounds. All three cases reproduced the same report after reordering inputs. The PA4 replay establishes a conservative fallback control. A positive independent-exposure network and native-scale alignment evidence remain acceptance requirements.
+
+```powershell
+$env:OPENBLAS_NUM_THREADS = '1'
+.\.venv\Scripts\python.exe -m tools.phase8d_overlap_reference tests/20.TIF --pa4 data/application-tests/owner01-pa4/project.astromosaic -o output/phase8d-references/replay.json
+```
+
+Choose a new output filename for each run. Omitting `--pa4` runs the controlled crop only. The local reference report is `output/phase8d-references/reference.json` with SHA-256 `e1f0d3af567db5db5f4a228fa1dba07beb64508075d338bfe95d3cecdc151549`. A separate process reproduced the report byte for byte in 12.27 seconds without a fit cache. The focused 8C and 8D selection passed 13 tests. Ruff, scoped mypy and Poetry lock validation passed. [Diagnostic](../tools/phase8d_overlap_reference.py) · [Controlled regression](../tests/numerical/test_phase8d_overlap_reference.py)
+
+## Optical calibration intake
+
+The PA4 working set has saved SIP solutions and source camera hints. A search of the local reference data and the capture's processing folders found no matching master flat or standalone measured lens calibration. Inspection of frames 19–22 in two DNG variants found `OpcodeList2` with three opcode ID 8 entries. The inspected opcode lists specify per-area polynomial level mappings. They supply no geometric warp or gain map, and the DNG-to-TIFF correction history remains unresolved. [Adobe DNG specification, Chapter 7](https://helpx.adobe.com/content/dam/help/en/camera-raw/digital-negative/jcr_content/root/content/flex/items/position/position-par/download_section_733958301/download-1/DNG_Spec_1_7_1_0.pdf#page=114)
+
+Record the original detector frame, crop and orientation, focal length and aperture, calibration provenance and prior corrections for the first imported candidate. Require one geometric mapping, unchanged source pixels, and detector-wide reserved stars that meet the native overlap gate. For an illumination candidate, require a matched flat or measured transmission map, normalization and mask checks, independent sky and aperture validation, and a check against duplicate correction. Evaluate coverage and real-tile resource use before packaging each accepted method. [Optics tracking](../questions_open_topics.md#q-029---configurable-color-photometry-and-optics)
