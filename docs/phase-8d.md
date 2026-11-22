@@ -127,10 +127,23 @@ The M2 report replay matched byte for byte. The M31 report is in `output/phase8d
 Standard uses the existing sky fit and held-out RGB model selection. A candidate changing the scale by more than a factor of 1.01 also has to pass the matched-star check. Each native aperture and its clipping halo use detector samples outside the source reads for both sky splits in that pair. The check compares the exposure-normalized fluxes on the current reference edge and screens for comparable native scales. The shared job tries an accepted sky offset or identity when stellar support is insufficient or the gain is rejected. It can use a different connected peer when appropriate. The preview, output JSON and TIFF history report the effective method. The JSON keeps the first rejected check and peer in `rejected_gain`. [ADR-0030](adr/0030-independent-stellar-support-for-photo-gains.md)
 
 ```powershell
+$m2 = 'output/phase8d-candidates/sdss/m2'
 .\.venv\Scripts\python.exe -m astromosaic project export-photo "$m2/comparison.astromosaic" -o "$m2/standard-guarded.tiff" --brightness standard --progress --json
 ```
 
 Advanced still needs a positive independent-exposure network, and the optics acceptance requires a measured calibration.
+
+### Standard local Windows results
+
+The source and copied beta 15 console agreed on the effective methods, verified RGBA samples, coverage, ICC tag and WCS. The copied desktop used both native CPU and OpenGL previews on the second monitor. Its M2 and mixed-ICC exports matched the source and console pixel for pixel. The desktop title and CLI reported `0.1.0b15`.
+
+| Case | Effective result | Stellar evidence |
+| --- | --- | --- |
+| Calibrated SDSS M2 | Unity gains on all three panels and two offset-only corrections | The 0.63585 candidate was rejected using 147 stars in 53 cells. Its median flux deviation would move from +1.96% to −35.17%. |
+| Owner crop with mixed ICC profiles | Standard gain 1.24991 | 11 stars in 10 cells. |
+| Owner crop with masked contamination | Standard gain 1.25000 | 8 stars in 8 cells. |
+
+The three exports used at most 26.1 MiB of the 64 MiB working reservation. The 8C source replay passed all frozen exposure and color cases and checked the original hashes again. The PA4 offline report retained its original SHA-256. The source tests also exercise cancellation at the stellar stage and fallback for a star-free overlap. [Windows build record](windows-release.md#verification-status) · [Source regression](../tests/numerical/test_phase8d_stellar_gain.py)
 
 ## Optical calibration intake
 
