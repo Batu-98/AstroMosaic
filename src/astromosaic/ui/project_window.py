@@ -457,6 +457,7 @@ class ProjectWindow(QMainWindow):
                 info = self._inspections[index]
                 dialog.show_embedded_optics(info.embedded_optics, info.camera_model)
                 dialog.band_override.setPlaceholderText(info.filter_name or "")
+                dialog.photo_source_info.setText(info.photo_color_hint or "Source unavailable")
         job.deleteLater()
         if self._close_after_job:
             self._finish_close_if_ready()
@@ -851,6 +852,7 @@ class ProjectWindow(QMainWindow):
         )
         if info is not None:
             dialog.band_override.setPlaceholderText(info.filter_name or "")
+            dialog.photo_source_info.setText(info.photo_color_hint or "Source unavailable")
         self._panel_dialog = (index, dialog)
         try:
             while dialog.exec():
@@ -878,6 +880,8 @@ class ProjectWindow(QMainWindow):
             include_sky=panel.include_sky,
             weight=panel.weight,
             band_override=panel.band_override,
+            photo_profile=panel.photo_profile,
+            photo_ev=panel.photo_ev,
         ):
             self._inspected_panels = self.project.panels
             if self._solved_panels is panels:
@@ -934,7 +938,7 @@ class ProjectWindow(QMainWindow):
                 try:
                     previous = self.project
                     self.project = dialog.settings()
-                except (ValueError, OverflowError) as error:
+                except (OSError, ValueError, OverflowError) as error:
                     self._error("Invalid mosaic settings", error)
                     continue
                 self._refresh(self.panels.currentIndex().row())
@@ -1398,6 +1402,7 @@ class ProjectWindow(QMainWindow):
             self._solve_timer.start()
         else:
             job.progress.connect(self._progress)
+            job.stage_changed.connect(self._job_stage)
             self.progress.setToolTip("")
         job.finished.connect(self._finished)
         self.progress.setValue(0)
@@ -1461,6 +1466,11 @@ class ProjectWindow(QMainWindow):
         if job is not None and self.cancel_button.isEnabled():
             self.status.setText(f"{job.progress_label} {done:,} / {total:,} {job.progress_units}.")
 
+    @Slot(str)
+    def _job_stage(self, stage: str) -> None:
+        if stage == "photo-overlap" and self.job is not None and self.cancel_button.isEnabled():
+            self.status.setText("Measuring photo overlaps…")
+
     @Slot(int, str)
     def _plate_solve_progress(self, percentage: int, status: str) -> None:
         if isinstance(self.job, PlateSolveJob) and self.cancel_button.isEnabled():
@@ -1488,6 +1498,9 @@ class ProjectWindow(QMainWindow):
             if job.result.common_pixels is not None:
                 text += f" Both layers cover {job.result.common_pixels:,} pixels."
             self._report_operation(text)
+            if job.result.photo is not None:
+                for line in job.result.photo.lines():
+                    self.command_panel.append_summary(line)
         elif job.cancelled:
             self.progress.setValue(0)
             self._report_operation("Mosaic cancelled.")
@@ -1579,6 +1592,9 @@ class ProjectWindow(QMainWindow):
                     f" Both layers cover {int(job.result.common_coverage.sum()):,} preview samples."
                 )
             self._report_operation(text)
+            if job.photo_report is not None:
+                for line in job.photo_report.lines():
+                    self.command_panel.append_summary(line)
             self._view_changed()
         else:
             self._clear_preview()

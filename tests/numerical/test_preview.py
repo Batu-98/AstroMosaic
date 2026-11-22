@@ -437,7 +437,7 @@ def test_photo_errors_cancel_and_retry(tmp_path: Path) -> None:
         )
     output = tmp_path / "new.tiff"
     photo = PhotoExport(None)
-    with pytest.raises(ValueError, match=r"linear\.tif: Photo export requires"):
+    with pytest.raises(ValueError, match=r"linear\.tif does not declare .*ICC profile"):
         render_mosaic([source, linear], output, spec, photo=photo)
     with pytest.raises(ValueError, match="requires a .tif or .tiff"):
         render_mosaic([source], output.with_suffix(".xisf"), spec, photo=photo)

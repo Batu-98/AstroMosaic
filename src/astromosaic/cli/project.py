@@ -125,6 +125,11 @@ def add_project_commands(parser: ArgumentParser) -> None:
         "--midtones", type=int, metavar="PERCENT", help="Select preview midtones (5–95)."
     )
     photo.add_argument("--progress", action="store_true", help="Report tile progress to stderr.")
+    settings = commands.add_parser("set-photo", help="Save photo settings in a project copy.")
+    settings.add_argument("path", type=Path, help="Saved .astromosaic project.")
+    settings.add_argument("-o", "--output", required=True, type=Path, help="A new project path.")
+    for command in (settings, photo):
+        _add_photo_options(command)
     for command in (validate, export, photo):
         command.add_argument("--band", metavar="FILTER", help="Select one saved sky band.")
     fit = commands.add_parser(
@@ -142,9 +147,73 @@ def add_project_commands(parser: ArgumentParser) -> None:
         validate,
         export,
         photo,
+        settings,
         fit,
     ):
         command.add_argument("--json", action="store_true", help="Emit a versioned JSON result.")
+
+
+def _add_photo_options(parser: ArgumentParser) -> None:
+    parser.add_argument(
+        "--photo-profile", metavar="PROFILE",
+        help="Project profile: auto, assume-srgb, srgb, linear-srgb, display-p3, adobe-rgb, or ICC path.",
+    )
+    parser.add_argument(
+        "--panel-profile", action="append", default=[], metavar="PANEL=PROFILE",
+        help="Assign a photo profile to a one-based panel number. Use inherit to clear an override.",
+    )
+    parser.add_argument(
+        "--panel-ev", action="append", default=[], metavar="PANEL=EV",
+        help="Set manual exposure EV on a one-based panel number.",
+    )
+    parser.add_argument(
+        "--exposure", choices=("off", "manual", "metadata"), help="Photo exposure normalization.",
+    )
+    parser.add_argument(
+        "--brightness", choices=("off", "sky-offset", "standard"), help="Photo brightness matching.",
+    )
+
+
+def _photo_options(
+    project: MosaicProject, arguments: Namespace, context: JobContext
+) -> MosaicProject:
+    from typing import cast
+
+    from astromosaic.photometry.photo_settings import PROFILE_LABELS, PhotoProfile, ProfileMode
+
+    def profile(value: str) -> PhotoProfile:
+        context.check_cancelled()
+        if value in PROFILE_LABELS and value != "icc":
+            return PhotoProfile(cast(ProfileMode, value))
+        if Path(value).suffix.lower() not in (".icc", ".icm"):
+            raise ValueError(f"Expected a photo profile name or ICC file, got {value!r}.")
+        return PhotoProfile.capture(Path(value))
+
+    count = len(project.panels)
+    profiles = panel_assignments(arguments.panel_profile, count, "PROFILE")
+    exposures = panel_assignments(arguments.panel_ev, count, "EV")
+    panels = list(project.panels)
+    for index in profiles.keys() | exposures.keys():
+        panel = panels[index]
+        assignment = profiles.get(index)
+        try:
+            panel_profile = (
+                panel.photo_profile if assignment is None
+                else None if assignment == "inherit" else profile(assignment)
+            )
+            panels[index] = replace(
+                panel, photo_profile=panel_profile,
+                photo_ev=float(exposures[index]) if index in exposures else panel.photo_ev,
+            )
+        except (OSError, ValueError) as error:
+            raise ValueError(f"{panel.source.path.name}: {error}") from error
+    saved = project.photo_settings
+    return replace(project, panels=tuple(panels), photo_settings=replace(
+        saved,
+        profile=profile(arguments.photo_profile) if arguments.photo_profile is not None else saved.profile,
+        exposure=arguments.exposure if arguments.exposure is not None else saved.exposure,
+        brightness=arguments.brightness if arguments.brightness is not None else saved.brightness,
+    ))
 
 
 def _label_mask(path: Path, panel: Path, budget: int, context: JobContext) -> SourceMask:
@@ -486,6 +555,19 @@ def _export(arguments: Namespace, result: dict[str, object], context: JobContext
     project = load_project(arguments.path)
     job.check_cancelled()
     if photo:
+        project = _photo_options(project, arguments, job)
+        if arguments.progress:
+            previous_stage = job.on_stage
+
+            def photo_stage(stage: str) -> None:
+                if previous_stage is not None:
+                    previous_stage(stage)
+                if arguments.json:
+                    _write_event("stage", stage=stage)
+                else:
+                    print("Measuring photo overlaps…", file=sys.stderr, flush=True)
+
+            job = replace(job, on_stage=photo_stage)
         if arguments.grid is not None:
             project = replace(project, auto_frame_preview=arguments.grid == "auto")
         tone_choice = arguments.tone or ("preview" if arguments.midtones is not None else "preserve")
@@ -500,13 +582,15 @@ def _export(arguments: Namespace, result: dict[str, object], context: JobContext
         )
         mosaic = render_project_photo(project, arguments.output, job, tone=tone, band=band)
         result.update(asdict(mosaic))
-        return f"Exported sky photo with {mosaic.width} x {mosaic.height} pixels."
+        summary = f"Exported sky photo with {mosaic.width} x {mosaic.height} pixels."
+        return "\n".join([summary, *mosaic.photo.lines()]) if mosaic.photo is not None else summary
     try:
         mosaic = render_project_layer(project, arguments.layer, arguments.output, job, band=band)
     except RefinementRejected as error:
         result["refinement"] = asdict(error.report)
         raise
     result.update(asdict(mosaic))
+    del result["photo"]
     label = f"sky band {band!r}" if band is not None else f"{arguments.layer} layer"
     return f"Exported {label} with {mosaic.width} x {mosaic.height} pixels."
 
@@ -573,6 +657,14 @@ def run_project(arguments: Namespace, *, context: JobContext | None = None) -> i
                     lambda done, total: _foreground_progress(done, total, arguments.json),
                 )
                 message = fit_project_points(arguments, result, fit_job)
+            elif action == "set-photo":
+                from astromosaic.storage.project import load_project, save_project
+
+                job.check_cancelled()
+                project = _photo_options(load_project(path), arguments, job)
+                save_project(arguments.output, project, context=job)
+                result.update(output=str(arguments.output), panels=len(project.panels))
+                message = f"Saved photo settings to {arguments.output}."
             elif action in {
                 "relink",
                 "solve",

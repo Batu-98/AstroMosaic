@@ -24,7 +24,7 @@ from tifffile import (
 from astromosaic.core import PanelDescriptor, Region, SourceFingerprint, Tile
 from astromosaic.io.fits import FitsTileSource, open_fits_sky_mask, optional_header_text
 from astromosaic.io.icc import MAX_ICC_BYTES, is_srgb_profile
-from astromosaic.io.tiff_metadata import add_tiff_optical_metadata
+from astromosaic.io.tiff_metadata import TiffPhotoMetadata, read_tiff_metadata
 
 DESCRIPTION_PREFIX = "AstroMosaic TIFF "
 DESCRIPTION_VERSION = DESCRIPTION_PREFIX + "1\n"
@@ -175,6 +175,7 @@ class TiffTileSource:
         max_tile_bytes: int,
         coverage: _Segments | None,
         sky_mask: FitsTileSource | None,
+        photo_metadata: TiffPhotoMetadata,
     ) -> None:
         self.descriptor = descriptor
         self._science = science
@@ -182,6 +183,7 @@ class TiffTileSource:
         self._max_tile_bytes = max_tile_bytes
         self._coverage = coverage
         self._sky_mask = sky_mask
+        self.photo_metadata = photo_metadata
         self._decode_bytes = max(science.decode_bytes, coverage.decode_bytes if coverage else 0)
 
     @property
@@ -236,15 +238,17 @@ def _check_orientation(page: TiffPage) -> None:
 
 def _icc_metadata(
     page: TiffPage, rgb: bool
-) -> tuple[Literal["srgb", "unsupported"] | None, str | None]:
+) -> tuple[Literal["srgb", "unsupported"] | None, str | None, bytes | None]:
     tag = page.tags.get(34675)
     if tag is None:
-        return None, None
+        return None, None, None
     if rgb and page.dtype == np.dtype("uint16") and tag.valuebytecount <= MAX_ICC_BYTES:
         profile = tag.value
-        if isinstance(profile, bytes) and is_srgb_profile(profile):
-            return "srgb", sha256(profile).hexdigest()
-    return "unsupported", None
+        if isinstance(profile, bytes):
+            if is_srgb_profile(profile):
+                return "srgb", sha256(profile).hexdigest(), profile
+            return "unsupported", None, profile
+    return "unsupported", None, None
 
 
 def _read_metadata(page: TiffPage) -> tuple[fits.Header, TiffPage | None]:
@@ -288,7 +292,8 @@ def _byte_subimage(page: TiffPage, coverage: TiffPage | TiffFrame) -> TiffPage:
 
 @contextmanager
 def open_tiff_panel(
-    path: Path, *, max_tile_bytes: int = 32 * 1024**2, sky_mask: Path | None = None
+    path: Path, *, max_tile_bytes: int = 32 * 1024**2, sky_mask: Path | None = None,
+    keep_icc: bool = False,
 ) -> Iterator[TiffTileSource]:
     if max_tile_bytes < 1:
         raise ValueError("The TIFF tile byte budget must be positive.")
@@ -317,10 +322,12 @@ def open_tiff_panel(
         header, coverage_page = _read_metadata(page)
         if photo_alpha and (header.get("AMINTENT") != "PHOTO" or coverage_page is not None):
             raise ValueError("Expected AstroMosaic photo metadata and a single source of coverage.")
-        encoding, profile_sha256 = _icc_metadata(page, rgb)
+        encoding, profile_sha256, profile = _icc_metadata(page, rgb)
         if header.get("AMINTENT") == "PHOTO" and encoding != "srgb":
             raise ValueError("An AstroMosaic photo TIFF requires a supported embedded sRGB profile.")
-        header = add_tiff_optical_metadata(page, header)
+        header, photo_metadata = read_tiff_metadata(
+            page, header, profile if keep_icc else None, rgb and page.dtype == np.dtype("uint16")
+        )
         coverage = None
         mask = None
         provenance: tuple[str, ...] = ("finite-raw-pixels",)
@@ -350,4 +357,4 @@ def open_tiff_panel(
             icc_encoding=encoding,
             icc_profile_sha256=profile_sha256,
         )
-        yield TiffTileSource(science, descriptor, header, max_tile_bytes, coverage, mask)
+        yield TiffTileSource(science, descriptor, header, max_tile_bytes, coverage, mask, photo_metadata)

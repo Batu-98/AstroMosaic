@@ -38,6 +38,7 @@ from astromosaic.pipeline.mosaic import (
     SkyCalibrationError,
     SkyCalibrationRequirement,
 )
+from astromosaic.pipeline.photo_fit import PhotoReport
 from astromosaic.storage.project import (
     Layer,
     MosaicProject,
@@ -59,6 +60,7 @@ from astromosaic.storage.project import (
 
 class BackgroundJob[Result](QThread):
     progress = Signal(object, object)
+    stage_changed = Signal(str)
     label = "job"
     progress_label = "Processing"
     progress_units = "pixels"
@@ -83,7 +85,9 @@ class BackgroundJob[Result](QThread):
 
     def run(self) -> None:
         try:
-            self.result = self.perform(JobContext(self._cancel.is_set, self._progress))
+            self.result = self.perform(JobContext(
+                self._cancel.is_set, self._progress, on_stage=self.stage_changed.emit
+            ))
         except MosaicCancelled:
             self.cancelled = True
         except (OSError, RuntimeError, ValueError) as error:
@@ -273,6 +277,7 @@ class PreviewJob(_ProjectJob[DisplayFrame]):
         self.band = band
         self.fitted_grid: RenderSpec | None = None
         self.visual_only = False
+        self.photo_report: PhotoReport | None = None
         self.adaptive_edge = adaptive_edge
         self.crop_grid = crop_grid
         self.suggested_crop: Region | None = None
@@ -299,6 +304,7 @@ class PreviewJob(_ProjectJob[DisplayFrame]):
         context.check_cancelled()
         self.fitted_grid = preview.fitted_grid
         self.visual_only = preview.visual_only
+        self.photo_report = preview.photo
         self.suggested_crop = preview.suggested_crop
         self.suggested_rotation = preview.suggested_rotation
         return frame

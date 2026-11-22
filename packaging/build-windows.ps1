@@ -13,7 +13,7 @@ try {
         }
     }
     $Python = (Resolve-Path -LiteralPath $Python).Path
-    & $Python -c "import PyInstaller, seiza; from imagecodecs import _imcd; from PySide6 import QtCore"
+    & $Python -c "import PyInstaller, seiza; from imagecodecs import _cms, _imcd; from PySide6 import QtCore"
     if ($LASTEXITCODE -ne 0) {
         throw 'Sync the locked main/build environment with the desktop and gaia extras.'
     }
@@ -41,6 +41,7 @@ try {
         '--copy-metadata', 'astromosaic', '--copy-metadata', 'seiza',
         '--add-data', "${srgbProfile}:astromosaic/io",
         '--hidden-import', 'imagecodecs._imcd',
+        '--hidden-import', 'imagecodecs._cms',
         '--hidden-import', 'imagecodecs._deflate',
         '--hidden-import', 'imagecodecs._shared',
         '--hidden-import', 'imagecodecs._shared_cython'

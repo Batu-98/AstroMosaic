@@ -5,7 +5,8 @@ mapping. Ordinary TIFF print resolution and 35 mm equivalent focal length
 are deliberately excluded. These values remain approximate solver hints.
 """
 
-from math import isfinite
+from dataclasses import dataclass
+from math import isclose, isfinite
 from typing import cast
 from xml.etree import ElementTree
 
@@ -19,6 +20,10 @@ _XMP_LIMIT = 128 * 1024
 _EXIF_NAMESPACE = "http://ns.adobe.com/exif/1.0/"
 _TIFF_NAMESPACE = "http://ns.adobe.com/tiff/1.0/"
 _EXIF_TAGS = {
+    "ColorSpace": 40961,
+    "ExposureTime": 33434,
+    "FNumber": 33437,
+    "ISOSpeedRatings": 34855,
     "FocalLength": 37386,
     "FocalPlaneXResolution": 41486,
     "FocalPlaneYResolution": 41487,
@@ -27,6 +32,25 @@ _EXIF_TAGS = {
     "PixelYDimension": 40963,
     "DigitalZoomRatio": 41988,
 }
+
+
+@dataclass(frozen=True, slots=True)
+class CameraExposure:
+    seconds: float | None = None
+    f_number: float | None = None
+    iso: float | None = None
+    camera: str | None = None
+    make: str | None = None
+    conflicting: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class TiffPhotoMetadata:
+    embedded_icc: bytes | None
+    uint16_rgb: bool
+    exif_srgb: bool
+    color_conflict: bool
+    exposure: CameraExposure
 
 
 def _positive_rational(value: object, *, allow_zero: bool = False) -> float | None:
@@ -64,7 +88,7 @@ def _xmp_fields(page: TiffPage) -> dict[str, object]:
         return {}
     fields: dict[str, object] = {}
     allowed = {f"{{{_EXIF_NAMESPACE}}}{key}": key for key in _EXIF_TAGS}
-    allowed[f"{{{_TIFF_NAMESPACE}}}Model"] = "Model"
+    allowed.update({f"{{{_TIFF_NAMESPACE}}}{key}": key for key in ("Make", "Model")})
     for element in root.iter():
         if element.tag in allowed and element.text is not None:
             fields[allowed[element.tag]] = element.text.strip()
@@ -74,7 +98,9 @@ def _xmp_fields(page: TiffPage) -> dict[str, object]:
     return fields
 
 
-def add_tiff_optical_metadata(page: TiffPage, header: fits.Header) -> fits.Header:
+def read_tiff_metadata(
+    page: TiffPage, header: fits.Header, embedded_icc: bytes | None, uint16_rgb: bool
+) -> tuple[fits.Header, TiffPhotoMetadata]:
     """Fill unusable FITS-style hints from EXIF, TIFF tags, and standard XMP.
 
     Embedded AstroMosaic fields keep precedence. Pixel pitch is nominal when
@@ -132,4 +158,38 @@ def add_tiff_optical_metadata(page: TiffPage, header: fits.Header) -> fits.Heade
                 if model and model.isascii() and model.isprintable():
                     result["INSTRUME"] = (model[:68], "Embedded TIFF camera model")
                     break
-    return result
+    fields = (exif, direct, xmp)
+
+    def numbers(*keys: str) -> list[float | None]:
+        return [_positive_rational(items[key]) for items in fields for key in keys if key in items]
+
+    def agreed(values: list[float | None]) -> tuple[float | None, bool]:
+        if not values:
+            return None, False
+        first = values[0]
+        if first is None or any(v is None or not isclose(v, first, rel_tol=1e-5) for v in values):
+            return None, True
+        return first, False
+
+    def identifier(key: str) -> tuple[str | None, bool]:
+        values = {
+            value.strip().casefold() for value in (
+                page.tags.valueof(key), exif.get(key), xmp.get(key)
+            ) if isinstance(value, str) and value.strip()
+        }
+        return (next(iter(values)) if len(values) == 1 else None), len(values) > 1
+
+    seconds, shutter_conflict = agreed(numbers("ExposureTime"))
+    aperture, aperture_conflict = agreed(numbers("FNumber"))
+    iso, iso_conflict = agreed(numbers("ISOSpeedRatings", "PhotographicSensitivity"))
+    camera, camera_conflict = identifier("Model")
+    make, make_conflict = identifier("Make")
+    exposure = CameraExposure(
+        seconds, aperture, iso, camera, make,
+        shutter_conflict or aperture_conflict or iso_conflict or camera_conflict or make_conflict,
+    )
+    color_spaces = set(numbers("ColorSpace"))
+    color_spaces.difference_update((None, 65535))
+    return result, TiffPhotoMetadata(
+        embedded_icc, uint16_rgb, 1 in color_spaces, len(color_spaces) > 1, exposure
+    )

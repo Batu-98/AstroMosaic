@@ -11,12 +11,15 @@ from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
     QDialogButtonBox,
+    QDoubleSpinBox,
     QFileDialog,
     QFormLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QPushButton,
+    QTabWidget,
+    QVBoxLayout,
     QWidget,
 )
 
@@ -26,6 +29,16 @@ from astromosaic.core.masks import ForegroundTag
 from astromosaic.geometry import SkyProjection
 from astromosaic.geometry.image import CompositionSpec, LayerPlacement
 from astromosaic.photometry.background import BackgroundMode
+from astromosaic.photometry.photo_settings import (
+    BRIGHTNESS_LABELS,
+    EXPOSURE_LABELS,
+    PROFILE_LABELS,
+    BrightnessMode,
+    ExposureMode,
+    PhotoProfile,
+    PhotoSettings,
+    ProfileMode,
+)
 from astromosaic.pipeline.framing import FrameLock
 from astromosaic.pipeline.mosaic import DEFAULT_SKY_BAND, RenderSpec
 from astromosaic.pipeline.refinement import RefinementSpec
@@ -42,10 +55,24 @@ _OVERRIDES: tuple[ForegroundTag | None, ...] = (None, "mixed", "sky-only")
 
 
 class _SettingsDialog(QDialog):
-    def __init__(self, title: str, parent: QWidget) -> None:
+    def __init__(self, title: str, parent: QWidget, *, tab: str | None = None) -> None:
         super().__init__(parent)
         self.setWindowTitle(title)
-        self.form = QFormLayout(self)
+        self.tabs = None
+        self.outer = None
+        if tab is None:
+            self.form = QFormLayout(self)
+        else:
+            self.tabs = QTabWidget(self)
+            self.outer = QVBoxLayout(self)
+            self.outer.addWidget(self.tabs)
+            self.form = self.tab_form(tab)
+
+    def tab_form(self, label: str) -> QFormLayout:
+        assert self.tabs is not None
+        page = QWidget(self.tabs)
+        self.tabs.addTab(page, label)
+        return QFormLayout(page)
 
     def field(self, label: str, value: object) -> QLineEdit:
         edit = QLineEdit(str(value))
@@ -58,7 +85,62 @@ class _SettingsDialog(QDialog):
         )
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
-        self.form.addRow(buttons)
+        if self.outer is None:
+            self.form.addRow(buttons)
+        else:
+            self.outer.addWidget(buttons)
+
+
+class _PhotoProfileFields:
+    def __init__(
+        self, form: QFormLayout, parent: QWidget, profile: PhotoProfile | None, *, inherit: bool
+    ) -> None:
+        self.previous = profile
+        self.mode = QComboBox()
+        if inherit:
+            self.mode.addItem("Use project profile", "inherit")
+        for choice, label in PROFILE_LABELS.items():
+            self.mode.addItem(label, choice)
+        self.mode.setCurrentIndex(self.mode.findData(profile.mode if profile else "inherit"))
+        form.addRow("Input profile", self.mode)
+        self.path = QLineEdit(str(profile.path) if profile is not None and profile.path else "")
+        self.path.setReadOnly(True)
+        browse = QPushButton("Browse…")
+
+        def choose() -> None:
+            name, _ = QFileDialog.getOpenFileName(
+                parent, "Assign an ICC profile", self.path.text(), "ICC profiles (*.icc *.icm)"
+            )
+            if name:
+                self.path.setText(name)
+                self.path.setModified(True)
+
+        browse.clicked.connect(choose)
+        file = QHBoxLayout()
+        file.addWidget(self.path, 1)
+        file.addWidget(browse)
+        form.addRow("ICC file", file)
+
+        def toggle() -> None:
+            enabled = self.mode.currentData() == "icc"
+            self.path.setEnabled(enabled)
+            browse.setEnabled(enabled)
+
+        self.mode.currentIndexChanged.connect(toggle)
+        toggle()
+
+    def settings(self) -> PhotoProfile | None:
+        mode = self.mode.currentData()
+        if mode == "inherit":
+            return None
+        if mode != "icc":
+            return PhotoProfile(cast(ProfileMode, mode))
+        if not self.path.text():
+            raise ValueError("Choose an ICC file.")
+        path = Path(self.path.text())
+        if self.previous is not None and self.previous.path == path and not self.path.isModified():
+            return self.previous
+        return PhotoProfile.capture(path)
 
 
 class ProjectSettings(_SettingsDialog):
@@ -68,7 +150,7 @@ class ProjectSettings(_SettingsDialog):
         suggested_rotation: float | None = None,
         input_metadata: str = "",
     ) -> None:
-        super().__init__("Mosaic settings", parent)
+        super().__init__("Mosaic settings", parent, tab="Sky Grid")
         self.project = project
         self.visible_grid = spec = preview_grid or project.render
         self.auto_frame = QCheckBox("Auto Frame")
@@ -140,6 +222,23 @@ class ProjectSettings(_SettingsDialog):
         self.background.currentTextChanged.connect(
             lambda value: self.match.setEnabled(value != "Disabled")
         )
+        photo = self.tab_form("Photo")
+        self.photo_profile = _PhotoProfileFields(
+            photo, self, project.photo_settings.profile, inherit=False
+        )
+        self.photo_exposure = QComboBox()
+        for choice, label in EXPOSURE_LABELS.items():
+            self.photo_exposure.addItem(label, choice)
+        self.photo_exposure.setCurrentIndex(self.photo_exposure.findData(project.photo_settings.exposure))
+        self.photo_exposure.setToolTip("Enter manual EV per panel in Panel Settings.")
+        photo.addRow("Exposure", self.photo_exposure)
+        self.photo_brightness = QComboBox()
+        for brightness, label in BRIGHTNESS_LABELS.items():
+            self.photo_brightness.addItem(label, brightness)
+        self.photo_brightness.setCurrentIndex(
+            self.photo_brightness.findData(project.photo_settings.brightness)
+        )
+        photo.addRow("Brightness matching", self.photo_brightness)
         self.buttons()
 
     def _update_locks(self, auto_frame: bool) -> None:
@@ -199,6 +298,8 @@ class ProjectSettings(_SettingsDialog):
                 cast(BackgroundMode, background),
             )
         )
+        profile = self.photo_profile.settings()
+        assert profile is not None
         project = replace(
             self.project,
             render=spec,
@@ -207,6 +308,11 @@ class ProjectSettings(_SettingsDialog):
             filter_name=self.filter.text().strip() or None,
             assume_surface_brightness=self.assume.isChecked(),
             refinement=refinement,
+            photo_settings=PhotoSettings(
+                profile,
+                cast(ExposureMode, self.photo_exposure.currentData()),
+                cast(BrightnessMode, self.photo_brightness.currentData()),
+            ),
             composition=self.project.composition if spec == previous else None,
         )
         project.validate()
@@ -215,7 +321,7 @@ class ProjectSettings(_SettingsDialog):
 
 class PanelSettings(_SettingsDialog):
     def __init__(self, panel: ProjectPanel, parent: QWidget) -> None:
-        super().__init__("Panel settings", parent)
+        super().__init__("Panel settings", parent, tab="Panel")
         self.panel = panel
         self._autofilled: dict[QLineEdit, str] = {}
         source = QLabel()
@@ -251,6 +357,18 @@ class PanelSettings(_SettingsDialog):
         self.sky_mask = self._attachment(
             "FITS sky mask", panel.sky_mask, "FITS image (*.fits *.fit *.fts)"
         )
+        photo = self.tab_form("Photo")
+        self.photo_source_info = QLabel("Checking source metadata…")
+        self.photo_source_info.setTextFormat(Qt.TextFormat.PlainText)
+        photo.addRow("Source color", self.photo_source_info)
+        self.photo_profile = _PhotoProfileFields(photo, self, panel.photo_profile, inherit=True)
+        self.photo_ev = QDoubleSpinBox()
+        self.photo_ev.setRange(-16, 16)
+        self.photo_ev.setDecimals(6)
+        self.photo_ev.setSingleStep(0.25)
+        self.photo_ev.setValue(panel.photo_ev)
+        self.photo_ev.setToolTip("Applies when Mosaic Settings uses Manual EV.")
+        photo.addRow("Manual exposure (EV)", self.photo_ev)
         self.buttons()
 
     def _optical_field(self, label: str, value: float | None) -> QLineEdit:
@@ -331,6 +449,9 @@ class PanelSettings(_SettingsDialog):
             include_sky=self.include_sky.isChecked(),
             optics=optics,
             band_override=self.band_override.text().strip() or None,
+            photo_profile=self.photo_profile.settings(),
+            photo_ev=self.panel.photo_ev if self.photo_ev.value() == round(self.panel.photo_ev, 6)
+            else self.photo_ev.value(),
         )
 
 

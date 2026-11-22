@@ -11,7 +11,7 @@ from importlib.metadata import version
 from math import ceil, floor, isfinite
 from pathlib import Path
 from stat import S_ISREG
-from typing import Any, Literal, TypedDict
+from typing import Any, Literal, NotRequired, TypedDict, cast
 from uuid import uuid4
 
 import numpy as np
@@ -46,6 +46,14 @@ from astromosaic.io import PanelSource, SkyMask, open_panel
 from astromosaic.io.atomic import atomic_binary_file
 from astromosaic.io.fits import optional_header_text
 from astromosaic.photometry.photo import PhotoTone
+from astromosaic.photometry.photo_settings import (
+    BrightnessMode,
+    ExposureMode,
+    PhotoProfile,
+    PhotoSettings,
+    ProfileMode,
+    validate_photo_ev,
+)
 from astromosaic.pipeline.control_points import (
     ControlPointFit,
     GroundControlPoint,
@@ -71,6 +79,7 @@ from astromosaic.pipeline.layers import (
 from astromosaic.pipeline.mosaic import (
     MosaicResult,
     PhotoExport,
+    PhotoInputs,
     PreviewFrame,
     RenderSpec,
     _prepare_mosaic,
@@ -90,6 +99,7 @@ _BAND_SCHEMA_VERSION = 6
 _TERRAIN_SCHEMA_VERSION = 7
 _POINT_REVIEW_SCHEMA_VERSION = 8
 _ADAPTIVE_SCHEMA_VERSION = 9
+_PHOTO_SCHEMA_VERSION = 10
 _MAX_MANIFEST_BYTES = 4 * 1024**2
 type Layer = Literal["sky", "foreground", "composition"]
 type _GroundInputs = tuple[tuple[int, SourceMask], ...]
@@ -136,10 +146,13 @@ class ProjectPanel:
     include_sky: bool = True
     optics: PanelOptics = PanelOptics()
     band_override: str | None = None
+    photo_profile: PhotoProfile | None = None
+    photo_ev: float = 0.0
 
     def __post_init__(self) -> None:
         if self.sky_mask is not None and self.source_mask is not None:
             raise ValueError("Choose either an attached FITS mask or an edited sky mask.")
+        validate_photo_ev(self.photo_ev)
         label = self.band_override
         if label is not None and (
             not isinstance(label, str)
@@ -225,6 +238,7 @@ class MosaicProject:
     composition: CompositionSpec | None = None
     auto_frame_preview: bool = False
     frame_locks: frozenset[FrameLock] = frozenset()
+    photo_settings: PhotoSettings = PhotoSettings()
 
     def validate(self) -> None:
         spec = self.render
@@ -328,6 +342,7 @@ class _PanelInputs(TypedDict):
     wcs_sidecars: dict[int, Path]
     filter_overrides: dict[int, str]
     refinement: RefinementSpec | None
+    photo_inputs: NotRequired[PhotoInputs]
 
 
 def _check_reference(role: str, reference: FileReference, context: JobContext) -> None:
@@ -361,6 +376,7 @@ class PanelInspection:
     descriptor: PanelDescriptor | None = None
     telescope_model: str | None = None
     embedded_scale_arcsec: float | None = None
+    photo_color_hint: str = ""
 
 
 def inspect_project_panel(panel: ProjectPanel, context: JobContext) -> PanelInspection:
@@ -370,6 +386,7 @@ def inspect_project_panel(panel: ProjectPanel, context: JobContext) -> PanelInsp
         with open_panel(panel.source.path) as source:
             header = source.header
             descriptor = source.descriptor
+            photo = source.photo_metadata
     except (OSError, ValueError, OverflowError) as error:
         return PanelInspection("Unavailable", str(error))
 
@@ -382,6 +399,12 @@ def inspect_project_panel(panel: ProjectPanel, context: JobContext) -> PanelInsp
         descriptor,
         optional_header_text(header, "TELESCOP"),
         positive_header_number(header.get("PIXSCALE")),
+        (
+            "Embedded sRGB ICC" if descriptor.icc_encoding == "srgb"
+            else "Embedded ICC" if descriptor.icc_encoding is not None
+            else "EXIF/XMP sRGB" if photo is not None and photo.exif_srgb
+            else "No photo profile declared"
+        ),
     )
     if panel.wcs_sidecar is not None:
         try:
@@ -526,7 +549,8 @@ def project_sky_bands(project: MosaicProject, context: JobContext) -> dict[str, 
 
 
 def _verified_inputs(
-    project: MosaicProject, context: JobContext, band: str | None = None
+    project: MosaicProject, context: JobContext, band: str | None = None, *,
+    use_photo: bool = False,
 ) -> _PanelInputs:
     sky_masks = {}
     filter_name = project.filter_name
@@ -553,7 +577,7 @@ def _verified_inputs(
                 raise ValueError(f"{panel.source.path.name}: {error}") from error
         if (mask := panel.sky_input()) is not None:
             sky_masks[index] = mask
-    return {
+    inputs: _PanelInputs = {
         "paths": [panel.source.path for panel in panels],
         "weights": [panel.weight for panel in panels],
         "filter_name": filter_name,
@@ -565,6 +589,14 @@ def _verified_inputs(
         },
         "refinement": project.refinement,
     }
+    if use_photo:
+        inputs["photo_inputs"] = PhotoInputs(
+            project.photo_settings,
+            {index: panel.photo_profile for index, panel in enumerate(panels)
+             if panel.photo_profile is not None},
+            {index: panel.photo_ev for index, panel in enumerate(panels) if panel.photo_ev},
+        )
+    return inputs
 
 
 @dataclass(frozen=True, slots=True)
@@ -626,7 +658,7 @@ def render_project_photo(
             tone, auto_frame=grid is None and project.auto_frame_preview,
             frame_locks=project.frame_locks,
         ),
-        **_verified_inputs(project, context, band),
+        **_verified_inputs(project, context, band, use_photo=True),
     )
 
 
@@ -652,7 +684,7 @@ def preview_project(
         adaptive_edge=adaptive_edge,
         window=window,
         inspect_crop=inspect_crop,
-        **_verified_inputs(project, context, band),
+        **_verified_inputs(project, context, band, use_photo=allow_visual),
     )
 
 
@@ -938,15 +970,28 @@ def render_project_layer(
         return _write_raster(raster, destination, context)
 
 
+def _portable_path(path: Path, directory: Path) -> str:
+    try:
+        return Path(os.path.relpath(path, directory)).as_posix()
+    except ValueError:
+        # Windows cannot express a relative path across drives.
+        return path.as_posix()
+
+
 def _encode_reference(reference: FileReference | None, directory: Path) -> dict[str, object] | None:
     if reference is None:
         return None
-    try:
-        path = Path(os.path.relpath(reference.path, directory)).as_posix()
-    except ValueError:
-        # Windows cannot express a relative path across drives.
-        path = reference.path.as_posix()
-    return {"path": path, "fingerprint": asdict(reference.fingerprint)}
+    return {
+        "path": _portable_path(reference.path, directory),
+        "fingerprint": asdict(reference.fingerprint),
+    }
+
+
+def _encode_profile(profile: PhotoProfile, directory: Path) -> dict[str, object]:
+    data: dict[str, object] = {"mode": profile.mode}
+    if profile.path is not None:
+        data.update(path=_portable_path(profile.path, directory), sha256=profile.digest)
+    return data
 
 
 def _encode_mask(mask: SourceMask | None) -> dict[str, object] | None:
@@ -972,6 +1017,12 @@ def save_project(
         for _, reference in panel.references()
     ):
         raise ValueError("Choose a project filename separate from the panel files and attachments.")
+    profiles = (project.photo_settings.profile, *(panel.photo_profile for panel in project.panels))
+    if any(
+        profile is not None and profile.path is not None and path.resolve() == profile.path.resolve()
+        for profile in profiles
+    ):
+        raise ValueError("Choose a project filename separate from the assigned ICC files.")
     project.validate()
     directory = path.absolute().parent
     render = asdict(project.render)
@@ -999,6 +1050,11 @@ def save_project(
         and (project.refinement.max_shift_px is None or project.refinement.background == "auto")
     ):
         schema_version = _ADAPTIVE_SCHEMA_VERSION
+    if (
+        project.photo_settings != PhotoSettings()
+        or any(panel.photo_profile is not None or panel.photo_ev != 0 for panel in project.panels)
+    ):
+        schema_version = _PHOTO_SCHEMA_VERSION
     if schema_version == _TAN_SCHEMA_VERSION:
         del render["projection"]
     data = {
@@ -1012,6 +1068,13 @@ def save_project(
         "refinement": asdict(project.refinement) if project.refinement else None,
         "foreground": foreground,
         "composition": asdict(project.composition) if project.composition else None,
+        **({
+            "photo": {
+                "profile": _encode_profile(project.photo_settings.profile, directory),
+                "exposure": project.photo_settings.exposure,
+                "brightness": project.photo_settings.brightness,
+            }
+        } if schema_version >= _PHOTO_SCHEMA_VERSION else {}),
         "panels": [
             {
                 "source": _encode_reference(panel.source, directory),
@@ -1023,6 +1086,11 @@ def save_project(
                 "source_mask": _encode_mask(panel.source_mask),
                 "include_sky": panel.include_sky,
                 "optics": asdict(panel.optics),
+                **(
+                    {"photo_profile": _encode_profile(panel.photo_profile, directory)}
+                    if panel.photo_profile is not None else {}
+                ),
+                **({"photo_ev": panel.photo_ev} if panel.photo_ev else {}),
                 **(
                     {"band_override": panel.band_override}
                     if schema_version >= _BAND_SCHEMA_VERSION
@@ -1068,21 +1136,47 @@ def _pair(value: object) -> tuple[object, object]:
     return value[0], value[1]
 
 
-def _decode_reference(value: object, directory: Path) -> FileReference:
-    record = _object(value)
-    name = record["path"]
+def _project_path(name: object, directory: Path) -> Path:
     if not isinstance(name, str) or not name.strip() or "\0" in name:
         raise ValueError("Expected a nonempty file path.")
     path = Path(name)
     if path.anchor and not path.is_absolute():
         raise ValueError("Expected a project-relative path or a fully qualified absolute path.")
+    return Path(os.path.abspath(directory / path))
+
+
+def _decode_reference(value: object, directory: Path) -> FileReference:
+    record = _object(value)
+    path = _project_path(record["path"], directory)
     fingerprint = _object(record["fingerprint"])
     size = _integer(fingerprint["size_bytes"])
     if size < 0:
         raise ValueError("Expected a nonnegative file size.")
     return FileReference(
-        Path(os.path.abspath(directory / path)),
+        path,
         SourceFingerprint(size, _integer(fingerprint["modified_ns"])),
+    )
+
+
+def _decode_profile(value: object, directory: Path) -> PhotoProfile:
+    record = _object(value)
+    mode, digest = record["mode"], record.get("sha256")
+    if not isinstance(mode, str) or (digest is not None and not isinstance(digest, str)):
+        raise ValueError("Invalid photo profile assignment.")
+    if "path" in record:
+        return PhotoProfile(cast(ProfileMode, mode), _project_path(record["path"], directory), digest)
+    return PhotoProfile(cast(ProfileMode, mode), digest=digest)
+
+
+def _decode_photo(value: object, directory: Path) -> PhotoSettings:
+    record = _object(value)
+    exposure, brightness = record["exposure"], record["brightness"]
+    if not isinstance(exposure, str) or not isinstance(brightness, str):
+        raise ValueError("Invalid photo exposure or brightness setting.")
+    return PhotoSettings(
+        _decode_profile(record["profile"], directory),
+        cast(ExposureMode, exposure),
+        cast(BrightnessMode, brightness),
     )
 
 
@@ -1287,6 +1381,8 @@ def _decode_panel(value: object, directory: Path, schema_version: int) -> Projec
     band_override = record["band_override"] if schema_version >= _BAND_SCHEMA_VERSION else None
     if schema_version < _BAND_SCHEMA_VERSION and record.get("band_override") is not None:
         raise ValueError("Sky band overrides require project manifest version 6.")
+    if schema_version < _PHOTO_SCHEMA_VERSION and ("photo_profile" in record or "photo_ev" in record):
+        raise ValueError("Panel photo settings require project manifest version 10.")
 
     def optical_value(key: str) -> float | None:
         value = optics.get(key)
@@ -1307,6 +1403,8 @@ def _decode_panel(value: object, directory: Path, schema_version: int) -> Projec
             optical_value("pixel_size_y_um"),
         ),
         band_override,
+        _decode_profile(record["photo_profile"], directory) if "photo_profile" in record else None,
+        _number(record.get("photo_ev", 0.0)),
     )
 
 
@@ -1318,7 +1416,7 @@ def load_project(path: Path) -> MosaicProject:
     try:
         data = _object(json.loads(payload.decode("utf-8")))
         schema_version = _integer(data["version"])
-        if not 1 <= schema_version <= _ADAPTIVE_SCHEMA_VERSION:
+        if not 1 <= schema_version <= _PHOTO_SCHEMA_VERSION:
             raise ValueError("Unsupported project manifest version.")
         if not isinstance(data["panels"], list):
             raise ValueError("Expected an ordered panel list.")
@@ -1330,9 +1428,12 @@ def load_project(path: Path) -> MosaicProject:
             assume, bool
         ):
             raise ValueError("Invalid filter or surface brightness declaration.")
+        directory = path.absolute().parent
+        if schema_version < _PHOTO_SCHEMA_VERSION and "photo" in data:
+            raise ValueError("Photo settings require project manifest version 10.")
         project = MosaicProject(
             tuple(
-                _decode_panel(record, path.absolute().parent, schema_version)
+                _decode_panel(record, directory, schema_version)
                 for record in data["panels"]
             ),
             _decode_render(data["render"], schema_version),
@@ -1343,6 +1444,10 @@ def load_project(path: Path) -> MosaicProject:
             _decode_composition(data["composition"]) if schema_version >= 3 else None,
             auto_frame_preview=auto_frame,
             frame_locks=_decode_frame_locks(data.get("frame_locks", []), schema_version),
+            photo_settings=(
+                _decode_photo(data["photo"], directory)
+                if schema_version >= _PHOTO_SCHEMA_VERSION else PhotoSettings()
+            ),
         )
         project.validate()
         return project

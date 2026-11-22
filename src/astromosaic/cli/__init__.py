@@ -134,6 +134,7 @@ def _run_mosaic(
         return {"status": error.report.status, "refinement": asdict(error.report)}, 1
     payload = asdict(result)
     del payload["common_pixels"]
+    del payload["photo"]
     if result.refinement is None:
         del payload["refinement"]
     return payload, 0

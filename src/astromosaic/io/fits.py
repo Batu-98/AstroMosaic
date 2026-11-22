@@ -28,6 +28,8 @@ def fits_tile_bytes(region: Region) -> int:
 
 
 class FitsTileSource:
+    photo_metadata = None
+
     def __init__(
         self,
         hdu: fits.PrimaryHDU,

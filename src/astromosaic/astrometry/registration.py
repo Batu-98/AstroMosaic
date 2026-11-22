@@ -26,9 +26,9 @@ class ProjectedField:
     fluxes: FloatArray
 
 
-def project_field(
-    stars: StarField, geometry: PanelGeometry, target: PanelGeometry, width: int, height: int
-) -> ProjectedField:
+def projected_bounds(
+    geometry: PanelGeometry, target: PanelGeometry, width: int, height: int
+) -> Bounds | None:
     # Sample each full-WCS edge to include curved and rotated footprints.
     x = np.linspace(-0.5, width - 0.5, 33)
     y = np.linspace(-0.5, height - 0.5, 33)
@@ -36,11 +36,16 @@ def project_field(
     boundary_y = np.concatenate((np.full_like(x, y[0]), np.full_like(x, y[-1]), y, y))
     boundary = target.inverse(geometry.forward(boundary_x, boundary_y))
     boundary = boundary[np.isfinite(boundary).all(axis=1)]
-    bounds = None
-    if boundary.size:
-        lo, hi = boundary.min(axis=0), boundary.max(axis=0)
-        bounds = float(lo[0]), float(lo[1]), float(hi[0]), float(hi[1])
+    if not boundary.size:
+        return None
+    lo, hi = boundary.min(axis=0), boundary.max(axis=0)
+    return float(lo[0]), float(lo[1]), float(hi[0]), float(hi[1])
 
+
+def project_field(
+    stars: StarField, geometry: PanelGeometry, target: PanelGeometry, width: int, height: int
+) -> ProjectedField:
+    bounds = projected_bounds(geometry, target, width, height)
     if not stars.stars:
         return ProjectedField(bounds, np.empty((0, 2)), np.empty(0))
     x, y, flux = np.array([(star.x, star.y, star.flux) for star in stars.stars], dtype=np.float64).T

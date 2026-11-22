@@ -14,6 +14,7 @@ class JobContext:
     on_progress: Callable[[int, int], None] | None = None
     checkpoint: Callable[[], None] | None = None
     on_cleanup: Callable[[float], None] | None = None
+    on_stage: Callable[[str], None] | None = None
 
     def check_cancelled(self) -> None:
         if self.is_cancelled is not None and self.is_cancelled():

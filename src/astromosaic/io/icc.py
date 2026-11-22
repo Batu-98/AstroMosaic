@@ -1,5 +1,6 @@
-"""Recognize standard sRGB matrix and transfer curves in bounded ICC metadata."""
+"""Inspect bounded RGB matrix/shaper profiles."""
 
+from math import isfinite
 from struct import unpack_from
 
 import numpy as np
@@ -38,10 +39,9 @@ def _srgb_curve(data: bytes) -> bool:
     return bool(np.max(np.abs(np.interp(probe, knots, values) - expected)) <= 0.00015)
 
 
-def is_srgb_profile(profile: bytes) -> bool:
-    """Match the colorants and transfer function instead of trusting the profile name."""
+def _matrix_tags(profile: bytes) -> dict[bytes, tuple[int, int]]:
     if not 132 <= len(profile) <= MAX_ICC_BYTES:
-        return False
+        return {}
     size = unpack_from(">I", profile)[0]
     count = unpack_from(">I", profile, 128)[0]
     table_end = 132 + count * 12
@@ -53,7 +53,7 @@ def is_srgb_profile(profile: bytes) -> bool:
         or not 6 <= count <= 256
         or not table_end <= size <= len(profile)
     ):
-        return False
+        return {}
     tags: dict[bytes, tuple[int, int]] = {}
     for index in range(count):
         key, start, length = unpack_from(">4sII", profile, 132 + 12 * index)
@@ -62,9 +62,14 @@ def is_srgb_profile(profile: bytes) -> bool:
             or key[:3] in (b"A2B", b"B2A", b"D2B", b"B2D")
             or not table_end <= start <= start + length <= size
         ):
-            return False
+            return {}
         tags[key] = (start, start + length)
+    return tags
 
+
+def is_srgb_profile(profile: bytes) -> bool:
+    """Match the colorants and transfer function instead of trusting the profile name."""
+    tags = _matrix_tags(profile)
     for channel, expected in zip((b"r", b"g", b"b"), _SRGB_COLORANTS, strict=True):
         lo, hi = tags.get(channel + b"XYZ", (0, 0))
         if hi - lo != 20 or profile[lo : lo + 4] != b"XYZ ":
@@ -76,3 +81,48 @@ def is_srgb_profile(profile: bytes) -> bool:
         if hi - lo > 12 + 4096 * 2 or not _srgb_curve(profile[lo:hi]):
             return False
     return True
+
+
+def is_matrix_profile(profile: bytes) -> bool:
+    """Require RGB colorants, a white point, and three supported shaper curves."""
+    tags = _matrix_tags(profile)
+    colorants = []
+    for key in (b"rXYZ", b"gXYZ", b"bXYZ", b"wtpt"):
+        lo, hi = tags.get(key, (0, 0))
+        if hi - lo != 20 or profile[lo : lo + 4] != b"XYZ ":
+            return False
+        xyz = unpack_from(">3i", profile, lo + 8)
+        if key == b"wtpt" and min(xyz) <= 0:
+            return False
+        colorants.append(xyz)
+    determinant = float(np.linalg.det(np.array(colorants[:3], dtype=np.float64) / 65536))
+    if not isfinite(determinant) or abs(determinant) < 1e-6:
+        return False
+    for key in (b"rTRC", b"gTRC", b"bTRC"):
+        lo, hi = tags.get(key, (0, 0))
+        if not _matrix_curve(profile, lo, hi):
+            return False
+    return True
+
+
+def _matrix_curve(profile: bytes, lo: int, hi: int) -> bool:
+    if hi - lo < 12:
+        return False
+    kind = profile[lo : lo + 4]
+    if kind == b"para":
+        function = unpack_from(">H", profile, lo + 8)[0]
+        counts = (1, 3, 4, 5, 7)
+        return (
+            function < len(counts)
+            and hi - lo == 12 + 4 * counts[function]
+            and unpack_from(">i", profile, lo + 12)[0] > 0
+        )
+    if kind != b"curv":
+        return False
+    count = unpack_from(">I", profile, lo + 8)[0]
+    if count > 65536 or hi - lo != 12 + 2 * count:
+        return False
+    curve = np.frombuffer(profile, dtype=">u2", offset=lo + 12, count=count)
+    if count == 1:
+        return bool(curve[0] > 0)
+    return not count or bool(curve[-1] > curve[0] and np.all(curve[1:] >= curve[:-1]))

@@ -220,6 +220,8 @@ def _add_image_properties(image: ET.Element, header: fits.Header) -> None:
 
 
 class XisfTileSource:
+    photo_metadata = None
+
     def __init__(
         self,
         stream: IO[bytes],
