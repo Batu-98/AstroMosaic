@@ -34,6 +34,29 @@ $env:OPENBLAS_NUM_THREADS = '1'
 
 Choose a new output filename for each run. Omitting `--pa4` runs the controlled crop only. The local reference report is `output/phase8d-references/reference.json` with SHA-256 `e1f0d3af567db5db5f4a228fa1dba07beb64508075d338bfe95d3cecdc151549`. A separate process reproduced the report byte for byte in 12.27 seconds without a fit cache. The focused 8C and 8D selection passed 13 tests. Ruff, scoped mypy and Poetry lock validation passed. [Diagnostic](../tools/phase8d_overlap_reference.py) · [Controlled regression](../tests/numerical/test_phase8d_overlap_reference.py)
 
+## Independent M31 candidate
+
+Nocturne publishes the M31 Seestar S30 Pro mosaic exposures under CC BY 4.0. The linked ZIP contained 392 FITS entries when inspected. Four entries were acquired from byte ranges and fingerprinted in the local `output/phase8d-candidates/nocturne/source.json` record. All four are independent 10-second IR-cut exposures with distinct pointing and capture times. Two raw overlap edges met the geometry target, forming a three-panel network with B as the connecting panel. [Nocturne M31 observations and license](https://nocturneastro.com/sample-data.html)
+
+The raw pilot used the FITS pointing and pixel scale as hints. ASTAP D05 with Gaia validation yielded SIP-3 solutions for all four frames. The full set includes A as a weaker geometry control. For B, C and D, the derived 2160 × 3840 RGB TIFFs preserve the detector raster and the validated raw WCS. Bilinear Bayer interpolation fills the missing color samples and retains the observed channel samples. The same linear assignment keeps the sensor RGB code scale common to all three panels for relative photometry.
+
+| Overlap | Raw Bayer held-out stars | Raw P95 at 3.7385 arcsec/px | Native-size RGB P95 at 3.7385 arcsec/px |
+| --- | ---: | ---: | ---: |
+| B–C | 172 | 0.428 px | 0.513 px |
+| B–D | 152 | 0.489 px | 0.521 px |
+| C–D | 99 | 0.601 px | 0.509 px |
+
+On the three-panel native-size RGB TIFFs, the frozen comparison selected **Off**. Maximum final overlap RGB P95 was 0.001889 with Off and 0.001880 with Standard. Both global candidates lacked independent signal or spatial support at the frozen rank threshold. The earlier four-panel Bayer superpixel version also selected Off. The candidate provides useful independent exposure and geometry evidence. The positive Advanced acceptance case remains open.
+
+The PA4 archive screen found no connection below 0.5 px among all 15 available solved sky panels on the fitted native-scale ZEA grid. KGP and Uludağ supplied separate TIFF candidates and remain without validated sidecars after the local blind and hinted solves. The local Nikon archive contains 30 D5300 raw flat candidates with zero focal-length and f-number metadata. No optical match was established.
+
+```powershell
+$env:OPENBLAS_NUM_THREADS = '1'
+.\.venv\Scripts\python.exe -m tools.phase8d_overlap_reference tests/20.TIF --project output/phase8d-candidates/nocturne/native/comparison.astromosaic -o output/phase8d-candidates/nocturne/native/replay.json
+```
+
+The local project uses the native-size RGB TIFFs and a fixed 7.477 arcsec/px comparison grid to bound sky sampling. `native/geometry.json` holds the separate native-scale stellar checks, and `native/comparison.json` holds the photometry and source fingerprints. Use individual source frames from the public archive when reproducing the candidate. A finished mosaic combines the exposures and loses the separate overlap measurements.
+
 ## Optical calibration intake
 
 The PA4 working set has saved SIP solutions and source camera hints. A search of the local reference data and the capture's processing folders found no matching master flat or standalone measured lens calibration. Inspection of frames 19–22 in two DNG variants found `OpcodeList2` with three opcode ID 8 entries. The inspected opcode lists specify per-area polynomial level mappings. They supply no geometric warp or gain map, and the DNG-to-TIFF correction history remains unresolved. [Adobe DNG specification, Chapter 7](https://helpx.adobe.com/content/dam/help/en/camera-raw/digital-negative/jcr_content/root/content/flex/items/position/position-par/download_section_733958301/download-1/DNG_Spec_1_7_1_0.pdf#page=114)

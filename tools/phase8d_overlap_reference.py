@@ -5,7 +5,6 @@ from __future__ import annotations
 import argparse
 import json
 from collections.abc import Sequence
-from contextlib import ExitStack
 from dataclasses import dataclass
 from hashlib import file_digest, sha256
 from itertools import combinations
@@ -22,12 +21,12 @@ from astromosaic.astrometry.registration import components, projected_bounds, ro
 from astromosaic.astrometry.solve import load_solution
 from astromosaic.core.job import DEFAULT_JOB_CONTEXT
 from astromosaic.geometry import PanelGeometry, TileSky, read_panel_geometry
+from astromosaic.io import open_panel
 from astromosaic.io.atomic import atomic_binary_file
 from astromosaic.photometry.photo_match import LUMINANCE, fit_brightness
-from astromosaic.photometry.photo_settings import PhotoProfile
 from astromosaic.pipeline.photo_color import PhotoTileSource, resolve_photo_profile
 from astromosaic.pipeline.photo_fit import PhotoPanel, _sample_panel
-from astromosaic.storage.project import load_project, open_project_sky_panel
+from astromosaic.storage.project import load_project
 
 type Values = NDArray[np.float64]
 type Indices = NDArray[np.int64]
@@ -357,22 +356,43 @@ def measure_controls(crop: Values) -> dict[str, object]:
     return report
 
 
-def _pa4(project_path: Path) -> dict[str, object]:
+def measure_project(
+    project_path: Path, *, panel_names: tuple[str, ...] | None = None
+) -> dict[str, object]:
     project = load_project(project_path)
     records = sorted(
-        (p for p in project.panels if p.source.path.name.upper() in _PA4 and p.include_sky),
+        (
+            p
+            for p in project.panels
+            if p.include_sky and (panel_names is None or p.source.path.name.upper() in panel_names)
+        ),
         key=lambda p: p.source.path.name.upper(),
     )
-    if tuple(p.source.path.name.upper() for p in records) != _PA4:
-        raise ValueError("Use the saved PA4 project with sky frames 19–22.")
+    names = tuple(p.source.path.name.upper() for p in records)
+    if panel_names is not None and names != panel_names:
+        raise ValueError("The saved project must include all named sky panels.")
+    if len(names) < 3 or len(set(names)) != len(names):
+        raise ValueError("Use three or more sky panels with distinct file names.")
     inputs = {"manifest": project_path}
+    bands = set()
     for record in records:
         inputs.update(
             {f"{record.source.path.name}/{role}": ref.path for role, ref in record.references()}
         )
+        for role, ref in record.references():
+            if ref.status() != "Ready":
+                raise ValueError(
+                    f"{record.source.path.name}: {role} reference is unavailable or changed."
+                )
+        profile = record.photo_profile or project.photo_settings.profile
+        if profile.path is not None:
+            inputs[f"{record.source.path.name}/ICC profile"] = profile.path
     hashes = {key: _digest(path) for key, path in inputs.items()}
     target = PanelGeometry(project.render.output_wcs(), ICRS())
     region = project.render.output_region()
+    samples = ((region.width + 3) // 8) * ((region.height + 3) // 8)
+    if not samples or samples * len(records) * 128 > _BUDGET:
+        raise ValueError("Use a saved comparison grid with a bounded sample count.")
     y, x = np.mgrid[4 : region.height : 8, 4 : region.width : 8]
     x, y = x.ravel(), y.ravel()
     panels = []
@@ -380,15 +400,21 @@ def _pa4(project_path: Path) -> dict[str, object]:
     block_ids = y // 64 * (int(x.max()) // 64 + 1) + x // 64
     order = np.argsort(block_ids, kind="stable")
     blocks = np.split(order, np.flatnonzero(np.diff(block_ids[order])) + 1)
-    with ExitStack() as stack:
-        for record in records:
-            source = stack.enter_context(open_project_sky_panel(record, _BUDGET, _JOB))
+    for record in records:
+        with open_panel(
+            record.source.path, max_tile_bytes=_BUDGET, sky_mask=record.sky_input(), keep_icc=True
+        ) as source:
+            bands.add(record.sky_band(source.descriptor.filter_name, project.filter_name))
+            if len(bands) > 1:
+                raise ValueError("Compare sky panels from a single band.")
             width, height = source.descriptor.width, source.descriptor.height
             if record.wcs_sidecar is not None:
                 geometry, _ = load_solution(record.wcs_sidecar.path, source)
             else:
                 geometry = read_panel_geometry(source.header, width, height)
-            color = resolve_photo_profile(source, None, PhotoProfile())
+            color = resolve_photo_profile(
+                source, record.photo_profile, project.photo_settings.profile
+            )
             panel = PhotoPanel(
                 record.source.path, PhotoTileSource(source, color, _BUDGET), geometry, color, 0.0
             )
@@ -406,17 +432,17 @@ def _pa4(project_path: Path) -> dict[str, object]:
                 sky = TileSky.from_pixels(target, bx.astype(np.float64), by.astype(np.float64))
                 sampled = _sample_panel(panel, sky, len(block), _BUDGET // 2)
                 if sampled is None:
-                    raise ValueError("A PA4 sample block exceeds the reference byte budget.")
+                    raise ValueError("A sample block exceeds the reference byte budget.")
                 sx, sy, _ = sky.in_panel(geometry, (0, 0))
                 xy[block] = np.stack((2 * sx / (width - 1) - 1, 2 * sy / (height - 1) - 1), axis=-1)
                 rgb[block] = sampled[0]
             rgb[(rgb @ LUMINANCE) > 0.075] = np.nan
             panels.append(PanelSamples(record.source.path.name, rgb, xy))
     if hashes != {key: _digest(path) for key, path in inputs.items()}:
-        raise ValueError("A PA4 source or project reference changed during sampling.")
+        raise ValueError("A source or project reference changed during sampling.")
     report = measure(panels, x, y)
     if report != measure(panels[::-1], x, y):
-        raise ValueError("Reversing PA4 input order changed the reference result.")
+        raise ValueError("Reversing input order changed the reference result.")
     return dict(
         report,
         input_sha256=hashes,
@@ -429,9 +455,9 @@ def _pa4(project_path: Path) -> dict[str, object]:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("owner", type=Path, help="Frozen original 20.TIF.")
-    parser.add_argument(
-        "--pa4", type=Path, help="Saved PA4 sky project for the real overlap replay."
-    )
+    real = parser.add_mutually_exclusive_group()
+    real.add_argument("--pa4", type=Path, help="Saved PA4 sky project for the real overlap replay.")
+    real.add_argument("--project", type=Path, help="Saved independent RGB sky network to compare.")
     parser.add_argument("-o", "--output", type=Path, help="Write a new local JSON report.")
     args = parser.parse_args()
     if _digest(args.owner) != _OWNER_HASH:
@@ -441,7 +467,9 @@ def main() -> int:
     del image
     report = {"schema_version": 1, "crop_source_sha256": _OWNER_HASH, **measure_controls(crop)}
     if args.pa4 is not None:
-        report["pa4"] = _pa4(args.pa4)
+        report["pa4"] = measure_project(args.pa4, panel_names=_PA4)
+    if args.project is not None:
+        report["project"] = measure_project(args.project)
     if _digest(args.owner) != _OWNER_HASH:
         raise ValueError("The owner original changed during reference sampling.")
     payload = json.dumps(report, indent=2, allow_nan=False) + "\n"
