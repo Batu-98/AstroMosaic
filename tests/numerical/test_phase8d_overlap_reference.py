@@ -9,6 +9,8 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from tools.phase8d_overlap_reference import PanelSamples, measure
+
 _ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -42,3 +44,23 @@ def test_advanced_reference_recovers_injected_terms_and_preserves_disconnected_g
         assert max(result["test_rgb_p95"][choice]) <= 3e-5
         assert result["metrics"]["covered_diffuse_test_rgb_p95"] <= 3e-5
         assert result["metrics"]["stellar_aperture_fractional_error"] <= 0.01
+
+
+def test_calibrated_comparison_recovers_background_without_changing_gain() -> None:
+    y, x = np.mgrid[0:256:4, 0:384:4].reshape(2, -1)
+    xy = np.column_stack((2 * x / 383 - 1, 2 * y / 255 - 1))
+    signal = 0.025 + 0.009 * np.sin(x / 13) * np.cos(y / 21)
+    rgb = signal[:, None] * np.array([0.9, 1.0, 1.1])
+    truth = np.array([[0.0, 0.0, 0.0], [0.002, -0.008, 0.004], [-0.001, 0.004, -0.005]])
+    panels = [
+        PanelSamples(name, rgb - (offset + xy @ np.array([dx, dy]))[:, None], xy)
+        for name, (offset, dx, dy) in zip("ABC", truth, strict=True)
+    ]
+    result = measure(panels, x, y, preserve_calibrated_scale=True)
+    assert result == measure(panels[::-1], x, y, preserve_calibrated_scale=True)
+    assert result["fixed_gain_selected"] == "fixed-gain-plane"
+    models = result["coefficients"]
+    assert isinstance(models, dict)
+    measured = np.asarray(list(models["fixed-gain-plane"].values()))
+    np.testing.assert_array_equal(measured[:, 0], 1.0)
+    np.testing.assert_allclose(measured[:, 1:], truth, atol=1e-12, rtol=0)

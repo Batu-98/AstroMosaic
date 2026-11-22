@@ -75,6 +75,26 @@ Standard lowered mean per-edge RGB P95 by 4.95% on the model-selection regions a
 
 Independent TIFF reopening matched the binary coverage, corner WCS and the median RGB codes at 36 positions per stack. All 24 source SHA-256 values matched. Eight focused tests passed. The saved project replay reproduced the comparison, including the order-independence result. The project and evidence are under `output/phase8d-candidates/nocturne/stacks/products/`. Use `--project` with `comparison.astromosaic` to replay. `comparison.json` has SHA-256 `8cc5b2e3bdd58182b1fad022946e902accec5762034a7ef4f749953436e590d5`.
 
+## Independent calibrated SDSS panels
+
+Use the public SDSS corrected frames in native nanomaggies. Assemble separate RGB panels from each scan's i, r and g frames on that scan's r WCS. M2 uses runs 2583, 4187 and 4192, camera column 2, fields 136, 104 and 111. M77 uses runs 94, 259 and 1752, camera column 3, fields 439, 227 and 132. The three scans in each field have distinct acquisition dates. The source FITS primary arrays and SHA-256 values remain local. Register the channels with the recorded WCS, then encode each calibrated value as `0.04 + flux / 4` for the common linear UInt16 test representation. Flag samples outside the encodable range or without full channel support. This encoding preserves a common relative scale for the three panels. The RGB channel assignment is for this diagnostic. [SDSS imaging tools](https://www.sdss.org/dr20/imaging/tools/) · [SDSS archive frame access](https://www.sdss.org/dr20/data_access/get_data/) · [SDSS attribution](https://www.sdss.org/collaboration/citing-sdss)
+
+| Scene | Native overlap positional P95 | Final mean RGB P95 Off | Standard | Gain and offset | Fixed-gain plane |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| M2 | 0.269–0.344 px | 0.012833 | 0.011253 | 0.010649 | 0.012491 |
+| M77 | 0.477–0.634 px | 0.015584 | 0.012832 | 0.011686 | 0.015492 |
+
+M2 passed the native 0.5 px geometry gate on all edges. The gain-and-offset candidate passed overlap-only selection and reduced final mean RGB P95 by 5.36% versus the reference Standard fit. It applied gains of 0.656 and 0.627 to the two peers. Relative aperture-flux medians on the reference edges shifted from +0.71% and −1.56% before correction to −33.96% and −38.30%. The exact aperture audit used a fixed seven-pixel radius and a 10–13-pixel sky annulus, with stars in the final spatial blocks and the brighter half of usable apertures. This rejects the apparent overlap improvement as a positive Advanced result. M77 supplied secondary evidence of the same flux problem and failed the full geometry gate.
+
+The new diagnostic option keeps both the free-gain and fixed-gain results. The fixed-gain plane changed the M2 bright-star flux ratios by at most 0.21% at P95 relative to Off, but improved final mean RGB P95 by only 2.66% versus Off. The fixed-gain candidates selected **Off** in both fields. A source CLI export also reproduced the issue in the current Standard implementation: the M2 run-4187 panel received a gain of 0.636. The CLI uses a different overlap sampling setup from this reference tool. Track stellar constraints on inferred gains for both methods before release changes.
+
+```powershell
+$env:OPENBLAS_NUM_THREADS = '1'
+.\.venv\Scripts\python.exe -m tools.phase8d_overlap_reference tests/20.TIF --project output/phase8d-candidates/sdss/m2/comparison.astromosaic --preserve-calibrated-scale -o output/phase8d-candidates/sdss/m2/replay.json
+```
+
+The local folders under `output/phase8d-candidates/sdss/` contain the two prepared projects, source manifests, model scores, reserved aperture audit and native geometry. Reopening the TIFFs verified binary coverage, native WCS, and the r-channel encoding at 1,231 covered positions. All 18 source hashes matched. The PA4 frozen report reproduced byte for byte after adding the optional comparison. Nine focused tests passed, including recovery of a known background plane with gains locked to unity.
+
 ## Optical calibration intake
 
 The PA4 working set has saved SIP solutions and source camera hints. A search of the local reference data and the capture's processing folders found no matching master flat or standalone measured lens calibration. Inspection of frames 19–22 in two DNG variants found `OpcodeList2` with three opcode ID 8 entries. The inspected opcode lists specify per-area polynomial level mappings. They supply no geometric warp or gain map, and the DNG-to-TIFF correction history remains unresolved. [Adobe DNG specification, Chapter 7](https://helpx.adobe.com/content/dam/help/en/camera-raw/digital-negative/jcr_content/root/content/flex/items/position/position-par/download_section_733958301/download-1/DNG_Spec_1_7_1_0.pdf#page=114)

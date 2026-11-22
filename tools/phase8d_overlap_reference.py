@@ -190,8 +190,15 @@ def _edges(panels: Sequence[PanelSamples], x: Indices, y: Indices) -> list[Edge]
 
 
 def _candidate(
-    edges: Sequence[Edge], group: tuple[int, ...], count: int, terms: int
+    edges: Sequence[Edge],
+    group: tuple[int, ...],
+    count: int,
+    *,
+    plane: bool,
+    fixed_gain: bool = False,
 ) -> tuple[Values | None, str]:
+    start_term = int(fixed_gain)
+    terms = (4 if plane else 2) - start_term
     coefficients = np.tile(_IDENTITY, (count, 1))
     columns = {panel: (i - 1) * terms for i, panel in enumerate(group) if i}
     train_rows = sum(edge.counts[0] for edge in edges)
@@ -213,22 +220,25 @@ def _candidate(
             if position is None:
                 continue
             sign = 1 - 2 * axis
-            matrix[region, position] = sign * luminance[:, axis]
-            matrix[region, position + 1] = sign
-            if terms == 4:
-                matrix[region, position + 2 : position + 4] = sign * edge.xy[train, axis]
+            offset = position
+            if not fixed_gain:
+                matrix[region, position] = sign * luminance[:, axis]
+                offset += 1
+            matrix[region, offset] = sign
+            if plane:
+                matrix[region, offset + 1 : offset + 3] = sign * edge.xy[train, axis]
         start = region.stop
     if not matrix.size:
         return None, "No reference-connected fit support."
     # Fixed units preserve the low-signal and conditioning checks across candidates.
-    scale = np.tile([0.02, 1.0] if terms == 2 else [0.02, 1.0, 1.0, 1.0], len(columns))
+    scale = np.tile([0.02, 1.0, 1.0, 1.0][start_term : start_term + terms], len(columns))
     matrix /= scale
     singular = np.linalg.svd(matrix * weights[:, None], compute_uv=False)
     if singular.size < matrix.shape[1] or singular[-1] < _RANK_RATIO * singular[0]:
         return None, "The overlap design lacks independent signal or spatial support."
     adjustment = robust_linear_fit(matrix, rhs, weights).ravel() / scale
     for panel, start in columns.items():
-        coefficients[panel, :terms] += adjustment[start : start + terms]
+        coefficients[panel, start_term : start_term + terms] += adjustment[start : start + terms]
     if np.any((coefficients[:, 0] < 0.25) | (coefficients[:, 0] > 4.0)) or np.any(
         np.abs(coefficients[:, 1:]).sum(axis=1) > 0.1
     ):
@@ -278,26 +288,9 @@ def _standard(edges: Sequence[Edge], group: tuple[int, ...], count: int) -> Valu
     return coefficients
 
 
-def measure(panels: Sequence[PanelSamples], x: Indices, y: Indices) -> dict[str, object]:
-    panels = sorted(panels, key=lambda panel: panel.name)
-    names = [panel.name for panel in panels]
-    edges = _edges(panels, x, y)
-    groups = components(len(names), [edge.indices for edge in edges if edge.qualified])
-    reference = groups[0]
-    accepted = [e for e in edges if e.qualified and set(e.indices).issubset(reference)]
-    count = len(names)
-    baseline = np.tile(_IDENTITY, (count, 1))
-    models = {"off": baseline, "standard": _standard(accepted, reference, count)}
-    rejected = {}
-    for name, terms in (("gain-offset", 2), ("gain-plane", 4)):
-        proposal, reason = _candidate(accepted, reference, count, terms)
-        if proposal is None:
-            rejected[name] = reason
-        else:
-            models[name] = proposal
-    validation = {key: _errors(accepted, coeff, 1) for key, coeff in models.items()}
+def _select(validation: dict[str, list[float]], models: Sequence[tuple[str, float]]) -> str:
     selected = "off"
-    for name, factor in (("standard", 0.95), ("gain-offset", 0.95), ("gain-plane", 0.85)):
+    for name, factor in models:
         previous, current = validation[selected], validation.get(name)
         if (
             current
@@ -308,6 +301,41 @@ def measure(panels: Sequence[PanelSamples], x: Indices, y: Indices) -> dict[str,
             )
         ):
             selected = name
+    return selected
+
+
+def measure(
+    panels: Sequence[PanelSamples],
+    x: Indices,
+    y: Indices,
+    *,
+    preserve_calibrated_scale: bool = False,
+) -> dict[str, object]:
+    panels = sorted(panels, key=lambda panel: panel.name)
+    names = [panel.name for panel in panels]
+    edges = _edges(panels, x, y)
+    groups = components(len(names), [edge.indices for edge in edges if edge.qualified])
+    reference = groups[0]
+    accepted = [e for e in edges if e.qualified and set(e.indices).issubset(reference)]
+    count = len(names)
+    baseline = np.tile(_IDENTITY, (count, 1))
+    models = {"off": baseline, "standard": _standard(accepted, reference, count)}
+    rejected = {}
+    candidates = [("gain-offset", False, False), ("gain-plane", True, False)]
+    if preserve_calibrated_scale:
+        candidates.extend([("fixed-gain-offset", False, True), ("fixed-gain-plane", True, True)])
+    for name, plane, fixed_gain in candidates:
+        proposal, reason = _candidate(
+            accepted, reference, count, plane=plane, fixed_gain=fixed_gain
+        )
+        if proposal is None:
+            rejected[name] = reason
+        else:
+            models[name] = proposal
+    validation = {key: _errors(accepted, coeff, 1) for key, coeff in models.items()}
+    selected = _select(
+        validation, (("standard", 0.95), ("gain-offset", 0.95), ("gain-plane", 0.85))
+    )
     hashes = {p.name: sha256(p.rgb.astype("<f8").tobytes()).hexdigest() for p in panels}
     return {
         "components": [[names[i] for i in group] for group in groups],
@@ -328,6 +356,15 @@ def measure(panels: Sequence[PanelSamples], x: Indices, y: Indices) -> dict[str,
         "selection_rgb_p95": validation,
         "test_rgb_p95": {key: _errors(accepted, coeff, 2) for key, coeff in models.items()},
         "selected": selected,
+        **(
+            {
+                "fixed_gain_selected": _select(
+                    validation, (("fixed-gain-offset", 0.95), ("fixed-gain-plane", 0.85))
+                )
+            }
+            if preserve_calibrated_scale
+            else {}
+        ),
         "unavailable_candidates": rejected,
         "sample_rgb_sha256": hashes,
     }
@@ -357,7 +394,10 @@ def measure_controls(crop: Values) -> dict[str, object]:
 
 
 def measure_project(
-    project_path: Path, *, panel_names: tuple[str, ...] | None = None
+    project_path: Path,
+    *,
+    panel_names: tuple[str, ...] | None = None,
+    preserve_calibrated_scale: bool = False,
 ) -> dict[str, object]:
     project = load_project(project_path)
     records = sorted(
@@ -440,8 +480,8 @@ def measure_project(
             panels.append(PanelSamples(record.source.path.name, rgb, xy))
     if hashes != {key: _digest(path) for key, path in inputs.items()}:
         raise ValueError("A source or project reference changed during sampling.")
-    report = measure(panels, x, y)
-    if report != measure(panels[::-1], x, y):
+    report = measure(panels, x, y, preserve_calibrated_scale=preserve_calibrated_scale)
+    if report != measure(panels[::-1], x, y, preserve_calibrated_scale=preserve_calibrated_scale):
         raise ValueError("Reversing input order changed the reference result.")
     return dict(
         report,
@@ -458,8 +498,15 @@ def main() -> int:
     real = parser.add_mutually_exclusive_group()
     real.add_argument("--pa4", type=Path, help="Saved PA4 sky project for the real overlap replay.")
     real.add_argument("--project", type=Path, help="Saved independent RGB sky network to compare.")
+    parser.add_argument(
+        "--preserve-calibrated-scale",
+        action="store_true",
+        help="Also compare offsets and planes at fixed unity gain on a calibrated project.",
+    )
     parser.add_argument("-o", "--output", type=Path, help="Write a new local JSON report.")
     args = parser.parse_args()
+    if args.preserve_calibrated_scale and args.project is None:
+        parser.error("--preserve-calibrated-scale requires --project.")
     if _digest(args.owner) != _OWNER_HASH:
         raise ValueError("Use the frozen owner original for the 8D controls.")
     image = tifffile.memmap(args.owner, mode="r")
@@ -469,7 +516,9 @@ def main() -> int:
     if args.pa4 is not None:
         report["pa4"] = measure_project(args.pa4, panel_names=_PA4)
     if args.project is not None:
-        report["project"] = measure_project(args.project)
+        report["project"] = measure_project(
+            args.project, preserve_calibrated_scale=args.preserve_calibrated_scale
+        )
     if _digest(args.owner) != _OWNER_HASH:
         raise ValueError("The owner original changed during reference sampling.")
     payload = json.dumps(report, indent=2, allow_nan=False) + "\n"
