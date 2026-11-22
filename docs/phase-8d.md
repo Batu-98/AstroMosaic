@@ -57,6 +57,24 @@ $env:OPENBLAS_NUM_THREADS = '1'
 
 The local project uses the native-size RGB TIFFs and a fixed 7.477 arcsec/px comparison grid to bound sky sampling. `native/geometry.json` holds the separate native-scale stellar checks, and `native/comparison.json` holds the photometry and source fingerprints. Use individual source frames from the public archive when reproducing the candidate. A finished mosaic combines the exposures and loses the separate overlap measurements.
 
+### Separate M31 pointing stacks
+
+The follow-up selects the eight nearest 10-second IR-cut observations from the 15 archive entries surrounding each B, C and D reference exposure. The selection radius was fixed at 0.55°. The most distant selected exposures were 0.486°, 0.442° and 0.425° from their respective reference positions. The three groups share no exposures. All 24 passed catalog validation and the solver's field-edge check. The local `nocturne/stacks/selection.json` records archive entries, CRC32 and SHA-256 values.
+
+Reconstruct the detector-sized RGB rasters with the single-frame Bayer interpolation. Within each group, reproject to its reference detector WCS in 256-pixel tiles and combine by per-channel median. Include a pixel in the stack if at least six exposures support it. Publish the 16-bit RGB samples with a separate binary coverage image. Measure inter-stack alignment at 3.7385 arcsec/px and sample photometry on the 7.477 arcsec/px comparison grid. Use the frozen fit, selection and final-test splits for the brightness comparison.
+
+| Stack | Covered pixels | Median green-channel noise reduction | Median aperture flux change against its reference exposure |
+| --- | ---: | ---: | ---: |
+| B | 6,635,988 | 2.54× | −5.71% |
+| C | 6,686,351 | 2.53× | −4.68% |
+| D | 7,001,945 | 2.54× | −1.28% |
+
+All three edges met the 0.5 px geometry target. Held-out P95 was 0.274 px for B–C (187 stars), 0.228 px for B–D (174 stars), and 0.232 px for C–D (124 stars). Estimate noise from the high-pass green-channel MAD in 40 fixed fully supported blocks per stack. Measure the aperture comparison at matched held-out stars using the same radius of seven pixels and a sky annulus of 9–13 pixels in the coadd and its reference exposure. This check measures the effect of stacking relative to an individual exposure. A known flux reference is still needed to establish absolute flux preservation.
+
+Standard lowered mean per-edge RGB P95 by 4.95% on the model-selection regions and 4.84% on the untouched final regions. The final mean went from 0.00072324 with Off to 0.00068827 with Standard. The selection threshold called for at least 5% plus the frozen absolute margin. Across 22,152 fit rows, the scaled singular-value ratios were 0.01224 for gain and offset and 0.01137 for gain and plane. Both fell below the 0.015 support threshold. The diagnostic selected **Off**.
+
+Independent TIFF reopening matched the binary coverage, corner WCS and the median RGB codes at 36 positions per stack. All 24 source SHA-256 values matched. Eight focused tests passed. The saved project replay reproduced the comparison, including the order-independence result. The project and evidence are under `output/phase8d-candidates/nocturne/stacks/products/`. Use `--project` with `comparison.astromosaic` to replay. `comparison.json` has SHA-256 `8cc5b2e3bdd58182b1fad022946e902accec5762034a7ef4f749953436e590d5`.
+
 ## Optical calibration intake
 
 The PA4 working set has saved SIP solutions and source camera hints. A search of the local reference data and the capture's processing folders found no matching master flat or standalone measured lens calibration. Inspection of frames 19–22 in two DNG variants found `OpcodeList2` with three opcode ID 8 entries. The inspected opcode lists specify per-area polynomial level mappings. They supply no geometric warp or gain map, and the DNG-to-TIFF correction history remains unresolved. [Adobe DNG specification, Chapter 7](https://helpx.adobe.com/content/dam/help/en/camera-raw/digital-negative/jcr_content/root/content/flex/items/position/position-par/download_section_733958301/download-1/DNG_Spec_1_7_1_0.pdf#page=114)
