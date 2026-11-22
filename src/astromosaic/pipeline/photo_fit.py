@@ -74,14 +74,14 @@ class PhotoReport:
             color = panel.profile_preset or panel.color_method
             line = (
                 f"{panel.panel}: {color} ({panel.color_origin.replace('_', ' ')}), "
-                f"exposure {panel.exposure_method}, ×{panel.exposure_gain:.5g}"
+                f"exposure {panel.exposure_method}, gain {panel.exposure_gain:.5g}"
             )
             if panel.exposure_detail:
                 line += f" ({panel.exposure_detail})"
             if self.requested_brightness != "off":
-                line += f", brightness {fit.method}, ×{fit.gain:.5g}, offset {fit.offset:+.5g}"
+                line += f", brightness {fit.method}, gain {fit.gain:.5g}, offset {fit.offset:+.5g}"
                 if fit.before_p95 is not None and fit.after_p95 is not None:
-                    line += f", held-out RGB P95 {fit.before_p95:.5g} → {fit.after_p95:.5g}"
+                    line += f", held-out RGB P95 {fit.before_p95:.5g} to {fit.after_p95:.5g}"
                 if panel.overlap_reference is not None:
                     peer = self.panels[panel.overlap_reference - 1].panel
                     line += (

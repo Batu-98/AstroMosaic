@@ -565,7 +565,7 @@ def _export(arguments: Namespace, result: dict[str, object], context: JobContext
                 if arguments.json:
                     _write_event("stage", stage=stage)
                 else:
-                    print("Measuring photo overlaps…", file=sys.stderr, flush=True)
+                    print("Measuring photo overlaps...", file=sys.stderr, flush=True)
 
             job = replace(job, on_stage=photo_stage)
         if arguments.grid is not None:
