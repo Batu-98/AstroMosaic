@@ -1,6 +1,7 @@
 """Exercise the profile and exposure choices through the shared sky workflow."""
 
 import json
+import sys
 from dataclasses import replace
 from pathlib import Path
 from typing import Literal
@@ -162,6 +163,22 @@ def test_exif_srgb_and_untagged_assumption(tmp_path: Path) -> None:
         render_project(
             replace(project, assume_surface_brightness=True), tmp_path / "science.tif", _JOB
         )
+
+
+def test_photo_cli_accepts_names_outside_the_console_encoding(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    grid = RenderSpec((120, -25), (8, 8), 4)
+    pixels = np.full((8, 8, 3), 32768, np.uint16)
+    panel = _write(tmp_path / "\u661f.tiff", pixels, grid, icc=_SRGB.read_bytes())
+    manifest = tmp_path / "Project.astromosaic"
+    save_project(manifest, MosaicProject((panel,), grid))
+    destination, log = tmp_path / "Photo.tiff", tmp_path / "log.txt"
+    with log.open("w", encoding="ascii") as stream, monkeypatch.context() as console:
+        console.setattr(sys, "stdout", stream)
+        assert main(["project", "export-photo", str(manifest), "-o", str(destination)]) == 0
+    assert destination.is_file()
+    assert r"\u661f.tiff: srgb" in log.read_text(encoding="ascii")
 
 
 def test_exposure_metadata_requires_compatible_camera_and_iso() -> None:

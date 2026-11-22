@@ -464,6 +464,12 @@ def _write_event(event: str, **fields: object) -> None:
     print(json.dumps(payload, sort_keys=True), file=sys.stderr, flush=True)
 
 
+def _print_message(message: str, stream: TextIO) -> None:
+    if stream.encoding is not None:
+        message = message.encode(stream.encoding, errors="backslashreplace").decode(stream.encoding)
+    print(message, file=stream)
+
+
 def _diagnostic(level: str, message: str) -> None:
     _write_event("diagnostic", level=level, message=message)
 
@@ -689,9 +695,9 @@ def run_project(arguments: Namespace, *, context: JobContext | None = None) -> i
         if arguments.json:
             _diagnostic("error", message)
         else:
-            print(f"astromosaic: {message}", file=sys.stderr)
+            _print_message(f"astromosaic: {message}", sys.stderr)
     if arguments.json:
         print(json.dumps(result, sort_keys=True))
     elif exit_code == 0:
-        print(message)
+        _print_message(message, sys.stdout)
     return exit_code
