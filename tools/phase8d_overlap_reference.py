@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from hashlib import file_digest, sha256
 from itertools import combinations
@@ -27,6 +27,7 @@ from astromosaic.photometry.photo_match import LUMINANCE, fit_brightness
 from astromosaic.pipeline.photo_color import PhotoTileSource, resolve_photo_profile
 from astromosaic.pipeline.photo_fit import PhotoPanel, _sample_panel
 from astromosaic.storage.project import load_project
+from tools.phase8d_stellar_gain import Aperture, Coefficients, measure_apertures, qualify_gains
 
 type Values = NDArray[np.float64]
 type Indices = NDArray[np.int64]
@@ -310,6 +311,8 @@ def measure(
     y: Indices,
     *,
     preserve_calibrated_scale: bool = False,
+    stellar_apertures: Mapping[str, Sequence[Aperture]] | None = None,
+    additional_gains: Mapping[str, Coefficients] | None = None,
 ) -> dict[str, object]:
     panels = sorted(panels, key=lambda panel: panel.name)
     names = [panel.name for panel in panels]
@@ -337,7 +340,7 @@ def measure(
         validation, (("standard", 0.95), ("gain-offset", 0.95), ("gain-plane", 0.85))
     )
     hashes = {p.name: sha256(p.rgb.astype("<f8").tobytes()).hexdigest() for p in panels}
-    return {
+    report: dict[str, object] = {
         "components": [[names[i] for i in group] for group in groups],
         "reference": names[reference[0]],
         "edges": [
@@ -368,6 +371,22 @@ def measure(
         "unavailable_candidates": rejected,
         "sample_rgb_sha256": hashes,
     }
+    if stellar_apertures is not None:
+        stellar = qualify_gains(report, stellar_apertures, additional=additional_gains)
+        eligible = stellar["eligible"]
+        assert isinstance(eligible, list)
+        stellar["selected"] = _select(
+            {model: scores for model, scores in validation.items() if model in eligible},
+            (
+                ("standard", 0.95),
+                ("fixed-gain-offset", 0.95),
+                ("gain-offset", 0.95),
+                ("fixed-gain-plane", 0.85),
+                ("gain-plane", 0.85),
+            ),
+        )
+        report["stellar_gain"] = stellar
+    return report
 
 
 def measure_controls(crop: Values) -> dict[str, object]:
@@ -398,6 +417,8 @@ def measure_project(
     *,
     panel_names: tuple[str, ...] | None = None,
     preserve_calibrated_scale: bool = False,
+    stellar_gain: bool = False,
+    additional_gains: Mapping[str, Coefficients] | None = None,
 ) -> dict[str, object]:
     project = load_project(project_path)
     records = sorted(
@@ -436,6 +457,7 @@ def measure_project(
     y, x = np.mgrid[4 : region.height : 8, 4 : region.width : 8]
     x, y = x.ravel(), y.ravel()
     panels = []
+    apertures: dict[str, list[Aperture]] | None = {} if stellar_gain else None
     # Visit detector windows in shared 64-pixel target blocks to bound each source read.
     block_ids = y // 64 * (int(x.max()) // 64 + 1) + x // 64
     order = np.argsort(block_ids, kind="stable")
@@ -458,6 +480,10 @@ def measure_project(
             panel = PhotoPanel(
                 record.source.path, PhotoTileSource(source, color, _BUDGET), geometry, color, 0.0
             )
+            if apertures is not None:
+                apertures[panel.path.name] = measure_apertures(
+                    panel.source, geometry, target, (region.width, region.height), _BUDGET
+                )
             bounds = projected_bounds(geometry, target, width, height)
             rgb, xy = np.full((len(x), 3), np.nan), np.zeros((len(x), 2))
             for block in blocks:
@@ -480,8 +506,23 @@ def measure_project(
             panels.append(PanelSamples(record.source.path.name, rgb, xy))
     if hashes != {key: _digest(path) for key, path in inputs.items()}:
         raise ValueError("A source or project reference changed during sampling.")
-    report = measure(panels, x, y, preserve_calibrated_scale=preserve_calibrated_scale)
-    if report != measure(panels[::-1], x, y, preserve_calibrated_scale=preserve_calibrated_scale):
+    report = measure(
+        panels,
+        x,
+        y,
+        preserve_calibrated_scale=preserve_calibrated_scale,
+        stellar_apertures=apertures,
+        additional_gains=additional_gains,
+    )
+    reordered = measure(
+        panels[::-1],
+        x,
+        y,
+        preserve_calibrated_scale=preserve_calibrated_scale,
+        stellar_apertures=apertures,
+        additional_gains=additional_gains,
+    )
+    if report != reordered:
         raise ValueError("Reversing input order changed the reference result.")
     return dict(
         report,
@@ -503,10 +544,24 @@ def main() -> int:
         action="store_true",
         help="Also compare offsets and planes at fixed unity gain on a calibrated project.",
     )
+    parser.add_argument(
+        "--stellar-gain",
+        action="store_true",
+        help="Require independent stellar support for inferred relative gains in --project.",
+    )
+    parser.add_argument(
+        "--audit-standard-export",
+        type=Path,
+        help="Score gains from the current application's Standard JSON export of --project.",
+    )
     parser.add_argument("-o", "--output", type=Path, help="Write a new local JSON report.")
     args = parser.parse_args()
     if args.preserve_calibrated_scale and args.project is None:
         parser.error("--preserve-calibrated-scale requires --project.")
+    if args.stellar_gain and args.project is None:
+        parser.error("--stellar-gain requires --project.")
+    if args.audit_standard_export is not None and not args.stellar_gain:
+        parser.error("--audit-standard-export requires --stellar-gain.")
     if _digest(args.owner) != _OWNER_HASH:
         raise ValueError("Use the frozen owner original for the 8D controls.")
     image = tifffile.memmap(args.owner, mode="r")
@@ -516,8 +571,31 @@ def main() -> int:
     if args.pa4 is not None:
         report["pa4"] = measure_project(args.pa4, panel_names=_PA4)
     if args.project is not None:
+        additional = None
+        if args.audit_standard_export is not None:
+            exported = json.loads(args.audit_standard_export.read_bytes())
+            photo = exported["photo"]
+            if (
+                exported["command"] != "project export-photo"
+                or exported["status"] != "ok"
+                or Path(exported["project"]).resolve() != args.project.resolve()
+                or photo["requested_brightness"] != "standard"
+                or photo["requested_exposure"] != "off"
+                or exported["grid"] != "saved"
+            ):
+                raise ValueError(
+                    "Use a saved-grid Standard export with exposure Off for this project."
+                )
+            additional = {
+                "application-standard": {
+                    item["panel"]: (item["brightness"]["gain"],) for item in photo["panels"]
+                }
+            }
         report["project"] = measure_project(
-            args.project, preserve_calibrated_scale=args.preserve_calibrated_scale
+            args.project,
+            preserve_calibrated_scale=args.preserve_calibrated_scale,
+            stellar_gain=args.stellar_gain,
+            additional_gains=additional,
         )
     if _digest(args.owner) != _OWNER_HASH:
         raise ValueError("The owner original changed during reference sampling.")

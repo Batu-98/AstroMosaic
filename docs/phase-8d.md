@@ -95,6 +95,34 @@ $env:OPENBLAS_NUM_THREADS = '1'
 
 The local folders under `output/phase8d-candidates/sdss/` contain the two prepared projects, source manifests, model scores, reserved aperture audit and native geometry. Reopening the TIFFs verified binary coverage, native WCS, and the r-channel encoding at 1,231 covered positions. All 18 source hashes matched. The PA4 frozen report reproduced byte for byte after adding the optional comparison. Nine focused tests passed, including recovery of a known background plane with gains locked to unity.
 
+## Independent stellar gain qualification
+
+The optional `--stellar-gain` comparison screens inferred gains before selecting a sky model. The existing result remains under `selected`. The guarded choice and the separate final stellar scores appear under `stellar_gain`. Use these measurements with comparably sampled panels in the same band and the separate native-scale geometry checks. [Stellar check](../tools/phase8d_stellar_gain.py)
+
+- Match isolated detections one to one on the comparison WCS. Measure the original linear working samples with a seven-detector-pixel aperture and a 10–13-pixel local sky annulus. Require valid, unsaturated support, positive flux in all channels and a luminance flux above ten times the local robust aperture noise estimate.
+- Keep the full projected aperture and annulus inside the matching 64-pixel spatial block. Use remainder 1 to screen sky-fit candidates and remainder 0 for the untouched stellar test. The sky coefficients use remainders 2–4.
+- For a relative gain change above a factor of 1.01 in either direction, require at least eight matched stars across at least three selection blocks on each affected edge. Give each block equal weight. The median corrected log flux ratio must be within `log(1.05)` of zero. The 80th percentile of the absolute block log ratios must be at most `log(1.12)`. The median absolute log discrepancy may increase by at most `log(1.02)` versus Off.
+- Select among the eligible sky candidates using the existing RGB residual margins. Apply the same stellar criteria on the test blocks for reporting. A unity-gain model makes no inferred gain change. The direct effect of additive backgrounds on measured aperture flux is covered by the separate fixed-gain aperture audit above.
+
+| Case | Guarded choice | Stellar result |
+| --- | --- | --- |
+| Calibrated SDSS M2 | Off | Standard, global gain-and-offset and global gain-and-plane were rejected on both splits. The current application Standard gain of 0.636 was also rejected. |
+| Independent M31 pointing stacks | Off | Standard had unity gains. Both free global candidates lacked sky-fit rank. |
+| Real owner crop with injected terms | Standard or gain and plane, according to the injection | Both selection and final apertures accepted the true gain changes. All final edge medians were within 1% of unity. |
+
+On the M2 run-2583–4187 edge, 35 selection stars in 13 blocks and 40 final stars in 14 blocks supported the decision. The final block-median flux ratio was 1.0175 with Off, 0.6672 with the global gain-and-offset candidate and 0.6470 with the application Standard gain. The application audit scores the existing export's gain with the same apertures. The application uses its own sky sampling split. The wider injected control uses the original `20.TIF` region `(2048, 1408, 1536, 1024)` with three overlapping detector crops and the known gains 1.00, 1.25 and 0.84. Separate cases inject constant and planar skies. A ten-star, single-block control checks insufficient spatial support. [Focused regressions](../tests/numerical/test_phase8d_stellar_gain.py)
+
+```powershell
+$env:OPENBLAS_NUM_THREADS = '1'
+$m2 = 'output/phase8d-candidates/sdss/m2'
+.\.venv\Scripts\python.exe -m astromosaic project export-photo "$m2/comparison.astromosaic" -o "$m2/standard-replay.tiff" --brightness standard --json | Set-Content -Encoding utf8NoBOM "$m2/standard-replay.json"
+.\.venv\Scripts\python.exe -m tools.phase8d_overlap_reference tests/20.TIF --project "$m2/comparison.astromosaic" --preserve-calibrated-scale --stellar-gain --audit-standard-export "$m2/standard-replay.json" -o "$m2/stellar-gain-replay.json"
+```
+
+The M2 report replay matched byte for byte. The M31 report is in `output/phase8d-candidates/nocturne/stacks/products/stellar-gain.json`. Sixteen focused tests passed, and the legacy PA4 report retained its original SHA-256.
+
+The guarded comparison is an offline qualification. Production integration needs a bounded independent stellar split on the application's saved grid, safe Standard fallback and shared preview/export diagnostics. Advanced still needs a positive independent-exposure network, and the optics acceptance requires a measured calibration.
+
 ## Optical calibration intake
 
 The PA4 working set has saved SIP solutions and source camera hints. A search of the local reference data and the capture's processing folders found no matching master flat or standalone measured lens calibration. Inspection of frames 19–22 in two DNG variants found `OpcodeList2` with three opcode ID 8 entries. The inspected opcode lists specify per-area polynomial level mappings. They supply no geometric warp or gain map, and the DNG-to-TIFF correction history remains unresolved. [Adobe DNG specification, Chapter 7](https://helpx.adobe.com/content/dam/help/en/camera-raw/digital-negative/jcr_content/root/content/flex/items/position/position-par/download_section_733958301/download-1/DNG_Spec_1_7_1_0.pdf#page=114)
