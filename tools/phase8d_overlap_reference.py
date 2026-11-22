@@ -24,10 +24,11 @@ from astromosaic.geometry import PanelGeometry, TileSky, read_panel_geometry
 from astromosaic.io import open_panel
 from astromosaic.io.atomic import atomic_binary_file
 from astromosaic.photometry.photo_match import LUMINANCE, fit_brightness
+from astromosaic.photometry.stellar_gain import Aperture
 from astromosaic.pipeline.photo_color import PhotoTileSource, resolve_photo_profile
 from astromosaic.pipeline.photo_fit import PhotoPanel, _sample_panel
 from astromosaic.storage.project import load_project
-from tools.phase8d_stellar_gain import Aperture, Coefficients, measure_apertures, qualify_gains
+from tools.phase8d_stellar_gain import Coefficients, measure_apertures, qualify_gains
 
 type Values = NDArray[np.float64]
 type Indices = NDArray[np.int64]

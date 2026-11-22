@@ -20,6 +20,10 @@ _EXCLUSION_LIMIT = 6000
 _DETECTION_OVERHEAD = 4 * 1024**2  # SEP stacks, bookkeeping, and retained measurements
 
 
+class StarBudgetError(ValueError):
+    """A star detection window and its halo do not fit the working budget."""
+
+
 @dataclass(frozen=True, slots=True)
 class Star:
     x: float
@@ -143,7 +147,9 @@ def measure_stars(source: PanelSource, max_working_bytes: int, context: JobConte
             break
         step //= 2
         if step < 12:
-            raise ValueError("The working budget cannot fit a star detection tile and its halo.")
+            raise StarBudgetError(
+                "The working budget cannot fit a star detection tile and its halo."
+            )
 
     stars: list[Star] = []
     exclusion_stars: list[Star] = []

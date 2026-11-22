@@ -570,6 +570,8 @@ def _export(arguments: Namespace, result: dict[str, object], context: JobContext
                     previous_stage(stage)
                 if arguments.json:
                     _write_event("stage", stage=stage)
+                elif stage == "photo-stars":
+                    print("Checking stellar flux...", file=sys.stderr, flush=True)
                 else:
                     print("Measuring photo overlaps...", file=sys.stderr, flush=True)
 

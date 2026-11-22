@@ -2,7 +2,7 @@
 
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
-from math import ceil, floor, isqrt
+from math import ceil, floor, isqrt, log
 from os.path import normcase
 from pathlib import Path
 from threading import Lock
@@ -13,6 +13,7 @@ from numpy.typing import NDArray
 from scipy.ndimage import maximum_filter
 
 from astromosaic.astrometry.registration import Bounds, overlap, projected_bounds
+from astromosaic.astrometry.stars import StarBudgetError, measure_stars
 from astromosaic.core import Region
 from astromosaic.core.job import JobContext
 from astromosaic.geometry import PanelGeometry, TileSky, raster_pixels
@@ -24,6 +25,15 @@ from astromosaic.photometry.photo_match import (
     metadata_gain,
 )
 from astromosaic.photometry.photo_settings import BrightnessMode, PhotoSettings
+from astromosaic.photometry.stellar_gain import (
+    Aperture,
+    StellarGainCheck,
+    aperture_flux,
+    aperture_intersects,
+    aperture_region,
+    check_stellar_gain,
+    matched_apertures,
+)
 from astromosaic.pipeline.photo_color import PhotoColor, PhotoTileSource
 from astromosaic.resampling import sample, source_window
 
@@ -31,6 +41,7 @@ _CELLS = 8
 _BLOCK_EDGE = 24
 _STAR_HALO = 5
 _FIXED_BYTES = 128 * 1024
+_STAR_WORKING_BYTES = 16 * 1024**2
 
 
 @dataclass(frozen=True, slots=True)
@@ -40,6 +51,12 @@ class PhotoPanel:
     geometry: PanelGeometry
     color: PhotoColor
     ev: float
+
+
+@dataclass(frozen=True, slots=True)
+class RejectedPhotoGain:
+    reference_panel: int
+    check: StellarGainCheck
 
 
 @dataclass(frozen=True, slots=True)
@@ -55,6 +72,7 @@ class PhotoPanelReport:
     brightness: BrightnessResult = BrightnessResult()
     overlap_reference: int | None = None
     overlap_sampled_pixels: int = 0
+    rejected_gain: RejectedPhotoGain | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -88,22 +106,33 @@ class PhotoReport:
                         f", overlap with {peer}, {fit.training_samples:,} fit / "
                         f"{fit.held_out_samples:,} held out"
                     )
+                if fit.stellar_gain is not None:
+                    stellar = fit.stellar_gain
+                    line += (
+                        f", stellar gain {stellar.status} "
+                        f"({stellar.stars} stars, {stellar.blocks} blocks)"
+                    )
                 if fit.detail:
                     line += f" ({fit.detail})"
+                rejection = panel.rejected_gain
+                if rejection is not None and rejection.reference_panel != panel.overlap_reference:
+                    peer = self.panels[rejection.reference_panel - 1].panel
+                    rejected = rejection.check
+                    line += f". Stellar gain {rejected.status} with {peer} ({rejected.reason})"
             lines.append(line)
         return lines
 
 
 def _sample_panel(
     panel: PhotoPanel, sky: TileSky, count: int, budget: int
-) -> tuple[NDArray[np.float64], int] | None:
+) -> tuple[NDArray[np.float64], int, Region | None] | None:
     x, y, usable = sky.in_panel(panel.geometry, (0, 0))
     source = panel.source
     width, height = source.descriptor.width, source.descriptor.height
     values = np.full((count, 3), np.nan)
     window = source_window(x, y, usable, width, height)
     if window is None:
-        return values, 0
+        return values, 0, None
     region = window.region.with_halo(width, height, _STAR_HALO)
     reserved = source.tile_bytes(region, photometry=True)
     if reserved > budget:
@@ -117,7 +146,7 @@ def _sample_panel(
     except (OSError, ValueError) as error:
         raise ValueError(f"{panel.path.name}: {error}") from error
     values[indices] = samples
-    return values, reserved
+    return values, reserved, region
 
 
 def _quiet_pixels(values: NDArray[np.float64]) -> NDArray[np.bool_]:
@@ -131,6 +160,63 @@ def _quiet_pixels(values: NDArray[np.float64]) -> NDArray[np.bool_]:
         np.isfinite(luma) & ~maximum_filter(luma > ceiling, size=2 * _STAR_HALO + 1),
         dtype=np.bool_,
     )
+
+
+def _measure_apertures(
+    panel: PhotoPanel,
+    target: PanelGeometry,
+    x_edges: NDArray[np.int64],
+    y_edges: NDArray[np.int64],
+    sky_reads: Sequence[Region],
+    budget: int,
+    context: JobContext,
+) -> list[Aperture]:
+    source = panel.source
+    width, height = source.descriptor.width, source.descriptor.height
+    field = measure_stars(source, budget, context)
+    if not field.stars:
+        return []
+    x, y = np.array([(star.x, star.y) for star in field.stars]).T
+    count = len(x)
+    # Local linear detector scale on the common tangent plane.
+    center, east, north = np.split(
+        target.inverse(
+            panel.geometry.forward(np.concatenate((x, x + 1, x)), np.concatenate((y, y, y + 1)))
+        ),
+        (count, 2 * count),
+    )
+    horizontal, vertical = (east - center).T, (north - center).T
+    scale = np.sqrt(np.abs(horizontal[0] * vertical[1] - horizontal[1] * vertical[0]))
+    cols = np.searchsorted(x_edges, center[:, 0], side="right") - 1
+    rows = np.searchsorted(y_edges, center[:, 1], side="right") - 1
+    inside = (cols >= 0) & (cols < len(x_edges) - 1)
+    inside &= (rows >= 0) & (rows < len(y_edges) - 1) & np.isfinite(scale) & (scale > 0)
+    result = []
+    for index in np.flatnonzero(inside):
+        context.check_cancelled()
+        sx, sy = float(x[index]), float(y[index])
+        region = aperture_region(sx, sy)
+        if not Region(0, 0, width, height).contains(region):
+            continue
+        region = region.with_halo(width, height, _STAR_HALO)
+        # The aperture, local annulus and clipping halo share no source pixels with the
+        # sky fit or RGB validation. This stays true for rotated and distorted panels.
+        if any(aperture_intersects(sx, sy, other, _STAR_HALO) for other in sky_reads):
+            continue
+        if source.tile_bytes(region, photometry=True) + _FIXED_BYTES > budget:
+            continue
+        flux = aperture_flux(source.read_photometry_tile(region), sx, sy)
+        if flux is not None:
+            ox, oy = center[index]
+            result.append(
+                Aperture(
+                    (float(ox), float(oy)),
+                    (int(cols[index]), int(rows[index])),
+                    flux,
+                    float(scale[index]),
+                )
+            )
+    return result
 
 
 def _measure_pair(
@@ -154,6 +240,7 @@ def _measure_pair(
     if not edge:
         return BrightnessResult(detail="The working budget cannot fit photo overlap samples."), 0, 0
     rows: tuple[list[NDArray[np.float64]], list[NDArray[np.float64]]] = ([], [])
+    reads: tuple[list[Region], list[Region]] = ([], [])
     x_edges = np.linspace(left, right + 1, min(_CELLS, width) + 1, dtype=np.int64)
     y_edges = np.linspace(top, bottom + 1, min(_CELLS, height) + 1, dtype=np.int64)
     row_bytes = _CELLS**2 * edge**2 * 256
@@ -183,6 +270,10 @@ def _measure_pair(
             sampled += int(np.count_nonzero(np.isfinite(av[inner]) & np.isfinite(bv[inner])) // 3)
             quiet = (_quiet_pixels(av) & _quiet_pixels(bv))[inner]
             if quiet.any():
+                if mode == "standard":
+                    assert a[2] is not None and b[2] is not None
+                    reads[0].append(a[2])
+                    reads[1].append(b[2])
                 rows[int((row + 2 * col) % 5 == 0)].append(
                     np.stack(
                         (
@@ -209,8 +300,39 @@ def _measure_pair(
             sampled,
             peak,
         )
+
+    def qualify(gain: float) -> StellarGainCheck:
+        nonlocal peak
+        if context.on_stage is not None:
+            context.on_stage("photo-stars")
+        context.check_cancelled()
+        # The sky rows and their fit workspace are still live. Reserve the star scan
+        # separately, including bounded retained apertures and projected coordinates.
+        live_bytes = row_bytes + 1024**2
+        star_budget = min(budget - live_bytes, _STAR_WORKING_BYTES)
+        try:
+            first = _measure_apertures(
+                reference, target, x_edges, y_edges, reads[0], star_budget, context
+            )
+            peak = max(peak, live_bytes + star_budget)
+            second = _measure_apertures(
+                moving, target, x_edges, y_edges, reads[1], star_budget, context
+            )
+        except StarBudgetError:
+            return StellarGainCheck(
+                reason="The working budget cannot fit independent stellar measurements."
+            )
+        return check_stellar_gain(
+            matched_apertures(first, second), log(gain), log(moving_gain / reference_gain)
+        )
+
     result = fit_brightness(
-        np.concatenate(rows[0]), np.concatenate(rows[1]), len(rows[0]), len(rows[1]), mode
+        np.concatenate(rows[0]),
+        np.concatenate(rows[1]),
+        len(rows[0]),
+        len(rows[1]),
+        mode,
+        gain_check=qualify,
     )
     context.check_cancelled()
     return result, sampled, peak
@@ -261,6 +383,14 @@ def _fit_overlaps(
                     context,
                 )
                 peak = max(peak, reserved)
+                stellar = fit.stellar_gain
+                if (
+                    stellar is not None
+                    and stellar.status != "supported"
+                    and current.rejected_gain is None
+                ):
+                    current = replace(current, rejected_gain=RejectedPhotoGain(peer + 1, stellar))
+                    reports[index] = current
                 if (
                     fit.method != "off"
                     or current.overlap_reference is None

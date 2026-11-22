@@ -1468,8 +1468,12 @@ class ProjectWindow(QMainWindow):
 
     @Slot(str)
     def _job_stage(self, stage: str) -> None:
-        if stage == "photo-overlap" and self.job is not None and self.cancel_button.isEnabled():
+        if self.job is None or not self.cancel_button.isEnabled():
+            return
+        if stage == "photo-overlap":
             self.status.setText("Measuring photo overlaps…")
+        elif stage == "photo-stars":
+            self.status.setText("Checking stellar flux…")
 
     @Slot(int, str)
     def _plate_solve_progress(self, percentage: int, status: str) -> None:

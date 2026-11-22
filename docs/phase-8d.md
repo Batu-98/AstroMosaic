@@ -115,13 +115,22 @@ On the M2 run-2583–4187 edge, 35 selection stars in 13 blocks and 40 final sta
 ```powershell
 $env:OPENBLAS_NUM_THREADS = '1'
 $m2 = 'output/phase8d-candidates/sdss/m2'
-.\.venv\Scripts\python.exe -m astromosaic project export-photo "$m2/comparison.astromosaic" -o "$m2/standard-replay.tiff" --brightness standard --json | Set-Content -Encoding utf8NoBOM "$m2/standard-replay.json"
-.\.venv\Scripts\python.exe -m tools.phase8d_overlap_reference tests/20.TIF --project "$m2/comparison.astromosaic" --preserve-calibrated-scale --stellar-gain --audit-standard-export "$m2/standard-replay.json" -o "$m2/stellar-gain-replay.json"
+.\.venv\Scripts\python.exe -m tools.phase8d_overlap_reference tests/20.TIF --project "$m2/comparison.astromosaic" --preserve-calibrated-scale --stellar-gain --audit-standard-export "$m2/standard-export.json" -o "$m2/stellar-gain-replay.json"
 ```
 
 The M2 report replay matched byte for byte. The M31 report is in `output/phase8d-candidates/nocturne/stacks/products/stellar-gain.json`. Sixteen focused tests passed, and the legacy PA4 report retained its original SHA-256.
 
-The guarded comparison is an offline qualification. Production integration needs a bounded independent stellar split on the application's saved grid, safe Standard fallback and shared preview/export diagnostics. Advanced still needs a positive independent-exposure network, and the optics acceptance requires a measured calibration.
+`standard-export.json` is the preserved beta 14 export. Use the current source or beta 15 command below to verify the production fallback.
+
+## Standard photo gain integration
+
+Standard uses the existing sky fit and held-out RGB model selection. A candidate changing the scale by more than a factor of 1.01 also has to pass the matched-star check. Each native aperture and its clipping halo use detector samples outside the source reads for both sky splits in that pair. The check compares the exposure-normalized fluxes on the current reference edge and screens for comparable native scales. The shared job tries an accepted sky offset or identity when stellar support is insufficient or the gain is rejected. It can use a different connected peer when appropriate. The preview, output JSON and TIFF history report the effective method. The JSON keeps the first rejected check and peer in `rejected_gain`. [ADR-0030](adr/0030-independent-stellar-support-for-photo-gains.md)
+
+```powershell
+.\.venv\Scripts\python.exe -m astromosaic project export-photo "$m2/comparison.astromosaic" -o "$m2/standard-guarded.tiff" --brightness standard --progress --json
+```
+
+Advanced still needs a positive independent-exposure network, and the optics acceptance requires a measured calibration.
 
 ## Optical calibration intake
 

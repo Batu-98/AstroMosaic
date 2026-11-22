@@ -1,6 +1,8 @@
 """Qualify linked sky offsets and gains on independent overlap samples."""
 
+from collections.abc import Callable
 from dataclasses import dataclass, replace
+from math import log
 from typing import Literal
 
 import numpy as np
@@ -9,8 +11,9 @@ from numpy.typing import NDArray
 from astromosaic.astrometry.registration import robust_linear_fit
 from astromosaic.io.tiff_metadata import CameraExposure
 from astromosaic.photometry.photo_settings import BrightnessMode
+from astromosaic.photometry.stellar_gain import GAIN_TOLERANCE, StellarGainCheck
+from astromosaic.photometry.stellar_gain import LUMINANCE as LUMINANCE
 
-LUMINANCE = (0.2126, 0.7152, 0.0722)
 _MIN_SAMPLES = 128
 _MIN_SPAN = 0.003
 _MAX_OFFSET = 0.1
@@ -61,6 +64,7 @@ class BrightnessResult:
     before_p95: float | None = None
     after_p95: float | None = None
     detail: str = ""
+    stellar_gain: StellarGainCheck | None = None
 
 
 def fit_brightness(
@@ -69,6 +73,8 @@ def fit_brightness(
     training_blocks: int,
     held_out_blocks: int,
     method: BrightnessMode,
+    *,
+    gain_check: Callable[[float], StellarGainCheck] | None = None,
 ) -> BrightnessResult:
     """Fit paired RGB samples, with the reference at index zero of each pair."""
     stats = BrightnessResult(
@@ -140,6 +146,11 @@ def fit_brightness(
     after = p95(gain, offset)
     if after >= best - max(_MIN_IMPROVEMENT, 0.01 * best):
         return fallback("Gain did not improve the held-out RGB residual.")
+    stellar = None
+    if gain_check is not None and abs(log(gain)) > GAIN_TOLERANCE:
+        stellar = replace(gain_check(gain), candidate_gain=gain)
+        if stellar.status != "supported":
+            return replace(fallback(stellar.reason), stellar_gain=stellar)
     return replace(
         measured,
         method="standard",
@@ -147,4 +158,5 @@ def fit_brightness(
         offset=offset,
         retained_samples=kept,
         after_p95=after,
+        stellar_gain=stellar,
     )

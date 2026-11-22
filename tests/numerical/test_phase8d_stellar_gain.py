@@ -11,9 +11,19 @@ import pytest
 import tifffile
 
 from astromosaic.core import Region
+from astromosaic.core.job import DEFAULT_JOB_CONTEXT
 from astromosaic.photometry.photo_settings import PhotoProfile, PhotoSettings
+from astromosaic.photometry.stellar_gain import Aperture
 from astromosaic.pipeline.mosaic import RenderSpec
-from astromosaic.storage.project import FileReference, MosaicProject, ProjectPanel, save_project
+from astromosaic.storage.project import (
+    FileReference,
+    MosaicProject,
+    ProjectPanel,
+    load_project,
+    preview_project,
+    render_project_photo,
+    save_project,
+)
 from tools.phase8d_overlap_reference import (
     _OWNER_HASH,
     _decode,
@@ -21,7 +31,7 @@ from tools.phase8d_overlap_reference import (
     _encode,
     measure_project,
 )
-from tools.phase8d_stellar_gain import Aperture, qualify_gains
+from tools.phase8d_stellar_gain import qualify_gains
 
 _ROOT = Path(__file__).resolve().parents[2]
 
@@ -79,6 +89,23 @@ def test_stellar_gate_accepts_injected_gain(tmp_path: Path, method: str) -> None
     np.testing.assert_allclose(recovered[:, 1:], truth[:, 1:], atol=2e-4)
     assert report["verified_order_independence"]
     assert _digest(owner) == _OWNER_HASH
+    if method == "standard":
+        saved = load_project(project)
+        configured = replace(
+            saved, photo_settings=replace(saved.photo_settings, brightness="standard")
+        )
+        preview = preview_project(configured, DEFAULT_JOB_CONTEXT, allow_visual=True)
+        rendered = render_project_photo(
+            configured, tmp_path / "qualified.tiff", DEFAULT_JOB_CONTEXT, tone=None
+        )
+        assert preview.photo is not None and preview.photo == rendered.photo
+        for panel, (gain, offset, _, _) in zip(preview.photo.panels[1:], truth[1:], strict=True):
+            fit = panel.brightness
+            assert fit.method == "standard"
+            assert fit.gain == pytest.approx(gain, rel=0.01)
+            assert fit.offset == pytest.approx(offset, abs=2e-4)
+            assert fit.stellar_gain is not None and fit.stellar_gain.status == "supported"
+        assert rendered.peak_reserved_bytes <= grid.max_working_bytes
 
 
 def test_stellar_gate_rejects_calibrated_sdss_gain(tmp_path: Path) -> None:
@@ -106,18 +133,23 @@ def test_stellar_gate_rejects_calibrated_sdss_gain(tmp_path: Path) -> None:
     )
     assert exported.returncode == 0, exported.stderr
     runtime = json.loads(exported.stdout)
-    application = {row["panel"]: (row["brightness"]["gain"],) for row in runtime["photo"]["panels"]}
+    panels = runtime["photo"]["panels"]
+    assert [row["brightness"]["gain"] for row in panels] == [1.0, 1.0, 1.0]
+    assert all(row["brightness"]["method"] in ("off", "offset-only") for row in panels)
+    rejected = panels[1]["rejected_gain"]
+    assert rejected["reference_panel"] == 1
+    assert rejected["check"]["status"] == "rejected"
+    assert rejected["check"]["candidate_gain"] == pytest.approx(0.635851, abs=1e-5)
     report = measure_project(
         project,
         preserve_calibrated_scale=True,
         stellar_gain=True,
-        additional_gains={"application-standard": application},
     )
     assert report["selected"] == "gain-offset"
     stellar = report["stellar_gain"]
     assert isinstance(stellar, dict)
     assert stellar["selected"] == "off"
-    for model in ("standard", "gain-offset", "gain-plane", "application-standard"):
+    for model in ("standard", "gain-offset", "gain-plane"):
         candidate = stellar["candidates"][model]
         assert not candidate["selection_passed"] and not candidate["test_passed"]
         assert candidate["edges"][0]["test"]["status"] == "rejected"

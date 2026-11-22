@@ -216,14 +216,22 @@ def test_standard_fit_is_shared_saved_and_cancelable(tmp_path: Path) -> None:
         render_project_photo(project, destination, job, tone=None)
     assert stages == ["photo-overlap"] and not destination.exists()
     assert not list(tmp_path.glob("*.part"))
+    stages.clear()
+    job = JobContext(is_cancelled=lambda: "photo-stars" in stages, on_stage=stages.append)
+    with pytest.raises(MosaicCancelled):
+        render_project_photo(project, destination, job, tone=None)
+    assert stages == ["photo-overlap", "photo-stars"] and not destination.exists()
+    assert not list(tmp_path.glob("*.part"))
 
     preview = preview_project(project, _JOB, allow_visual=True)
     assert preview.photo is not None
     fit = preview.photo.panels[1].brightness
-    assert fit.method == "standard"
-    assert fit.gain == pytest.approx(1.25, rel=0.01)
-    assert fit.offset == pytest.approx(-0.003, abs=2e-4)
-    assert fit.after_p95 is not None and fit.after_p95 < 3e-5
+    assert fit.method == "offset-only" and fit.gain == 1
+    assert fit.offset == pytest.approx(0.0012, abs=2e-4)
+    assert fit.stellar_gain is not None and fit.stellar_gain.status == "insufficient"
+    assert fit.stellar_gain.stars == 0
+    assert fit.before_p95 is not None and fit.after_p95 is not None
+    assert fit.after_p95 < fit.before_p95
     spec = replace(grid, crop=Region(51, 49, 96, 72))
     cropped = render_project_photo(project, destination, _JOB, tone=None, grid=spec)
     assert cropped.photo == preview.photo
