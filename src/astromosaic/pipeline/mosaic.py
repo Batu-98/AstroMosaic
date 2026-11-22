@@ -263,7 +263,7 @@ def _export_header(
     header.add_history(f"AstroMosaic {version('astromosaic')}: CPU ICRS {projection} reprojection.")
     if photo:
         header.add_history("Decoded embedded sRGB; bilinear valid support; normalized weights.")
-        header.add_history("Encoded sRGB2014 RGB UInt16; binary coverage SubIFD.")
+        header.add_history("Encoded sRGB2014 RGB UInt16 with binary associated alpha.")
     else:
         header.add_history("Bilinear valid support; normalized panel weights; linear float32.")
     for index, panel in enumerate(panels, start=1):

@@ -131,10 +131,12 @@ def test_sky_viewport_pixels_pan_zoom_and_stretch(
         preserved.setflags(write=False)
         frame = replace(frame, photo_levels=(0.0, 0.5), preserved_rgba=preserved)
         viewport.set_frame(frame)
-        check_samples()
-        viewport.tone_box.setCurrentIndex(1)
         assert not viewport.midtones.isEnabled()
         check_samples(preserve_tone=True)
+        viewport.tone_box.setCurrentIndex(0)
+        assert viewport.midtones.isEnabled()
+        check_samples()
+        viewport.tone_box.setCurrentIndex(1)
 
         if use_gpu:
 

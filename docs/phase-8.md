@@ -10,6 +10,8 @@ AstroMosaic 0.1.0b7 already frames selected sky panels from their WCS, decodes r
 
 8B adds a distinct sky export intent. A completed, covered visual sky preview provides the selected band, resolved grid and linked display statistics for the desktop export. The headless command resolves the saved or automatically fitted grid and, for preview tone, samples the same final preview grid. It never needs a Qt session. Project manifests and scientific output keep their existing contracts. Visual input eligibility precedes the render, with diagnostics naming the affected panel.
 
+The table records the initial 8B output through beta 12. [Beta 13 photo tone and transparency](#8b-photo-tone-and-transparency-follow-up) extends the photo TIFF layout and sets the default tone.
+
 | Selection or input | 8B behavior |
 | --- | --- |
 | Photo, all selected panels are RGB UInt16 TIFF with recognized embedded matrix/TRC sRGB | Read original pixels and masks through the validated WCS, including its SIP terms when present. Decode canonical sRGB before bilinear sampling and validity-weighted blending. Keep effective input ICC fingerprints, WCS origin, weight, band, and tone in the output history or metadata. |
@@ -36,17 +38,23 @@ The ICC conversion matrix and reference patches, known exposure or background co
 
 1. Add the tagged sRGB TIFFs, plate solve the sky panels and select the sky band when the project contains several bands.
 2. Choose **Build Preview**. Use **Auto Frame** to fit the solved footprints or turn it off to use the saved sky grid.
-3. Choose **Use Preview Tone** to apply the displayed stretch at full resolution or **Preserve Tone** to encode the blended linear colors directly. With preview tone, set **Midtones** before the export.
+3. **Preserve Tone** encodes the blended linear colors directly and is the default from beta 13. Choose **Use Preview Tone** and set **Midtones** to apply a display stretch at full resolution.
 4. Choose **Export Photo Mosaic** and a new TIFF path. The export uses the preview's full grid, with the original panels sampled at each output pixel. **Use Preview Grid** can adopt the framing for subsequent saved-grid work. The File menu has **Export Scientific Mosaic** for the scientific sky workflow.
 
 The Command Panel accepts `session export-photo -o "Mosaic.tiff"` after a completed covered visual sky preview. It uses the active band, grid and tone controls.
 
 ```powershell
-astromosaic project export-photo "Solved.astromosaic" -o "Mosaic.tiff" --grid auto --midtones 25 --progress --json
-astromosaic project export-photo "Solved.astromosaic" -o "Natural.tiff" --tone preserve
+astromosaic project export-photo "Solved.astromosaic" -o "Natural.tiff" --grid auto --progress --json
+astromosaic project export-photo "Solved.astromosaic" -o "Stretched.tiff" --tone preview --midtones 25
 ```
 
-Without `--grid`, the CLI uses the project's saved preview mode. The default tone is `preview` with midtones 25 on the desktop's 5–95 scale. Omit `--band` for a project with one effective sky band. The JSON result contains the resolved grid mode, tone and usual render measurements. The ICC tag is readable in a color-managed TIFF application. AstroMosaic also reads the FITS-style WCS description and coverage SubIFD. Generic TIFF viewers display the uncovered black raster codes and may ignore those astronomy metadata fields.
+Without `--grid`, the CLI uses the project's saved preview mode. `--midtones` alone selects preview tone for existing scripts. Omit `--band` for a project with one effective sky band. The JSON result contains the resolved grid mode, effective tone and render measurements. [Current photo TIFF format](#8b-photo-tone-and-transparency-follow-up)
+
+### 8B Photo tone and transparency follow-up
+
+Beta 13 writes contiguous RGBA UInt16 with TIFF associated alpha. The coverage alpha is 65,535 for covered pixels, including black sky, and zero for areas outside valid panel coverage. RGB codes are zero wherever alpha is zero. The ICC profile, WCS description, band and tone metadata describe the same sky grid. The tile writer accounts for eight bytes per output pixel plus TIFF and ICC overhead and publishes atomically.
+
+AstroMosaic reopens beta 11 and 12 photo TIFFs using their binary coverage SubIFD. Open beta 13 photo TIFFs in beta 13 or an editor that supports 16-bit TIFF alpha. Source panels remain the render inputs when re-exporting a previously stretched photo. [Photo alpha and tone decision](adr/0028-transparent-photo-tiff.md)
 
 ### 8B Source verification
 

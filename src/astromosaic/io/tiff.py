@@ -12,6 +12,7 @@ from astropy.io import fits
 from numpy.typing import NDArray
 from tifffile import (
     COMPRESSION,
+    EXTRASAMPLE,
     PHOTOMETRIC,
     PLANARCONFIG,
     PREDICTOR,
@@ -193,7 +194,7 @@ class TiffTileSource:
 
     def tile_bytes(self, region: Region) -> int:
         mask_bytes = self._sky_mask.tile_bytes(region) if self._sky_mask is not None else 0
-        # Float32 RGB, coverage and finite flags, and a raw row fragment.
+        # Float32 RGB or RGBA, coverage and finite flags, and a raw row fragment.
         raster_bytes = 32 * region.width * region.height + 24 * region.width
         return raster_bytes + max(self._decode_bytes, mask_bytes)
 
@@ -204,10 +205,18 @@ class TiffTileSource:
             raise ValueError(
                 "The TIFF tile and its codec buffers exceed the configured byte budget."
             )
-        channels = self._science.page.samplesperpixel
-        pixels = np.empty((region.height, region.width, channels), dtype=np.float32)
-        self._science.read_into(region, pixels)
-        valid = np.isfinite(pixels).all(axis=-1)
+        samples = self._science.page.samplesperpixel
+        raw = np.empty((region.height, region.width, samples), dtype=np.float32)
+        self._science.read_into(region, raw)
+        if samples == 4:
+            alpha = raw[..., 3]
+            valid = alpha == 65535
+            if np.any(~valid & (alpha != 0)):
+                raise ValueError("Expected binary alpha in the AstroMosaic photo TIFF.")
+            pixels = raw[..., :3]
+        else:
+            pixels = raw
+            valid = np.isfinite(pixels).all(axis=-1)
         if self._coverage is not None:
             coverage = np.empty((region.height, region.width, 1), dtype=np.uint8)
             self._coverage.read_into(region, coverage)
@@ -217,7 +226,7 @@ class TiffTileSource:
         if self._sky_mask is not None:
             valid &= self._sky_mask.read_binary_mask(region)
         pixels[~valid] = np.nan
-        return Tile(region, pixels[..., 0] if channels == 1 else pixels, valid)
+        return Tile(region, pixels[..., 0] if samples == 1 else pixels, valid)
 
 
 def _check_orientation(page: TiffPage) -> None:
@@ -290,12 +299,24 @@ def open_tiff_panel(
         page = tiff.pages[0]
         assert isinstance(page, TiffPage)
         _check_orientation(page)
-        rgb = page.photometric == PHOTOMETRIC.RGB and page.samplesperpixel == 3
+        photo_alpha = (
+            page.photometric == PHOTOMETRIC.RGB
+            and page.samplesperpixel == 4
+            and page.dtype == np.dtype("uint16")
+            and page.extrasamples == (EXTRASAMPLE.ASSOCALPHA,)
+        )
+        rgb = page.photometric == PHOTOMETRIC.RGB and (page.samplesperpixel == 3 or photo_alpha)
         mono = page.photometric == PHOTOMETRIC.MINISBLACK and page.samplesperpixel == 1
-        if not (mono or rgb) or page.extrasamples or page.dtype not in _SCIENCE_DTYPES:
+        if (
+            not (mono or rgb)
+            or (page.extrasamples and not photo_alpha)
+            or page.dtype not in _SCIENCE_DTYPES
+        ):
             raise ValueError("Expected 16-bit integer or float32 TIFF with mono or RGB samples.")
         science = _Segments(page, stream, stat.st_size, tiff.byteorder)
         header, coverage_page = _read_metadata(page)
+        if photo_alpha and (header.get("AMINTENT") != "PHOTO" or coverage_page is not None):
+            raise ValueError("Expected AstroMosaic photo metadata and a single source of coverage.")
         encoding, profile_sha256 = _icc_metadata(page, rgb)
         if header.get("AMINTENT") == "PHOTO" and encoding != "srgb":
             raise ValueError("An AstroMosaic photo TIFF requires a supported embedded sRGB profile.")
@@ -306,6 +327,8 @@ def open_tiff_panel(
         if coverage_page is not None:
             coverage = _Segments(coverage_page, stream, stat.st_size, tiff.byteorder)
             provenance += ("tiff-coverage-subifd",)
+        if photo_alpha:
+            provenance += ("tiff-photo-alpha",)
         if sky_mask is not None:
             mask = masks.enter_context(open_fits_sky_mask(sky_mask, science.width, science.height))
             provenance += ("supplied-sky-mask",)

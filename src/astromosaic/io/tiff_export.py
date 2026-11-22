@@ -7,7 +7,7 @@ from pathlib import Path
 from shutil import disk_usage
 
 from astropy.io import fits
-from tifffile import TiffWriter
+from tifffile import EXTRASAMPLE, TiffWriter
 
 from astromosaic.io import TIFF_SUFFIXES
 from astromosaic.io.atomic import atomic_binary_file
@@ -43,8 +43,9 @@ def open_tiff_mosaic(
     if len(description) > DESCRIPTION_LIMIT:
         raise ValueError("The TIFF mosaic metadata exceeds its size limit.")
     profile = files("astromosaic.io").joinpath("sRGB2014.icc").read_bytes() if photo else None
-    subimages = 2 if layers else 1
-    raster_bytes = width * height * ((2 if photo else 4) * channels + subimages)
+    subimages = 0 if photo else 1 + int(layers)
+    stored_samples = channels + int(photo)
+    raster_bytes = width * height * ((2 if photo else 4) * stored_samples + subimages)
     minimum_bytes = raster_bytes + len(description) + (len(profile) if profile else 0)
     if minimum_bytes > max_output_bytes:
         raise ValueError("The TIFF mosaic exceeds the configured output byte limit.")
@@ -53,7 +54,7 @@ def open_tiff_mosaic(
         raise OSError("There is insufficient disk space for the TIFF mosaic.")
 
     rgb = channels == 3
-    shape = (height, width, 3) if rgb else (height, width)
+    shape = (height, width, stored_samples) if rgb else (height, width)
     bigtiff = minimum_bytes >= 2**32 - 4096
     with atomic_binary_file(path, publish_check=publish_check) as stream:
         # The writer reserves the rasters on disk and returns their byte offsets.
@@ -64,6 +65,7 @@ def open_tiff_mosaic(
                 dtype="uint16" if photo else "float32",
                 photometric="rgb" if rgb else "minisblack",
                 planarconfig="contig" if rgb else None,
+                extrasamples=(EXTRASAMPLE.ASSOCALPHA,) if photo else None,
                 metadata=None,
                 description=description,
                 iccprofile=profile,
@@ -94,7 +96,7 @@ def open_tiff_mosaic(
             stream,
             width,
             pixels[0],
-            offsets[0],
+            offsets[0] if offsets else None,
             "<u2" if photo else "<f4",
             offsets[1] if layers else None,
         )

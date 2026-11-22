@@ -128,6 +128,7 @@ class SkyViewport(QWidget):
         self.tone_box.setAccessibleName("Photo mosaic tone")
         self.tone_box.addItem("Use Preview Tone")
         self.tone_box.addItem("Preserve Tone")
+        self.tone_box.setCurrentIndex(1)
         self.tone_box.currentIndexChanged.connect(self._update_display)
         controls.addWidget(self.tone_box)
         controls.addStretch()

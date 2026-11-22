@@ -333,8 +333,10 @@ def test_photo_encodes_the_full_weighted_grid_and_preserves_coverage(
     )
     assert (result.width, result.height) == spec.size
     assert result.peak_reserved_bytes <= spec.max_working_bytes
-    pixels = imagecodecs.tiff_decode(photo.read_bytes())
-    assert pixels.dtype == np.uint16 and pixels.shape == first.shape
+    rgba = imagecodecs.tiff_decode(photo.read_bytes())
+    assert rgba.dtype == np.uint16 and rgba.shape == (*first.shape[:2], 4)
+    pixels = rgba[..., :3]
+    alpha = rgba[..., 3]
 
     def decode(rgb: NDArray[np.uint16]) -> NDArray[np.float64]:
         encoded = rgb.astype(np.float64) / 65535
@@ -369,13 +371,15 @@ def test_photo_encodes_the_full_weighted_grid_and_preserves_coverage(
         page = output.pages[0]
         assert isinstance(page, tifffile.TiffPage)
         assert imagecodecs.cms_info(page.tags[34675].value)["description"] == "sRGB2014"
-        assert page.pages is not None
-        coverage = page.pages[0].asarray()
+        assert page.extrasamples == (tifffile.EXTRASAMPLE.ASSOCALPHA,)
+        assert not page.subifds
+    assert set(np.unique(alpha)) == {0, 65535}
+    coverage = alpha == 65535
     np.testing.assert_array_equal(coverage[1::3, 1::3], covered)
-    assert int(coverage.sum()) == result.covered_pixels and set(np.unique(coverage)) == {0, 1}
-    assert (pixels[coverage == 0] == 0).all()
+    assert int(coverage.sum()) == result.covered_pixels
+    assert (pixels[~coverage] == 0).all()
     if preserve:
-        assert coverage[12, 1] == 1 and not pixels[12, 1].any()
+        assert coverage[12, 1] and not pixels[12, 1].any()
     with open_panel(photo) as output_panel:
         metadata = output_panel.header
         assert output_panel.descriptor.icc_encoding == "srgb"
@@ -385,6 +389,10 @@ def test_photo_encodes_the_full_weighted_grid_and_preserves_coverage(
         assert metadata["AMINTENT"] == "PHOTO" and "BUNIT" not in metadata
         assert metadata["FILTER"] == "RGB"
         assert metadata["PHOTOTON"] == ("preserve" if preserve else "preview")
+        assert output_panel.descriptor.channel_layout == "rgb"
+        window = output_panel.read_tile(Region(0, 7, 12, 6))
+        np.testing.assert_array_equal(window.valid, coverage[7:13, :12])
+        np.testing.assert_array_equal(window.pixels[window.valid], pixels[7:13, :12][window.valid])
         if not preserve:
             assert metadata["PHOTOMID"] == midtones
             assert metadata["PHOTOBLK"] == pytest.approx(black, abs=1e-6)
@@ -397,6 +405,24 @@ def test_photo_encodes_the_full_weighted_grid_and_preserves_coverage(
     with pytest.raises(ValueError, match="uses sRGB-encoded samples"):
         render_mosaic([photo], tmp_path / "science.tiff", spec, assume_surface_brightness=True)
     assert [path.read_bytes() for path in panels] == original
+
+
+def test_reopen_legacy_photo_tiff_with_binary_coverage(tmp_path: Path) -> None:
+    photo = tmp_path / "legacy-photo.tiff"
+    header = RenderSpec(CENTER, (2, 1), SCALE_ARCSEC).output_wcs().to_header()
+    header["AMINTENT"] = "PHOTO"
+    with tifffile.TiffWriter(photo) as writer:
+        writer.write(
+            np.zeros((1, 2, 3), np.uint16), photometric="rgb", metadata=None, subifds=1,
+            iccprofile=_matrix_icc(srgb=True),
+            description="AstroMosaic TIFF 1\n" + header.tostring(sep="\n", padding=False),
+        )
+        writer.write(np.array([[1, 0]], np.uint8), photometric="minisblack", metadata=None)
+    with open_panel(photo) as panel:
+        assert panel.descriptor.icc_encoding == "srgb"
+        tile = panel.read_tile(Region(0, 0, 2, 1))
+        np.testing.assert_array_equal(tile.valid, [[True, False]])
+        np.testing.assert_array_equal(tile.pixels[0, 0], [0, 0, 0])
 
 
 def test_photo_errors_cancel_and_retry(tmp_path: Path) -> None:
@@ -417,7 +443,7 @@ def test_photo_errors_cancel_and_retry(tmp_path: Path) -> None:
         render_mosaic([source], output.with_suffix(".xisf"), spec, photo=photo)
     with pytest.raises(ValueError, match="output byte limit"):
         render_mosaic(
-            [source], output, replace(spec, max_output_bytes=spec.size[0] * spec.size[1] * 7),
+            [source], output, replace(spec, max_output_bytes=spec.size[0] * spec.size[1] * 8),
             photo=photo,
         )
     with pytest.raises(ValueError, match="no valid input coverage"):

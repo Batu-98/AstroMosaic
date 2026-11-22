@@ -81,6 +81,7 @@ def test_photo_desktop_session_and_cli_share_the_fitted_grid_and_tone(
     desktop = tmp_path / "photo-desktop.tiff"
     session = tmp_path / "photo-session.tiff"
     cli = tmp_path / "photo-cli.tiff"
+    cli_preview = tmp_path / "preview-cli.tiff"
     window = ProjectWindow(
         use_gpu=False,
         preferences=QSettings(str(tmp_path / "appearance.ini"), QSettings.Format.IniFormat),
@@ -112,26 +113,33 @@ def test_photo_desktop_session_and_cli_share_the_fitted_grid_and_tone(
         if app.platformName() == "windows":
             for button in (window.settings_button, window.preview_button, window.start_button):
                 assert button.width() >= button.sizeHint().width()
-        window.viewport.midtones.setValue(41)
+        assert window.viewport.tone_box.currentText() == "Preserve Tone"
         monkeypatch.setattr(QFileDialog, "getSaveFileName", lambda *a, **kw: (str(desktop), ""))
         window.start_button.click()
         wait_idle()
         assert desktop.is_file(), window.status.text()
 
         assert main(
-            ["project", "export-photo", str(manifest), "--band", "RGB", "--midtones", "41",
-             "-o", str(cli), "--json"]
+            ["project", "export-photo", str(manifest), "--band", "RGB", "-o", str(cli), "--json"]
         ) == 0
         result = json.loads(capsys.readouterr().out)
-        assert (result["band"], result["tone"], result["grid"]) == ("RGB", "preview", "auto")
+        assert (result["band"], result["tone"], result["grid"]) == ("RGB", "preserve", "auto")
         assert cli.read_bytes() == desktop.read_bytes()
 
-        window.viewport.tone_box.setCurrentIndex(1)
+        window.viewport.tone_box.setCurrentIndex(0)
+        window.viewport.midtones.setValue(41)
         window.command_panel.entry.setText(f'session export-photo -o "{session}"')
         window.command_panel.run_button.click()
         wait_idle()
         with open_panel(session) as reader:
-            assert reader.header["PHOTOTON"] == "preserve"
+            assert reader.header["PHOTOTON"] == "preview"
+            assert reader.header["PHOTOMID"] == 0.41
+        assert main(
+            ["project", "export-photo", str(manifest), "--band", "RGB", "--midtones", "41",
+             "-o", str(cli_preview), "--json"]
+        ) == 0
+        assert json.loads(capsys.readouterr().out)["tone"] == "preview"
+        assert cli_preview.read_bytes() == session.read_bytes()
         assert manifest.read_bytes() == initial
         assert window.project.render == project.render and window.project.auto_frame_preview
 

@@ -118,8 +118,12 @@ def add_project_commands(parser: ArgumentParser) -> None:
     photo.add_argument("path", type=Path, help="Saved .astromosaic project.")
     photo.add_argument("-o", "--output", required=True, type=Path, help="A new TIFF path.")
     photo.add_argument("--grid", choices=("auto", "saved"), help="Override the project grid mode.")
-    photo.add_argument("--tone", choices=("preview", "preserve"), default="preview")
-    photo.add_argument("--midtones", type=int, metavar="PERCENT", help="Preview midtones (5–95).")
+    photo.add_argument(
+        "--tone", choices=("preview", "preserve"), help="Photo tone (default: preserve)."
+    )
+    photo.add_argument(
+        "--midtones", type=int, metavar="PERCENT", help="Select preview midtones (5–95)."
+    )
     photo.add_argument("--progress", action="store_true", help="Report tile progress to stderr.")
     for command in (validate, export, photo):
         command.add_argument("--band", metavar="FILTER", help="Select one saved sky band.")
@@ -484,14 +488,15 @@ def _export(arguments: Namespace, result: dict[str, object], context: JobContext
     if photo:
         if arguments.grid is not None:
             project = replace(project, auto_frame_preview=arguments.grid == "auto")
+        tone_choice = arguments.tone or ("preview" if arguments.midtones is not None else "preserve")
         tone = None
-        if arguments.tone == "preview":
+        if tone_choice == "preview":
             midtones = DEFAULT_MIDTONES if arguments.midtones is None else arguments.midtones
             tone = PhotoTone(midtones / 100)
         elif arguments.midtones is not None:
             raise ValueError("--midtones requires --tone preview.")
         result.update(
-            intent="photo", tone=arguments.tone, grid="auto" if project.auto_frame_preview else "saved"
+            intent="photo", tone=tone_choice, grid="auto" if project.auto_frame_preview else "saved"
         )
         mosaic = render_project_photo(project, arguments.output, job, tone=tone, band=band)
         result.update(asdict(mosaic))
