@@ -227,7 +227,7 @@ flowchart TD
 | A present unit contains a per-pixel basis | The job requires area-aware conversion of those inputs before mosaicking. |
 | Conflicting filter labels | The job reports the filter requirement. The saved band and common-filter controls provide the grouping inputs for the next attempt. |
 | Mono and RGB appear in one layer | The job requires a common channel layout. RGB sky mosaics use TIFF or XISF for output. |
-| Supported sRGB TIFF with a usable WCS | The desktop sky **Visual Preview** decodes the sRGB transfer before interpolation. Science validation and export require compatible linear inputs, even if a common scale is declared. |
+| RGB UInt16 TIFF with a usable WCS and resolved photo profile | The desktop sky **Visual Preview** converts the selected profiles to linear sRGB before interpolation. Science validation and export require compatible linear inputs and calibration. |
 | Unsupported TIFF ICC profile or mixed sRGB and linear inputs | The sky preview reports the affected panel and requires a compatible input set. |
 
 ### Sampling and optional refinement
@@ -307,7 +307,7 @@ The final preview is at most 512 samples along its longest edge. A valid coarse 
 
 Display normalization uses the 1st and 99.5th percentiles of valid samples with linked RGB levels. **Midtones**, pan, pointer-centered zoom and **Fit View** act on the cached display. **Highlight Overlap** is available for a composition with a common-coverage map. Changing the active project, layer or band can clear the cached preview and require a new build. **View → Theme** stores the application's Dark or Light appearance preference. Pixel processing remains on the CPU, with OpenGL used for display when available. Context, shader or upload failure switches to CPU display and preserves the usable frame. [Preview implementation](../src/astromosaic/ui/sky_viewport.py) · [Display normalization](../src/astromosaic/display.py)
 
-**sRGB TIFF scenario.** Add unsigned 16-bit RGB TIFFs tagged with a supported sRGB ICC profile, solve their WCS and choose **Build Preview**. The **Visual Preview** decodes the sRGB transfer before combining the panels. Its inputs stay unchanged. Unknown profiles or a mixture with linear or untagged panels give a panel-specific error. Scientific exports require compatible linear inputs. [Desktop preview workflow](phase-3c.md#desktop-workflow) · [Recorded sRGB preview case](../questions_open_topics.md#q-028---automatic-sky-preview-for-solved-panels)
+Add RGB UInt16 TIFFs and solve their WCS. A photo profile can come from the source metadata, **Mosaic Settings → Photo**, or **Panel Settings → Photo**. Select **Build Preview** to sample and blend in linear sRGB. For exposure and brightness choices, the Command Panel reports the reference, effective corrections and overlap support. Unresolved color profiles give a panel-specific diagnostic. [Photo workflow](phase-8.md#8c-photo-color-and-exposure-workflow) · [Recorded sRGB preview case](../questions_open_topics.md#q-028---automatic-sky-preview-for-solved-panels)
 
 ## Export and File Publication
 

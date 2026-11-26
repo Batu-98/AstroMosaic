@@ -41,7 +41,7 @@ Use **Tools → Plate Solve Settings** to choose and check the local ASTAP CLI a
 
 The **Command Panel** opens at startup and records summaries of desktop operations alongside CLI output. Use **Tools → Command Panel** to toggle it. The panel runs commands such as `project validate` and `project export` and supports render progress, cancellation and session history. [Command panel workflow](phase-4c.md#desktop-workflow)
 
-Build a visual sky preview from supported sRGB TIFFs to enable **Export Photo Mosaic**. Choose **Use Preview Tone** or **Preserve Tone** to write a tagged 16-bit TIFF at the full preview grid resolution. [Photo mosaic workflow and CLI](phase-8.md#8b-export-a-photo-mosaic)
+Build a visual sky preview from RGB UInt16 TIFFs with supported profiles to enable **Export Photo Mosaic**. Use the **Photo** tab in **Mosaic Settings** for profile, exposure and brightness choices, and **Panel Settings → Photo** for per-panel profile or EV overrides. Choose **Preserve Tone** or **Use Preview Tone** to write a tagged 16-bit TIFF at the full preview grid resolution. [Photo workflow and CLI](phase-8.md#8c-photo-color-and-exposure-workflow)
 
 With **Live Sky Preview** enabled, an opened sky preview refreshes as its inputs change. Zoom for **1:1** detail and use **Edit Crop** to adjust the automatic bounds on the full grid. **Apply Crop** saves the selected pixel rectangle in the project grid for the next export. [Framing locks and crop controls](phase-3c.md#adaptive-framing-and-interactive-crop)
 
@@ -130,7 +130,8 @@ The viewport command checks a small projection and exits. The [Phase 0 evidence]
 | [Phase 5C per-band output](phase-5c.md) | Saved sky band assignments, individual previews and exports, and batch jobs. |
 | [Phase 6 real-observation reliability](phase-6.md) | Reference data, foreground pairing, masked solving, ZEA previews, and Windows lifecycle and release acceptance. |
 | [Phase 7 terrain panorama registration](phase-7.md) | Panorama research, manual and automatic terrain points, camera geometry, and real-data Windows acceptance. |
-| [Proposed Phase 8 color, photometry and optics](phase-8.md) | Selectable input profiles, color transforms, exposure and brightness matching, lens corrections, vignetting and photo export. |
+| [Phase 8 color, photometry and optics](phase-8.md) | Photo export, input profiles, matrix color conversion, linked exposure and brightness. Later stages cover advanced fits and optics. |
+| [Phase 9 desktop undo and redo](phase-9.md) | Planned project and editor history, saved-state behavior, worker results and Windows acceptance. |
 | [ADR-0001](adr/0001-python-first-baseline.md) | Records which architecture is active and which decisions remain unverified. |
 
 All project Markdown, source comments, identifiers, logs, and default application text are written in English.

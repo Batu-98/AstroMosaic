@@ -307,8 +307,8 @@ def _create(arguments: Namespace, context: JobContext) -> int:
 def _solve_copy(
     project: MosaicProject, arguments: Namespace, result: dict[str, object], context: JobContext
 ) -> str:
-    from astromosaic.astrometry.solve_budget import SolveBudget, SolveBudgetExceeded
-    from astromosaic.storage.project import panels_needing_wcs, save_project, solve_project_panel
+    from astromosaic.astrometry.solve_budget import SolveBudget
+    from astromosaic.storage.project import panels_needing_wcs, save_project, solve_project_panels
 
     options = solve_options(arguments)
     batch = (
@@ -326,9 +326,9 @@ def _solve_copy(
     if options.revalidate or options.strict_edges:
         indices = selected
     else:
-        pending = set(panels_needing_wcs(project, job))
-        indices = tuple(index for index in selected if index in pending)
-    reused = [index + 1 for index in selected if index not in indices]
+        indices = panels_needing_wcs(project, job, indices=selected)
+    pending = set(indices)
+    reused = [index + 1 for index in selected if index not in pending]
     outcomes: list[dict[str, object]] = []
     result.update(panels=len(selected), reused=reused, outcomes=outcomes)
 
@@ -354,11 +354,10 @@ def _solve_copy(
     try:
         if directory is not None:
             report_progress(0)
-            for index in indices:
-                job.check_cancelled()
-                outcome = solve_project_panel(
-                    index, panels[index], options, directory, job, job_budget=batch
-                )
+            for outcome in solve_project_panels(
+                project, indices, options, directory, job, job_budget=batch
+            ):
+                index = outcome.index
                 outcomes.append(
                     {
                         "panel": index + 1,
@@ -382,10 +381,6 @@ def _solve_copy(
                 else:
                     panels[index] = replace(panels[index], wcs_sidecar=outcome.sidecar)
                 report_progress(len(outcomes))
-                if batch is not None and outcome.status == "budget-exhausted":
-                    batch.check()
-                    if outcome.budget is not None and outcome.budget["limiting_scope"] == "job":
-                        raise SolveBudgetExceeded(outcome.error or "The job solve budget elapsed.")
         if failed:
             job.check_cancelled()
             raise ValueError(f"Plate solve failed for {failed} panel(s). See the panel outcomes.")

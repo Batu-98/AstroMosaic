@@ -2,6 +2,7 @@ import json
 import signal
 import subprocess
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
 import numpy as np
@@ -406,14 +407,56 @@ def test_cli_relinks_a_saved_project_and_reuses_its_wcs(
     assert not list(tmp_path.glob("astromosaic-wcs-*")) and manifest.read_bytes() == before
 
 
-@pytest.mark.parametrize("ending", ["solved", "failed", "cancelled", "cancelled-at-publish"])
+def test_project_solve_checks_reuse_only_for_selected_panels(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from astromosaic.astrometry.solve_budget import SolveBudgetExceeded
+    from astromosaic.storage import project as storage
+
+    sources = tuple(tmp_path / f"Panel {number}.fits" for number in (1, 2, 3))
+    for source in sources:
+        write_smoke_panel(source)
+    manifest = tmp_path / "Night.astromosaic"
+    assert main(_create_args(manifest, *sources)) == 0
+    capsys.readouterr()
+
+    inspect = storage.inspect_project_panel
+    inspected = []
+
+    def inspect_panel(panel: storage.ProjectPanel, context: JobContext) -> storage.PanelInspection:
+        inspected.append(panel.source.path)
+        if panel.source.path == sources[0]:
+            raise SolveBudgetExceeded("The job solve budget elapsed.")
+        return inspect(panel, context)
+
+    monkeypatch.setattr(storage, "inspect_project_panel", inspect_panel)
+    destination = tmp_path / "Selected panels.astromosaic"
+    result = main(
+        [
+            "project", "solve", str(manifest), "-o", str(destination),
+            "--panel", "3", "--panel", "2", "--job-budget", "60", "--json",
+        ]
+    )
+    report = json.loads(capsys.readouterr().out)
+    assert result == 0, report
+    assert sorted(inspected) == list(sources[1:])
+    assert report["reused"] == [3, 2] and report["outcomes"] == []
+    assert load_project(destination) == load_project(manifest)
+    assert not list(tmp_path.glob("astromosaic-wcs-*"))
+
+
+@pytest.mark.parametrize(
+    "ending", ["solved", "failed", "cancelled", "cancelled-at-publish", "job-budget-exhausted"]
+)
 def test_project_solve_publishes_only_complete_results(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
     monkeypatch: pytest.MonkeyPatch,
     ending: str,
 ) -> None:
-    from astromosaic.astrometry.solve import SolveOptions, SolveResult, write_solution
+    from astromosaic.astrometry.solve import SolveOptions, SolveResult, SolveStep, write_solution
     from astromosaic.astrometry.solve_budget import SolveBudget
     from astromosaic.geometry import read_panel_geometry
     from astromosaic.io import open_panel
@@ -437,12 +480,20 @@ def test_project_solve_publishes_only_complete_results(
         context: JobContext,
         *,
         job_budget: SolveBudget | None,
+        on_step: Callable[[SolveStep], None] | None = None,
     ) -> storage.PanelSolveOutcome:
-        assert options.revalidate and job_budget is not None
+        assert options.revalidate and job_budget is not None and on_step is None
         if index == 1 and ending == "failed":
             return storage.PanelSolveOutcome(index, error="No match.")
         if index == 1 and ending == "cancelled":
             raise MosaicCancelled("Cancelled between panels.")
+        if index == 1 and ending == "job-budget-exhausted":
+            return storage.PanelSolveOutcome(
+                index,
+                error="The job solve budget has no search time after the validation reserve.",
+                status="budget-exhausted",
+                budget={"limiting_scope": "job"},
+            )
         path = directory / f"panel-{index + 1}.wcs.json"
         with open_panel(panel.source.path) as source:
             geometry = read_panel_geometry(source.header, 16, 12)
@@ -484,8 +535,11 @@ def test_project_solve_publishes_only_complete_results(
         assert main(["project", "export", str(destination), "-o", str(output)]) == 0
         assert np.any(fits.getdata(output, 1) > 0)
     else:
-        expected = (1, "error") if ending == "failed" else (130, "cancelled")
+        expected = (130, "cancelled") if ending.startswith("cancelled") else (1, "error")
         assert (code, report["status"]) == expected
+        if ending == "job-budget-exhausted":
+            assert report["outcomes"][1]["status"] == "budget-exhausted"
+            assert "validation reserve" in report["message"]
         assert not destination.exists() and not list(tmp_path.glob("astromosaic-wcs-*"))
 
 

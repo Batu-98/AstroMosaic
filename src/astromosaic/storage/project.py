@@ -6,6 +6,7 @@ from base64 import b64decode, b64encode
 from collections.abc import Callable, Iterator, Sequence
 from contextlib import ExitStack, contextmanager
 from dataclasses import asdict, dataclass, replace
+from functools import partial
 from hashlib import sha256
 from importlib.metadata import version
 from math import ceil, floor, isfinite
@@ -430,20 +431,22 @@ def panels_needing_wcs(
     project: MosaicProject,
     context: JobContext,
     *,
+    indices: tuple[int, ...] | None = None,
     on_inspected: Callable[[int, int], None] | None = None,
 ) -> tuple[int, ...]:
-    sky = project.sky_indices()
-    if sky and on_inspected is not None:
-        on_inspected(0, len(sky))
+    """Find panels that need a solve in the selected order."""
+    selected = project.sky_indices() if indices is None else indices
+    if selected and on_inspected is not None:
+        on_inspected(0, len(selected))
     pending = []
-    for checked, index in enumerate(sky, start=1):
+    for checked, index in enumerate(selected, start=1):
         if inspect_project_panel(project.panels[index], context).wcs_status not in {
             "Embedded",
             "Sidecar",
         }:
             pending.append(index)
         if on_inspected is not None:
-            on_inspected(checked, len(sky))
+            on_inspected(checked, len(selected))
     return tuple(pending)
 
 
@@ -525,6 +528,39 @@ def solve_project_panel(
         )
     except (OSError, ValueError, OverflowError) as error:
         return PanelSolveOutcome(index, attempts=attempts, error=str(error), budget=budget.report())
+
+
+def solve_project_panels(
+    project: MosaicProject,
+    indices: Sequence[int],
+    options: SolveOptions,
+    directory: Path,
+    context: JobContext,
+    *,
+    job_budget: SolveBudget | None,
+    on_started: Callable[[int, int], None] | None = None,
+    on_step: Callable[[int, int, SolveStep], None] | None = None,
+) -> Iterator[PanelSolveOutcome]:
+    """Yield ordered outcomes from a batch using the caller's budget-aware context."""
+    for ordinal, index in enumerate(indices):
+        context.check_cancelled()
+        if on_started is not None:
+            on_started(ordinal, index)
+        outcome = solve_project_panel(
+            index,
+            project.panels[index],
+            options,
+            directory,
+            context,
+            job_budget=job_budget,
+            on_step=partial(on_step, ordinal, index) if on_step is not None else None,
+        )
+        # Let the caller retain the final panel report before a job-level stop.
+        yield outcome
+        if job_budget is not None and outcome.status == "budget-exhausted":
+            job_budget.check()
+            if outcome.budget is not None and outcome.budget["limiting_scope"] == "job":
+                raise SolveBudgetExceeded(outcome.error or "The job solve budget elapsed.")
 
 
 def project_sky_bands(project: MosaicProject, context: JobContext) -> dict[str, list[int]]:

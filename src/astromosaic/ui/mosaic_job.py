@@ -11,7 +11,7 @@ import numpy as np
 from PySide6.QtCore import QObject, QThread, Signal
 
 from astromosaic.astrometry.solve import SolveOptions, SolveStep
-from astromosaic.astrometry.solve_budget import SolveBudget, SolveBudgetExceeded
+from astromosaic.astrometry.solve_budget import SolveBudget
 from astromosaic.core import Region, Tile
 from astromosaic.core.job import JobContext, MosaicCancelled
 from astromosaic.core.masks import MASK_EDGE, SKY, UNCLASSIFIED, SourceMask
@@ -54,7 +54,7 @@ from astromosaic.storage.project import (
     render_project,
     render_project_layer,
     render_project_photo,
-    solve_project_panel,
+    solve_project_panels,
 )
 
 
@@ -197,23 +197,19 @@ class PlateSolveJob(_ProjectJob[None]):
             finally:
                 self.eligibility_seconds = monotonic() - started
             self.total = len(indices)
-            for ordinal, index in enumerate(indices):
-                context.check_cancelled()
-                self._panel_progress(ordinal, index, 0, "Reading image and solve hints…")
-                outcome = solve_project_panel(
-                    index,
-                    self.project.panels[index],
-                    self.options,
-                    self.directory,
-                    context,
-                    job_budget=self.batch_budget,
-                    on_step=partial(self._solve_step, ordinal, index),
-                )
+            for outcome in solve_project_panels(
+                self.project,
+                indices,
+                self.options,
+                self.directory,
+                context,
+                job_budget=self.batch_budget,
+                on_started=partial(
+                    self._panel_progress, percent=0, phase="Reading image and solve hints…"
+                ),
+                on_step=self._solve_step,
+            ):
                 self.outcomes.append(outcome)
-                if self.batch_budget is not None and outcome.status == "budget-exhausted":
-                    self.batch_budget.check()
-                    if outcome.budget is not None and outcome.budget["limiting_scope"] == "job":
-                        raise SolveBudgetExceeded(outcome.error or "The job solve budget elapsed.")
         finally:
             self.elapsed_seconds = monotonic() - self.queued_at
 
