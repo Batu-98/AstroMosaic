@@ -32,6 +32,7 @@ from astromosaic.display import (
     MAX_MIDTONES,
     MIN_MIDTONES,
     DisplayFrame,
+    highlight_overlap,
     stretch_rgba,
 )
 from astromosaic.photometry.photo import PhotoTone
@@ -74,8 +75,12 @@ class _RasterPreview(QWidget):
             painter.end()
 
 
-def _display_image(frame: DisplayFrame, midtones: float, preserve_tone: bool) -> QImage:
-    pixels = stretch_rgba(frame, midtones, preserve_tone=preserve_tone)
+def _display_image(
+    frame: DisplayFrame, midtones: float, preserve_tone: bool, *, highlight_common: bool = False
+) -> QImage:
+    pixels = stretch_rgba(
+        frame, midtones, preserve_tone=preserve_tone, highlight_common=highlight_common
+    )
     width, height = frame.size
     return QImage(
         pixels.data, width, height, width * 4, QImage.Format.Format_RGBA8888
@@ -91,6 +96,7 @@ class SkyViewport(QWidget):
         self._use_gpu = use_gpu and QApplication.platformName() not in {"minimal", "offscreen"}
         self._gl: OpenGLPreview | None = None
         self._frame: DisplayFrame | None = None
+        self._highlight_common = False
         self._zoom = 1.0
         self._pan = QPointF()
         self._drag: QPointF | None = None
@@ -228,9 +234,10 @@ class SkyViewport(QWidget):
         self._pages.addWidget(canvas)
         canvas.installEventFilter(self)
 
-    def set_frame(self, frame: DisplayFrame | None) -> None:
+    def set_frame(self, frame: DisplayFrame | None, *, highlight_common: bool = False) -> None:
         previous = self._frame
-        self._frame = frame
+        self._frame = highlight_overlap(frame) if frame is not None and highlight_common else frame
+        self._highlight_common = highlight_common
         if frame is None or previous is None or frame.output_size != previous.output_size:
             self.clear_detail()
             self.fit()
@@ -247,7 +254,10 @@ class SkyViewport(QWidget):
             self._pages.setCurrentWidget(self._raster)
         elif self._gl is not None:
             self._pages.setCurrentWidget(self._gl)
-        self._backend.setText(self.backend if frame is not None else "")
+        self._backend.setText(
+            f"{self.backend} · 1:1" if self._detail is not None
+            else self.backend if frame is not None else ""
+        )
         self._update_display()
 
     @Slot()
@@ -287,11 +297,12 @@ class SkyViewport(QWidget):
             self.tone_box.currentIndex() == 1
         )
         self.midtones.setEnabled(frame is not None and not preserve)
+        midtones = self.midtones.value() / 100
         if self._detail is not None:
             self._detail_image = _display_image(
-                self._detail[1], self.midtones.value() / 100, preserve
+                self._detail[1], midtones, preserve, highlight_common=self._highlight_common
             )
-        surface.set_display(frame, self.midtones.value() / 100, preserve_tone=preserve)
+        surface.set_display(frame, midtones, preserve_tone=preserve)
 
     @Slot()
     def fit(self) -> None:

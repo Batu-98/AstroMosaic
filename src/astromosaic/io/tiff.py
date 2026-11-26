@@ -4,6 +4,7 @@ import os
 from collections.abc import Iterator
 from contextlib import ExitStack, contextmanager
 from hashlib import sha256
+from mmap import ACCESS_READ, mmap
 from pathlib import Path
 from typing import IO, Literal
 
@@ -176,6 +177,7 @@ class TiffTileSource:
         coverage: _Segments | None,
         sky_mask: FitsTileSource | None,
         photo_metadata: TiffPhotoMetadata,
+        resources: ExitStack,
     ) -> None:
         self.descriptor = descriptor
         self._science = science
@@ -185,6 +187,34 @@ class TiffTileSource:
         self._sky_mask = sky_mask
         self.photo_metadata = photo_metadata
         self._decode_bytes = max(science.decode_bytes, coverage.decode_bytes if coverage else 0)
+        self._resources = resources
+        self._mapped_pixels: NDArray[np.generic] | None = None
+
+    def read_sample_pixels(
+        self, rows: NDArray[np.intp], columns: NDArray[np.intp]
+    ) -> NDArray[np.float32] | None:
+        """Gather points directly from an eligible TIFF's original contiguous bytes."""
+        science = self._science
+        page = science.page
+        if (
+            self._coverage is not None or self._sky_mask is not None
+            or page.samplesperpixel == 4 or page.is_tiled or science.separate
+            or not page.is_memmappable
+        ):
+            return None
+        if self._mapped_pixels is None:
+            try:
+                mapping = self._resources.enter_context(
+                    mmap(science.stream.fileno(), 0, access=ACCESS_READ)
+                )
+            except OSError:
+                return None
+            self._mapped_pixels = np.ndarray(
+                (science.height, science.width, page.samplesperpixel),
+                dtype=science.dtype, buffer=mapping, offset=page.dataoffsets[0],
+            )
+            self._resources.callback(setattr, self, "_mapped_pixels", None)
+        return self._mapped_pixels[rows, columns].astype(np.float32, copy=False)
 
     @property
     def header(self) -> fits.Header:
@@ -297,7 +327,7 @@ def open_tiff_panel(
 ) -> Iterator[TiffTileSource]:
     if max_tile_bytes < 1:
         raise ValueError("The TIFF tile byte budget must be positive.")
-    with path.open("rb") as stream, TiffFile(stream) as tiff, ExitStack() as masks:
+    with path.open("rb") as stream, TiffFile(stream) as tiff, ExitStack() as resources:
         stat = os.fstat(stream.fileno())
         if len(tiff.pages) != 1:
             raise ValueError("Expected one primary TIFF image.")
@@ -337,7 +367,7 @@ def open_tiff_panel(
         if photo_alpha:
             provenance += ("tiff-photo-alpha",)
         if sky_mask is not None:
-            mask = masks.enter_context(open_fits_sky_mask(sky_mask, science.width, science.height))
+            mask = resources.enter_context(open_fits_sky_mask(sky_mask, science.width, science.height))
             provenance += ("supplied-sky-mask",)
         descriptor = PanelDescriptor(
             fingerprint=SourceFingerprint(stat.st_size, stat.st_mtime_ns),
@@ -357,4 +387,6 @@ def open_tiff_panel(
             icc_encoding=encoding,
             icc_profile_sha256=profile_sha256,
         )
-        yield TiffTileSource(science, descriptor, header, max_tile_bytes, coverage, mask, photo_metadata)
+        yield TiffTileSource(
+            science, descriptor, header, max_tile_bytes, coverage, mask, photo_metadata, resources
+        )

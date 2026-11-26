@@ -12,6 +12,7 @@ import pytest
 from astropy.io import fits
 
 from astromosaic.core import Region
+from astromosaic.core.job import DEFAULT_JOB_CONTEXT
 from astromosaic.geometry import tan_output_wcs
 from astromosaic.pipeline.mosaic import RenderSpec
 from astromosaic.storage.project import (
@@ -19,6 +20,7 @@ from astromosaic.storage.project import (
     MosaicProject,
     ProjectPanel,
     load_project,
+    preview_project,
     save_project,
 )
 
@@ -256,7 +258,7 @@ def test_session_commands_use_the_live_project_without_modal_dialogs(
         saved_grid = window.project.render
         run("session preview --grid auto")
         wait_until(idle)
-        fitted_grid = window._preview_grid
+        fitted_grid = preview_project(window.project, DEFAULT_JOB_CONTEXT).fitted_grid
         assert fitted_grid is not None and fitted_grid != saved_grid
         assert window.viewport.frame is not None and window.viewport.frame.has_coverage
         assert window.project.render == saved_grid

@@ -173,6 +173,16 @@ This register tracks unresolved decisions, problems, and risks. It is not a work
 - **Next action / responsibility** During 9C, the implementer measures representative panel and mask sessions on Windows and selects retention limits and behavior for an oversized edit.
 - **Closure condition** Record the workload, limits and peak memory. Verify eviction, oversized edits, saved-state tracking, redo branching and resource release on close.
 
+### Q-035 - Desktop panel import and sky preview latency
+
+- **Status / priority** Open / P2
+- **Opened / updated** 2026-11-26
+- **Affected workflow** Add Panels, first sky preview, and repeated previews on large TIFF inputs.
+- **Impact and evidence** Two real 6000 × 4000 RGB TIFFs took about 2.5 s to add while foreground detection scanned 48 million source pixels. Each CPU overview requested 232 million source pixel positions across 240 TIFF windows. The first proxy arrived in 3.0–9.1 s and the overview took 11.1–18.3 s. [Source measurements](progression.md#2026-11-26---desktop-diagnosis---measured-panel-import-and-sky-preview-latency)
+- **Current assumption** The owner selected GPU acceleration without adding a preview cache. The native sky preview now samples on hardware OpenGL and accesses compatible TIFF source points directly. [GPU sampling decision](docs/adr/0031-gpu-sky-preview-sampling.md)
+- **Next action / responsibility** Measure first-frame latency with cold files on representative local and external storage. Track foreground import scanning separately from sky preview. The first original TIFF preview took 14.45 s while the repeat took 2.35 s on this workstation.
+- **Closure condition** Verify improvement on representative real projects with cold and warm measurements, documented peak memory, responsive cancellation, and unchanged reference WCS, coverage, and export results.
+
 ## Resolved Topics
 
 ### Q-001 - Python, dependency, and platform compatibility matrix
@@ -422,6 +432,24 @@ This register tracks unresolved decisions, problems, and risks. It is not a work
 - **Impact and evidence** The desktop and CLI duplicated the batch stop rules. CLI WCS reuse checks ran on the entire sky selection before filtering the requested panels, so an unselected panel could exhaust the job budget.
 - **Resolution** The Qt-free [project module](src/astromosaic/storage/project.py) runs the ordered batch and stops on cancellation or job exhaustion. The desktop retains completed outcomes and the CLI publishes a complete copy atomically. [CLI reuse checks](docs/phase-4a.md#prepare-a-project-without-the-desktop) inspect just the panels selected for the job.
 - **Verification** A selected-panel regression reproduced the old failure. All 36 focused Windows source tests passed after the fix, including native-solver diagnostics and CLI budget, cancellation and publication checks. The full offscreen source suite passed 261 tests with six documented skips.
+
+### Q-033 - Composition overlap highlight at detail zoom
+
+- **Status / priority** Resolved / P3
+- **Opened / updated** 2026-11-26 / 2026-11-26
+- **Affected scope** Desktop composition preview presentation.
+- **Impact and evidence** Toggling Highlight Overlap changed the overview but left the displayed 1:1 detail in its previous colors. The detail worker applied the highlight once, and later redraws reused that choice.
+- **Resolution** The viewport uses the active highlight setting for both views. It retains the original detail frame so the toggle can update color immediately in either direction while preserving the detail region, tone, coverage and 1:1 indicator. [Composition workflow](docs/phase-3e.md#desktop-workflow)
+- **Verification** The framebuffer regression reproduced the mismatch on CPU and OpenGL before the fix. Native Paranal tests passed on both. They checked both toggle directions and a new 1:1 result delivered while Highlight Overlap was enabled.
+
+### Q-034 - Sky preflight output suffix
+
+- **Status / priority** Resolved / P2
+- **Opened / updated** 2026-11-26 / 2026-11-26
+- **Affected scope** Phase 4A scientific sky preflight.
+- **Impact and evidence** A mono project could pass validation with a proposed `.bin` file and fail export because the FITS writer rejected the suffix.
+- **Resolution** Scientific sky preflight and rendering now use the writer's suffix check. Existing FITS aliases remain case-insensitive. [CLI validation workflow](docs/phase-4a.md#create-and-validate)
+- **Verification** The CLI regression reproduces the earlier mismatch and checks matching diagnostics, rejection without a part file, and acceptance of an uppercase `.FIT` destination.
 
 ## New Entry Template
 

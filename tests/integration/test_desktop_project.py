@@ -28,6 +28,7 @@ from astromosaic.io import PanelSource, open_panel
 from astromosaic.pipeline.masking import read_thumbnail
 from astromosaic.pipeline.mosaic import MosaicResult, PreviewFrame, RenderSpec, SkyCalibrationError
 from astromosaic.pipeline.smoke import write_smoke_panel
+from astromosaic.resampling import PreviewInterpolator
 from astromosaic.storage.project import (
     FileReference,
     MosaicProject,
@@ -71,8 +72,13 @@ def test_photo_desktop_session_and_cli_share_the_fitted_grid_and_tone(
     linear_source = tmp_path / "linear.fits"
     header["FILTER"], header["BUNIT"] = "L", "MJy/sr"
     fits.writeto(linear_source, np.ones((18, 24), dtype=np.float32), header)
+    extra_linear_source = tmp_path / "extra-linear.fits"
+    fits.writeto(extra_linear_source, np.ones((18, 24), dtype=np.float32), header)
     project = MosaicProject(
-        panels=tuple(ProjectPanel(FileReference.capture(p)) for p in (photo_source, linear_source)),
+        panels=tuple(
+            ProjectPanel(FileReference.capture(p))
+            for p in (photo_source, linear_source, extra_linear_source)
+        ),
         auto_frame_preview=True,
     )
     manifest = tmp_path / "Saved.astromosaic"
@@ -94,6 +100,13 @@ def test_photo_desktop_session_and_cli_share_the_fitted_grid_and_tone(
             app.processEvents()
             sleep(0.005)
 
+    def wait_for_live_preview() -> None:
+        deadline = monotonic() + 12
+        while window.viewport.frame is None or window.job is not None:
+            assert monotonic() < deadline, window.status.text()
+            app.processEvents()
+            sleep(0.005)
+
     try:
         secondary = next((screen for screen in app.screens() if screen != app.primaryScreen()), None)
         if secondary is not None:
@@ -106,7 +119,7 @@ def test_photo_desktop_session_and_cli_share_the_fitted_grid_and_tone(
         wait_idle()
         assert window.preview_title.text() == "Visual Preview"
         assert window.start_button.text() == "Export Photo Mosaic…"
-        assert window._preview_grid is not None and window.project.render == project.render
+        assert window.use_preview_grid_button.isEnabled() and window.project.render == project.render
         window.resize(630, 760)
         app.processEvents()
         assert window.band_box.isVisible()
@@ -145,18 +158,26 @@ def test_photo_desktop_session_and_cli_share_the_fitted_grid_and_tone(
 
         window._update_panel(0, replace(window.project.panels[0], weight=1.25))
         assert window.viewport.frame is None
-        deadline = monotonic() + 12
-        while window.viewport.frame is None or window.job is not None:
-            assert monotonic() < deadline, window.status.text()
-            app.processEvents()
-            sleep(0.005)
-        assert window._preview_project == window.project
+        wait_for_live_preview()
+        assert window.start_button.text() == "Export Photo Mosaic…"
+
+        window.panels.selectRow(2)
+        window.remove_action.trigger()
+        assert len(window.project.panels) == 2 and window.viewport.frame is None
+        wait_for_live_preview()
+        assert window.band_box.currentData() == "RGB"
+        assert window.start_button.text() == "Export Photo Mosaic…"
+
         current = window.project
+        frame_before_crop = window.viewport.frame
         window.edit_crop_button.click()
         wait_idle()
-        assert window.viewport.crop is not None and window._crop_draft is not None
+        assert window.viewport.crop is not None and window.crop_controls.isVisible()
+        assert not window.check_foreground.isEnabled() and not window.revalidate_solve_action.isEnabled()
         window.cancel_crop_button.click()
-        assert window.project == current and window._crop_draft is None
+        assert window.project == current and not window.crop_controls.isVisible()
+        assert window.viewport.frame is frame_before_crop
+        assert window.start_button.text() == "Export Photo Mosaic…"
         window.edit_crop_button.click()
         wait_idle()
         assert window.auto_crop_button.isEnabled() and not window.start_button.isEnabled()
@@ -304,10 +325,11 @@ def test_desktop_project_roundtrip_progress_cancel_and_retry(
         adaptive_edge: int | None,
         grid: RenderSpec | None,
         inspect_crop: bool,
+        interpolate: PreviewInterpolator | None,
     ) -> PreviewFrame:
         return preview_project(
             project, pause_on_progress(context), on_proxy, band=band, allow_visual=allow_visual,
-            adaptive_edge=adaptive_edge, grid=grid, inspect_crop=inspect_crop,
+            adaptive_edge=adaptive_edge, grid=grid, inspect_crop=inspect_crop, interpolate=interpolate,
         )
 
     def set_geometry() -> None:

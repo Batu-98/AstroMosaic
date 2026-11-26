@@ -231,7 +231,9 @@ astromosaic project export-photo "Photo.astromosaic" -o "Baseline.tiff" --exposu
 
 The export overrides apply to one run. Use `--photo-profile` for the project default and `--panel-profile PANEL=inherit` to clear a panel override. Use `--exposure manual --panel-ev 2=1` for one stop on panel 2. Exposure metadata uses shutter and aperture for compatible cameras with matching ISO. Missing or conflicting capture values produce a unity gain with a reason.
 
-**Sky Offset** fits linked RGB at unit gain. **Standard** estimates the sky pedestal and a linked affine correction using spatially separated fit and validation blocks. It requires at least 128 samples and two blocks in each split. The gain fit also requires a 5th-to-95th percentile luminance span of 0.003. The fit uses the full resolved grid so preview zoom and output cropping share its correction. The reference is selected by source path within the band, and eligible overlaps can extend that reference to connected panels. [Photo fit](../src/astromosaic/pipeline/photo_fit.py)
+**Sky Offset** fits linked RGB at unit gain. **Standard** estimates the sky pedestal and a linked affine correction using spatially separated fit and validation blocks. It requires at least 128 samples and two blocks in each split. The gain fit also requires a 5th-to-95th percentile luminance span of 0.003. The reference is selected by source path within the band, and eligible overlaps can extend that reference to connected panels. [Photo fit](../src/astromosaic/pipeline/photo_fit.py)
+
+Photo preparation resolves working colors and reserves memory for retained ICC profiles. It fits overlap corrections on the full resolved grid so the overview, detail view, and cropped export use the same corrections. [Photo preparation](../src/astromosaic/pipeline/photo_preparation.py)
 
 ### 8C Local source results
 

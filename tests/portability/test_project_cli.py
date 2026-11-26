@@ -102,6 +102,7 @@ def test_create_and_preflight_share_project_io_without_qt(
 
     script = """
 import sys
+from unittest.mock import patch
 
 class BlockQt:
     def find_spec(self, fullname, path=None, target=None):
@@ -110,9 +111,20 @@ class BlockQt:
 
 sys.meta_path.insert(0, BlockQt())
 from astromosaic.cli import main
-raise SystemExit(main(sys.argv[1:]))
+from astromosaic.io.fits import FitsTileSource
+from astromosaic.io.tiff import TiffTileSource
+
+unexpected_work = AssertionError("A sky preflight must stop before rendering.")
+with (
+    patch.object(FitsTileSource, "read_tile", side_effect=unexpected_work),
+    patch.object(TiffTileSource, "read_tile", side_effect=unexpected_work),
+    patch("astromosaic.pipeline.mosaic.refine_panels", side_effect=unexpected_work),
+    patch("astromosaic.pipeline.mosaic.tan_footprint", side_effect=unexpected_work),
+    patch("astromosaic.pipeline.mosaic._write_raster", side_effect=unexpected_work),
+):
+    raise SystemExit(main(sys.argv[1:]))
 """
-    output = tmp_path / "mosaic.fits"
+    output = tmp_path / "mosaic.FIT"
     validated = subprocess.run(
         [
             sys.executable,
@@ -125,11 +137,11 @@ raise SystemExit(main(sys.argv[1:]))
             str(output),
             "--json",
         ],
-        check=True,
         capture_output=True,
         encoding="utf-8",
         timeout=60,
     )
+    assert validated.returncode == 0, validated.stderr
     assert validated.stderr == ""
     assert json.loads(validated.stdout) == {
         "schema_version": 1,
@@ -251,6 +263,14 @@ def test_project_command_failures_report_json_and_preserve_files(
     assert occupied["output"] == str(source)
     assert "already exists" in occupied["message"]
     assert source.read_bytes() == original_source
+
+    unsupported = tmp_path / "output.bin"
+    for command in (validate, export):
+        assert main([*command, "-o", str(unsupported)]) == 1
+        invalid_format = json.loads(capsys.readouterr().out)
+        assert invalid_format["status"] == "error"
+        assert invalid_format["message"] == "The FITS output path must end in .fits, .fit, or .fts."
+        assert not unsupported.exists() and not list(tmp_path.glob("*.part"))
 
     source.rename(tmp_path / "moved.fits")
     assert main(validate) == 1

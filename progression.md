@@ -1813,3 +1813,61 @@ Copy this format into a new entry immediately above this template, preserving ch
 - **Verified** The Windows source suite passed 261 tests with six documented skips. Poetry lock validation, Ruff, scoped mypy, and the local Markdown link check passed. The downloaded source ZIP matched the published checksum.
 - **Handoff** The desktop and CLI were built from the clean tagged source. Native desktop CPU and OpenGL checks and the packaged CLI passed the M13 plate-solve workflow. Confirmed launcher versions and SHA-256 hashes. [Release and build records](docs/windows-release.md#verification-status)
 - **Next** Complete clean-machine acceptance and native redistribution review before publishing portable Windows downloads. Continue with Phase 9A. [Distribution tracking](questions_open_topics.md#q-005---application-licensing-and-distribution-model)
+
+### 2026-11-26 - Architecture maintenance - Consolidated sky photo preparation
+
+- **Changed** Moved photo eligibility, profile resolution, ICC reservations and full-grid correction fitting into [photo preparation](src/astromosaic/pipeline/photo_preparation.py). The sky renderer keeps source and WCS validation, framing, tile sampling and output publication.
+- **Checked** The mixed-ICC control and SDSS M2 reproduced TIFF bytes, preview and detail samples and masks, WCS, peak reservations and fit diagnostics before and after the refactor. The M17 scientific FITS crop matched byte for byte. All 21 focused photo and preview tests passed, including aggregate ICC limits and cropped detail parity. Ruff and scoped mypy passed.
+- **Next** Complete the full Windows source suite. [Photo workflow](docs/phase-8.md#8c-photo-color-and-exposure-workflow)
+
+### 2026-11-26 - Architecture maintenance - Verified sky photo preparation
+
+- **Verified** The full Windows offscreen source suite passed 263 tests with six documented skips. Four require optional OpenCV and two require a native OpenGL desktop. Ruff across source, tests and tools and scoped mypy passed.
+- **Handoff** Verification covers the source checkout. The exact-output controls and the [photo workflow guide](docs/phase-8.md#8c-photo-color-and-exposure-workflow) document the shared preparation.
+
+### 2026-11-26 - Architecture maintenance - Unified live preview state
+
+- **Changed** Bound completed overviews to the project, layer, band and effective grid. Pending workers publish only to their own request. Detail follows the active overview identity. Crop Cancel restores its original overview and panel mutations are disabled during the draft.
+- **Fixed** Retained the selected sky band across transient panel inspection. The live preview rebuilds when that band is still available.
+- **Checked** All 21 focused offscreen tests and all four native Windows preview and viewport checks passed. Scoped mypy and Ruff passed. The existing composition highlight redraw issue is recorded in [Q-033](questions_open_topics.md#q-033---composition-overlap-highlight-at-detail-zoom).
+- **Next** Finish the full source suite and replay the real SDSS M2 detail, crop and photo workflow.
+
+### 2026-11-26 - Architecture maintenance - Verified live preview lifecycle
+
+- **Verified** The Windows offscreen source suite passed 266 tests and skipped four optional OpenCV cases and two native OpenGL cases. The native Windows run passed all four selected CPU and OpenGL tests, including both OpenGL skips. Ruff and scoped mypy passed. Preview state also ran with Qt imports blocked.
+- **Replayed** The native CPU view of real SDSS M2 data matched the resolved grid and tone at 1:1. A completed detail result was discarded after switching layers. Crop Cancel restored the original overview and the desktop photo TIFF matched the source reference byte for byte over 1,224,736 covered pixels.
+- **Handoff** Verification covers the Windows source checkout. The [live preview and crop guide](docs/phase-3c.md#adaptive-framing-and-interactive-crop) records the updated workflow. The composition highlight follow-up remains in [Q-033](questions_open_topics.md#q-033---composition-overlap-highlight-at-detail-zoom).
+
+### 2026-11-26 - Architecture maintenance - Separated sky preflight from render planning
+
+- **Changed** Shared input, WCS, layout and destination validation between sky preflight and rendering. Preflight returns panel count, crop dimensions and channel count after scientific metadata and refinement eligibility checks.
+- **Fixed** Preflight and export share the FITS suffix check for proposed scientific sky output. [Q-034](questions_open_topics.md#q-034---sky-preflight-output-suffix)
+- **Checked** Reproduced both the unsupported-suffix mismatch and the unnecessary footprint work. All 55 focused source tests passed after the change. The real M17 FITS and wide RGB ZEA/TIFF cases returned identical CLI JSON before and after.
+- **Next** Finish the full Windows source suite and the real photo and science output comparison.
+
+### 2026-11-26 - Architecture maintenance - Verified sky preflight and render parity
+
+- **Verified** The complete Windows offscreen source suite passed 266 tests with six skips. The native Windows run passed all four selected CPU and OpenGL tests, including both OpenGL skips. Four optional OpenCV cases were skipped. Ruff and scoped mypy passed.
+- **Replayed** M17 and wide RGB ZEA returned identical preflight JSON without creating output. The mixed-ICC and SDSS M2 photo exports and the M17 scientific FITS control matched their prior files byte for byte.
+- **Handoff** Verification covers the Windows source checkout. The [preflight documentation](docs/phase-4a.md#create-and-validate) and resolved [Q-034](questions_open_topics.md#q-034---sky-preflight-output-suffix) record the shared checks.
+
+### 2026-11-26 - Desktop maintenance - Fixed overlap highlighting at 1:1
+
+- **Changed** Applied the active overlap highlight to the overview and detail redraws in the viewport. The detail worker now delivers the original display frame. The viewport retains the displayed region and 1:1 label during either toggle.
+- **Verified** The framebuffer regression failed before the fix on CPU and OpenGL and passed after it. The Windows source run passed 27 focused tests with two OpenGL skips and five native CPU and OpenGL tests, including both skips. Ruff and scoped mypy passed.
+- **Replayed** The real Paranal composition matched the expected detail colors and coverage on native CPU and OpenGL in both toggle directions. A new detail computed while highlighting was enabled also restored the original colors on toggle off. The previous and current tint calculations matched in 273 tone cases.
+- **Handoff** Closed [Q-033](questions_open_topics.md#q-033---composition-overlap-highlight-at-detail-zoom). Verification covers the Windows source checkout.
+
+### 2026-11-26 - Desktop diagnosis - Measured panel import and sky preview latency
+
+- **Measured** On Windows 11 with an i5-14600K and RTX 4070, the current source opened the saved two-panel TIFF project and finished panel inspection in about 20–26 ms. Adding those two real 6000 × 4000 RGB TIFFs from an empty project took 2.53 s. The foreground check scanned all 48 million source pixels and spent 1.74 s in TIFF tile reads and conversion.
+- **Replayed** The native CPU viewport delivered its first proxy in 2.97–9.09 s and completed three previews in 11.13–18.29 s. The native OpenGL viewport delivered its first proxy in 2.60–2.95 s and completed two previews in 11.27–11.41 s. Each trial requested 232,030,391 source pixel positions across 240 TIFF windows, counting repeats. TIFF tile reads and conversion took 6.00–12.81 s. The three CPU M17 FITS control previews delivered a proxy in 71–115 ms. The OS file cache was managed by Windows throughout.
+- **Located** The compositor reads a bounding rectangle of source pixels for each output tile. Its coarse, tone-reference, and adaptive passes repeat this work. OpenGL uploads and draws the resulting raster. [Earlier PA4 measurements](docs/phase-6.md#local-zea-geometry-and-performance-results) · [Adaptive preview design](docs/adr/0027-adaptive-sky-preview.md)
+- **Next** Track bounded source reuse and separate first-frame and import timing in [Q-035](questions_open_topics.md#q-035---desktop-panel-import-and-sky-preview-latency). The local probe is `output/preview-load-diagnostic-20261126.py`. The comparison with PTGui uses the vendor's description of its OpenCL preview. [PTGui Panorama Editor](https://www.ptgui.com/whatsnew/110000)
+
+### 2026-11-26 - Desktop preview - Accelerated sky sampling with OpenGL compute
+
+- **Changed** Added worker-thread GPU interpolation for the sky overview, crop and 1:1 detail. Compatible contiguous TIFFs supply the requested source neighbors directly from the original file. No image cache is added. CPU interpolation remains available, and the scientific and photo export sampling continue through the CPU reference. [ADR-0031](docs/adr/0031-gpu-sky-preview-sampling.md)
+- **Measured** On the same RTX 4070, the two linear TIFFs took 2.43–2.70 s for the complete GPU overview and 0.11–0.30 s for the first proxy over three runs. They supplied 2.98 million neighboring source samples per run. The previous warmed OpenGL runs took 11.27–11.41 s. The original UInt16 TIFF pair took 14.45 s on the first measured run and 2.35 s on repeat. Windows managed the file cache in every run.
+- **Checked** The native Windows source matched CPU coverage and tone levels exactly for M17 FITS and the original PA4 TIFFs at overview and detail scales. Normalized RGB matched within `2e-7`. The real OpenGL close regression passed.
+- **Next** Verify the local beta 17 executable and track cold-read and foreground import latency separately in [Q-035](questions_open_topics.md#q-035---desktop-panel-import-and-sky-preview-latency).

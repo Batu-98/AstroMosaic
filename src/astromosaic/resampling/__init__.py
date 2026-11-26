@@ -1,5 +1,6 @@
 """Windowed, mask-aware bilinear sampling of original image data."""
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from math import ceil, floor
 from typing import cast
@@ -9,9 +10,15 @@ from numpy.typing import NDArray
 from scipy.ndimage import map_coordinates
 
 from astromosaic.core import Region, Tile
+from astromosaic.io import PanelSource, PointSampleSource
 
 _CENTER_TOLERANCE = 1e-7  # source pixels
 _SUPPORT_TOLERANCE = 1e-10
+
+type _Samples = tuple[NDArray[np.intp], NDArray[np.float64]]
+type PreviewInterpolator = Callable[
+    [NDArray[np.float64], NDArray[np.float32]], NDArray[np.float64] | None
+]
 
 
 @dataclass(frozen=True, slots=True)
@@ -54,7 +61,59 @@ def source_window(
     )
 
 
-def sample(tile: Tile, window: SamplingWindow) -> tuple[NDArray[np.intp], NDArray[np.float64]]:
+def _bilinear_points(
+    window: SamplingWindow,
+) -> tuple[NDArray[np.float64], NDArray[np.intp], NDArray[np.intp]]:
+    y, x = window.coordinates
+    row, column = y.astype(np.intp), x.astype(np.intp)
+    below = np.minimum(row + 1, window.region.height - 1)
+    right = np.minimum(column + 1, window.region.width - 1)
+    return (
+        np.column_stack((y - row, x - column)),
+        np.column_stack((row, row, below, below)),
+        np.column_stack((column, right, column, right)),
+    )
+
+
+def _interpolate_preview(
+    interpolate: PreviewInterpolator,
+    window: SamplingWindow,
+    fraction: NDArray[np.float64],
+    pixels: NDArray[np.float32],
+) -> _Samples | None:
+    result = interpolate(fraction, pixels)
+    if result is None:
+        return None
+    has_support = result[:, 0] >= 1 - _SUPPORT_TOLERANCE
+    channels = pixels.shape[-1]
+    values = result[has_support, 1 : channels + 1]
+    return window.indices[has_support], values[:, 0] if channels == 1 else values
+
+
+def sample_source_points(
+    source: PanelSource, window: SamplingWindow, interpolate: PreviewInterpolator
+) -> _Samples | None:
+    if not isinstance(source, PointSampleSource):
+        return None
+    fraction, rows, columns = _bilinear_points(window)
+    pixels = source.read_sample_pixels(rows + window.region.y, columns + window.region.x)
+    if pixels is None:
+        return None
+    return _interpolate_preview(interpolate, window, fraction, pixels)
+
+
+def sample(
+    tile: Tile, window: SamplingWindow, *, interpolate: PreviewInterpolator | None = None
+) -> _Samples:
+    if interpolate is not None:
+        fraction, rows, columns = _bilinear_points(window)
+        pixels = tile.pixels[rows, columns]
+        pixels[~tile.valid[rows, columns]] = np.nan
+        if pixels.ndim == 2:
+            pixels = pixels[..., None]
+        accelerated = _interpolate_preview(interpolate, window, fraction, pixels)
+        if accelerated is not None:
+            return accelerated
     support = map_coordinates(
         tile.valid, window.coordinates, order=1, output=np.float64, prefilter=False
     )

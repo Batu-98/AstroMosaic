@@ -2,7 +2,8 @@
 
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from contextlib import ExitStack, contextmanager
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, replace
+from functools import partial
 from importlib.metadata import version
 from math import isfinite, isqrt
 from pathlib import Path
@@ -30,15 +31,20 @@ from astromosaic.geometry import (
 )
 from astromosaic.geometry.footprint import PixelBounds, raster_bounds, tan_footprint, zea_footprint
 from astromosaic.io import TIFF_SUFFIXES, XISF_SUFFIX, PanelSource, SkyMask, open_panel
-from astromosaic.io.fits_export import open_fits_mosaic
+from astromosaic.io.fits_export import open_fits_mosaic, validate_fits_output_suffix
 from astromosaic.photometry import PanelCorrection
 from astromosaic.photometry.photo import PhotoTone, encode_photo_tile, preview_levels
-from astromosaic.photometry.photo_settings import PhotoProfile, PhotoSettings, validate_photo_ev
 from astromosaic.pipeline.framing import FRAME_LOCKS, FrameLock, fit_preview_grid
-from astromosaic.pipeline.photo_color import PhotoTileSource, resolve_photo_profile
-from astromosaic.pipeline.photo_fit import PhotoPanel, PhotoReport, prepare_photo_fit
-from astromosaic.pipeline.refinement import RefinementReport, RefinementSpec, refine_panels
-from astromosaic.resampling import sample, source_window
+from astromosaic.pipeline.photo_fit import PhotoPanel, PhotoReport
+from astromosaic.pipeline.photo_preparation import PhotoInputs as PhotoInputs
+from astromosaic.pipeline.photo_preparation import PhotoPreparation, SkyRenderIntent
+from astromosaic.pipeline.refinement import (
+    RefinementReport,
+    RefinementSpec,
+    refine_panels,
+    validate_refinement_inputs,
+)
+from astromosaic.resampling import PreviewInterpolator, sample, sample_source_points, source_window
 
 MIB = 1024**2
 DEFAULT_WORKING_BYTES = 64 * MIB
@@ -103,6 +109,14 @@ class RenderSpec:
 
 
 @dataclass(frozen=True, slots=True)
+class SkyPreflight:
+    panels: int
+    width: int
+    height: int
+    channels: int
+
+
+@dataclass(frozen=True, slots=True)
 class MosaicResult:
     width: int
     height: int
@@ -122,13 +136,6 @@ class PhotoExport:
     tone: PhotoTone | None
     auto_frame: bool = False
     frame_locks: frozenset[FrameLock] = frozenset()
-
-
-@dataclass(frozen=True, slots=True)
-class PhotoInputs:
-    settings: PhotoSettings = PhotoSettings()
-    profiles: Mapping[int, PhotoProfile] = field(default_factory=dict)
-    exposure_ev: Mapping[int, float] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True, eq=False)
@@ -366,6 +373,7 @@ def _try_tile[P: _RasterPanel](
     budget: _WorkingBudget,
     context: JobContext,
     channels: int,
+    interpolate: PreviewInterpolator | None = None,
 ) -> _RenderedTile | None:
     count = region.width * region.height
     output_bytes = _TILE_FIXED_BYTES + count * (_OUTPUT_BYTES_PER_PIXEL + 64 * (channels - 1))
@@ -388,15 +396,21 @@ def _try_tile[P: _RasterPanel](
         window = source_window(px, py, usable, descriptor.width, descriptor.height)
         if window is None:
             continue
-        reserved_bytes = output_bytes + panel.source.tile_bytes(window.region)
-        if not budget.reserve(reserved_bytes):
-            return None
         try:
-            tile = panel.source.read_tile(window.region)
+            sampled = (
+                sample_source_points(panel.source, window, interpolate)
+                if interpolate is not None else None
+            )
+            if sampled is None:
+                reserved_bytes = output_bytes + panel.source.tile_bytes(window.region)
+                if not budget.reserve(reserved_bytes):
+                    return None
+                tile = panel.source.read_tile(window.region)
+                sampled = sample(tile, window, interpolate=interpolate)
+                del tile
         except (OSError, ValueError) as error:
             raise ValueError(f"{panel.name}: {error}") from error
-        indices, values = sample(tile, window)
-        del tile
+        indices, values = sampled
         if correction is not None:
             correction.apply(values, px[indices], py[indices], descriptor.width, descriptor.height)
 
@@ -475,6 +489,11 @@ class _RasterPlan:
     profile_bytes: int = 0
     photo: PhotoReport | None = None
 
+    def peak_reserved_bytes(self, raster_peak: int) -> int:
+        if self.photo is not None:
+            return max(raster_peak, self.profile_bytes + self.photo.peak_fit_bytes)
+        return raster_peak
+
     def tiles(
         self, width: int, height: int, budget: _WorkingBudget, context: JobContext,
         *, window: Region | None = None,
@@ -521,6 +540,7 @@ class _PreparedMosaic:
         *,
         origin: tuple[int, int] = (0, 0),
         sky_height: int | None = None,
+        interpolate: PreviewInterpolator | None = None,
     ) -> _RenderedTile | None:
         candidates: Iterable[_Panel] = self.panels
         if self.footprint_bytes or sky_height is not None:
@@ -554,11 +574,14 @@ class _PreparedMosaic:
 
             return locate
 
-        return _try_tile(region, candidates, make_mapper, budget, context, self.channels)
+        return _try_tile(region, candidates, make_mapper, budget, context, self.channels, interpolate)
 
-    def raster(self) -> _RasterPlan:
+    def raster(self, interpolate: PreviewInterpolator | None = None) -> _RasterPlan:
+        render_tile = self.try_tile if interpolate is None else partial(
+            self.try_tile, interpolate=interpolate
+        )
         return _RasterPlan(
-            self.try_tile,
+            render_tile,
             len(self.panels),
             self.channels,
             self.header,
@@ -578,11 +601,21 @@ def _output_format(path: Path) -> str:
         return "TIFF"
     if suffix == XISF_SUFFIX:
         return "XISF"
+    validate_fits_output_suffix(path)
     return "FITS"
 
 
+@dataclass(frozen=True, slots=True)
+class _OpenedSky:
+    panels: list[_Panel]
+    crop: Region
+    channels: int
+    photo_preparation: PhotoPreparation
+    photo_panels: list[PhotoPanel]
+
+
 @contextmanager
-def _prepare_mosaic(
+def _open_sky_mosaic(
     paths: Sequence[Path],
     spec: RenderSpec,
     destination: Path | None,
@@ -596,11 +629,9 @@ def _prepare_mosaic(
     context: JobContext,
     filter_overrides: Mapping[int, str] | None = None,
     auto_frame: bool = False,
-    intent: Literal["scientific", "preview", "photo"] = "scientific",
-    frame_locks: frozenset[FrameLock] = frozenset(),
-    inspect_crop: bool = False,
+    intent: SkyRenderIntent = "scientific",
     photo_inputs: PhotoInputs | None = None,
-) -> Iterator[_PreparedMosaic]:
+) -> Iterator[_OpenedSky]:
     if not paths:
         raise ValueError("Supply at least one FITS, TIFF, or XISF panel.")
     weights = [1.0] * len(paths) if weights is None else weights
@@ -615,22 +646,20 @@ def _prepare_mosaic(
         raise ValueError("Filter override indices must refer to input panels.")
 
     crop = spec.output_region()
-    format_name = _output_format(destination) if destination is not None else None
     photo = intent == "photo"
-    visual_allowed = intent != "scientific"
-    photo_inputs = photo_inputs if photo_inputs is not None else PhotoInputs()
-    if any(index not in range(len(paths)) for index in (*photo_inputs.profiles, *photo_inputs.exposure_ev)):
-        raise ValueError("Photo settings indices must refer to input panels.")
+    photo_preparation = PhotoPreparation(
+        photo_inputs, panel_count=len(paths), intent=intent, max_working_bytes=spec.max_working_bytes
+    )
+    visual_allowed = photo_preparation.visual_allowed
+    format_name = None
     if destination is not None:
-        if photo and format_name != "TIFF":
+        if photo and destination.suffix.lower() not in TIFF_SUFFIXES:
             raise ValueError("Photo mosaic output requires a .tif or .tiff destination.")
+        format_name = _output_format(destination)
         if not photo and crop.width * crop.height * 5 > spec.max_output_bytes:
             raise ValueError(f"The {format_name} mosaic exceeds the configured output byte limit.")
         if destination.exists() or destination.is_symlink():
             raise FileExistsError(f"The output file already exists: {destination}")
-    report = None
-    photo_report = None
-    profile_bytes = 0
     with ExitStack() as inputs:
         panels = []
         for index, (path, weight) in enumerate(zip(paths, weights, strict=True)):
@@ -647,10 +676,7 @@ def _prepare_mosaic(
                     )
                 )
                 descriptor = source.descriptor
-                if source.photo_metadata is not None and source.photo_metadata.embedded_icc is not None:
-                    profile_bytes += len(source.photo_metadata.embedded_icc)
-                    if profile_bytes > spec.max_working_bytes // 4:
-                        raise ValueError("The embedded ICC profiles exceed the working byte budget.")
+                photo_preparation.reserve_embedded_profile(source)
                 provenance = {
                     "tiff-description": "TIFF description WCS",
                     "xisf-fits-keywords": "XISF FITS keywords",
@@ -684,39 +710,11 @@ def _prepare_mosaic(
                 _Panel(path.name, source, geometry, weight, provenance, rms_arcsec=rms_arcsec)
             )
 
-        visual = photo or (visual_allowed and (
-            photo_inputs.settings.profile.mode != "auto" or bool(photo_inputs.profiles)
-            or any(
-                panel.source.descriptor.icc_encoding is not None
-                or (panel.source.photo_metadata is not None and panel.source.photo_metadata.exif_srgb)
-                for panel in panels
-            )
-        ))
-        photo_panels: list[PhotoPanel] = []
-        if visual:
-            for index, (path, panel) in enumerate(zip(paths, panels, strict=True)):
-                context.check_cancelled()
-                assignment = photo_inputs.profiles.get(index)
-                ev = photo_inputs.exposure_ev.get(index, 0.0)
-                try:
-                    validate_photo_ev(ev)
-                    color = resolve_photo_profile(panel.source, assignment, photo_inputs.settings.profile)
-                    if color.matrix_profile is not None and (
-                        panel.source.photo_metadata is None
-                        or color.matrix_profile is not panel.source.photo_metadata.embedded_icc
-                    ):
-                        profile_bytes += len(color.matrix_profile)
-                        if profile_bytes > spec.max_working_bytes // 4:
-                            raise ValueError("The assigned ICC profiles exceed the working byte budget.")
-                except (OSError, ValueError) as error:
-                    raise ValueError(f"{path.name} {error}") from error
-                source = PhotoTileSource(panel.source, color, spec.max_working_bytes)
-                photo_panels.append(PhotoPanel(path, source, panel.geometry, color, ev))
-            if refinement is not None:
-                activity = "photo export" if photo else "preview"
-                raise ValueError(
-                    f"Disable relative refinement in Mosaic Settings for sRGB {activity}."
-                )
+        photo_panels = photo_preparation.prepare_panels(
+            ((path, panel.source, panel.geometry) for path, panel in zip(paths, panels, strict=True)),
+            context,
+            refinement_requested=refinement is not None,
+        )
         layout = panels[0].source.descriptor.channel_layout
         if any(panel.source.descriptor.channel_layout != layout for panel in panels):
             raise ValueError("Supply either all mono or all RGB panels.")
@@ -728,7 +726,100 @@ def _prepare_mosaic(
                 raise ValueError(
                     f"The {format_name} mosaic exceeds the configured output byte limit."
                 )
+        yield _OpenedSky(panels, crop, channels, photo_preparation, photo_panels)
 
+
+def preflight_sky_mosaic(
+    paths: Sequence[Path],
+    spec: RenderSpec,
+    destination: Path | None = None,
+    *,
+    weights: Sequence[float] | None = None,
+    filter_name: str | None = None,
+    assume_surface_brightness: bool = False,
+    sky_masks: Mapping[int, SkyMask] | None = None,
+    wcs_sidecars: Mapping[int, Path] | None = None,
+    refinement: RefinementSpec | None = None,
+    context: JobContext = DEFAULT_JOB_CONTEXT,
+    filter_overrides: Mapping[int, str] | None = None,
+    photo_inputs: PhotoInputs | None = None,
+) -> SkyPreflight:
+    """Check scientific sky metadata and refinement eligibility without preparing tiles."""
+    with _open_sky_mosaic(
+        paths,
+        spec,
+        destination,
+        weights=weights,
+        filter_name=filter_name,
+        assume_surface_brightness=assume_surface_brightness,
+        sky_masks=sky_masks,
+        wcs_sidecars=wcs_sidecars,
+        refinement=None,
+        context=context,
+        filter_overrides=filter_overrides,
+        photo_inputs=photo_inputs,
+    ) as sky:
+        # Check that the calibrated metadata can be represented in the export header.
+        _export_header(
+            spec.output_wcs(),
+            sky.panels,
+            filter_name,
+            assume_surface_brightness,
+            filter_overrides or {},
+            paths,
+        )
+        if refinement is not None:
+            validate_refinement_inputs([panel.source for panel in sky.panels])
+        context.check_cancelled()
+        return SkyPreflight(len(sky.panels), sky.crop.width, sky.crop.height, sky.channels)
+
+
+@contextmanager
+def _prepare_mosaic(
+    paths: Sequence[Path],
+    spec: RenderSpec,
+    destination: Path | None,
+    *,
+    weights: Sequence[float] | None,
+    filter_name: str | None,
+    assume_surface_brightness: bool,
+    sky_masks: Mapping[int, SkyMask] | None,
+    wcs_sidecars: Mapping[int, Path] | None,
+    refinement: RefinementSpec | None,
+    context: JobContext,
+    filter_overrides: Mapping[int, str] | None = None,
+    auto_frame: bool = False,
+    intent: SkyRenderIntent = "scientific",
+    frame_locks: frozenset[FrameLock] = frozenset(),
+    inspect_crop: bool = False,
+    photo_inputs: PhotoInputs | None = None,
+) -> Iterator[_PreparedMosaic]:
+    photo = intent == "photo"
+    filter_overrides = filter_overrides if filter_overrides is not None else {}
+    sky_masks = sky_masks if sky_masks is not None else {}
+    with _open_sky_mosaic(
+        paths,
+        spec,
+        destination,
+        weights=weights,
+        filter_name=filter_name,
+        assume_surface_brightness=assume_surface_brightness,
+        sky_masks=sky_masks,
+        wcs_sidecars=wcs_sidecars,
+        refinement=refinement,
+        context=context,
+        filter_overrides=filter_overrides,
+        auto_frame=auto_frame,
+        intent=intent,
+        photo_inputs=photo_inputs,
+    ) as sky:
+        panels = sky.panels
+        crop = sky.crop
+        channels = sky.channels
+        photo_preparation = sky.photo_preparation
+        photo_panels = sky.photo_panels
+        report = None
+        photo_report = None
         framing = None
         if auto_frame or inspect_crop:
             regions = []
@@ -755,20 +846,13 @@ def _prepare_mosaic(
 
         if photo and crop.width * crop.height * 8 > spec.max_output_bytes:
             raise ValueError("The photo TIFF exceeds the configured output byte limit.")
-        if visual:
-            fit_target = (
-                target if spec.crop is None or photo_inputs.settings.brightness == "off"
-                else PanelGeometry(replace(spec, crop=None).output_wcs(), ICRS())
-            )
-            corrections, photo_report = prepare_photo_fit(
-                photo_panels, photo_inputs.settings, fit_target, spec.size,
-                spec.max_working_bytes - profile_bytes, context,
-            )
+        if photo_panels:
+            corrections, photo_report = photo_preparation.fit(photo_panels, spec, target, context)
             panels = [
                 replace(panel, source=item.source, correction=correction)
                 for panel, item, correction in zip(panels, photo_panels, corrections, strict=True)
             ]
-        if visual and not photo:
+        if photo_panels and not photo:
             band, _ = _common_band(
                 [panel.source for panel in panels], filter_name, filter_overrides
             )
@@ -823,10 +907,10 @@ def _prepare_mosaic(
                     footprint_bytes += _FOOTPRINT_BYTES_PER_PANEL
                     panels[index] = replace(panel, footprint=footprint)
         yield _PreparedMosaic(
-            target, panels, channels, header, size, spec, report, footprint_bytes, visual,
+            target, panels, channels, header, size, spec, report, footprint_bytes, bool(photo_panels),
             framing.suggested_crop if framing is not None else None,
             framing.suggested_rotation if framing is not None else None,
-            profile_bytes, photo_report,
+            photo_preparation.profile_bytes, photo_report,
         )
 
 
@@ -970,8 +1054,7 @@ def _write_raster(
         covered,
         mosaic.panel_count,
         tiles,
-        max(budget.peak, mosaic.profile_bytes + mosaic.photo.peak_fit_bytes)
-        if mosaic.photo is not None else budget.peak,
+        mosaic.peak_reserved_bytes(budget.peak),
         rejected,
         refinement=mosaic.refinement,
         common_pixels=common if layers else None,
@@ -1039,8 +1122,7 @@ def _preview_frame(
         Tile(origin, pixels, valid),
         mosaic.size,
         mosaic.output_wcs.deepcopy() if mosaic.output_wcs is not None else None,
-        max(frame_bytes + budget.peak, mosaic.profile_bytes + mosaic.photo.peak_fit_bytes)
-        if mosaic.photo is not None else frame_bytes + budget.peak,
+        mosaic.peak_reserved_bytes(frame_bytes + budget.peak),
         common,
         mosaic.seam_width,
         photo=mosaic.photo,
@@ -1141,6 +1223,7 @@ def preview_mosaic(
     window: Region | None = None,
     inspect_crop: bool = False,
     photo_inputs: PhotoInputs | None = None,
+    interpolate: PreviewInterpolator | None = None,
 ) -> PreviewFrame:
     """Sample the saved or fitted sky grid without opening an output file."""
     with _prepare_mosaic(
@@ -1161,7 +1244,7 @@ def preview_mosaic(
         inspect_crop=inspect_crop,
         photo_inputs=photo_inputs,
     ) as mosaic:
-        raster = mosaic.raster()
+        raster = mosaic.raster(interpolate)
         if window is not None:
             return replace(_preview_detail(raster, window, context), visual_only=mosaic.visual_only)
         return replace(_preview_raster(

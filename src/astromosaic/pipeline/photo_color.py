@@ -12,7 +12,7 @@ from numpy.typing import NDArray
 from scipy.ndimage import maximum_filter
 
 from astromosaic.core import Region, Tile
-from astromosaic.io import PanelSource
+from astromosaic.io import PanelSource, PointSampleSource
 from astromosaic.io.icc import is_matrix_profile, is_srgb_profile
 from astromosaic.photometry.photo_settings import PhotoProfile
 
@@ -164,6 +164,14 @@ class PhotoTileSource:
     def read_tile(self, region: Region, *, halo: int = 0) -> Tile:
         actual = region.with_halo(self.descriptor.width, self.descriptor.height, halo)
         return self._read(actual, photometry=False)
+
+    def read_sample_pixels(
+        self, rows: NDArray[np.intp], columns: NDArray[np.intp]
+    ) -> NDArray[np.float32] | None:
+        if self._color.method == "matrix-icc" or not isinstance(self._source, PointSampleSource):
+            return None
+        pixels = self._source.read_sample_pixels(rows, columns)
+        return self._color.decode(pixels) if pixels is not None else None
 
     def read_photometry_tile(self, region: Region) -> Tile:
         return self._read(region, photometry=True)

@@ -16,6 +16,7 @@ from astromosaic.core import Region
 from astromosaic.core.job import JobContext, MosaicCancelled
 from astromosaic.io import open_panel
 from astromosaic.pipeline.mosaic import RenderSpec
+from astromosaic.pipeline.refinement import RefinementSpec
 from astromosaic.storage.project import (
     FileReference,
     MosaicProject,
@@ -176,6 +177,12 @@ def test_band_preflight_reports_bad_membership_units_and_layout(tmp_path: Path) 
         validate_project_sky(project, context, band="h-alpha")
     with pytest.raises(ValueError, match="RGB mosaics require"):
         validate_project_sky(project, context, tmp_path / "rgb.fits", band="O III")
+    refined = replace(project, refinement=RefinementSpec())
+    with pytest.raises(ValueError, match="Relative refinement currently requires mono panels"):
+        validate_project_sky(refined, context, band="O III")
+    mono = replace(refined, panels=refined.panels[:1])
+    with pytest.raises(ValueError, match="Relative refinement requires at least two panels"):
+        validate_project_sky(mono, context, band="H-alpha")
     with pytest.raises(ValueError, match="requires the sky layer"):
         render_project_layer(project, "composition", tmp_path / "bad.tiff", context, band="O III")
     mixed = replace(project.panels[1], band_override="H-alpha")

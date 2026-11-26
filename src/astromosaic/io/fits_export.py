@@ -13,6 +13,11 @@ from astromosaic.io.raster import RasterMosaicWriter
 _FITS_BLOCK_SIZE = 2880
 
 
+def validate_fits_output_suffix(path: Path) -> None:
+    if path.suffix.lower() not in {".fits", ".fit", ".fts"}:
+        raise ValueError("The FITS output path must end in .fits, .fit, or .fts.")
+
+
 def _padded_size(size: int) -> int:
     return ((size + _FITS_BLOCK_SIZE - 1) // _FITS_BLOCK_SIZE) * _FITS_BLOCK_SIZE
 
@@ -39,8 +44,7 @@ def open_fits_mosaic(
 ) -> Iterator[RasterMosaicWriter]:
     """Publish only after all tiles are written and flushed, without replacing an existing file."""
     path = path.absolute()
-    if path.suffix.lower() not in {".fits", ".fit", ".fts"}:
-        raise ValueError("The FITS output path must end in .fits, .fit, or .fts.")
+    validate_fits_output_suffix(path)
 
     primary = fits.PrimaryHDU(header=header).header
     primary.set("EXTEND", True, after="NAXIS")

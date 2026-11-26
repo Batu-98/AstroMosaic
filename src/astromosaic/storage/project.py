@@ -88,11 +88,14 @@ from astromosaic.pipeline.mosaic import (
     _preview_raster,
     _RasterPlan,
     _write_raster,
+    preflight_sky_mosaic,
     preview_mosaic,
     render_mosaic,
     sky_band_label,
 )
-from astromosaic.pipeline.refinement import RefinementSpec, validate_refinement_inputs
+from astromosaic.pipeline.mosaic import SkyPreflight as SkyPreflight
+from astromosaic.pipeline.refinement import RefinementSpec
+from astromosaic.resampling import PreviewInterpolator
 
 _TAN_SCHEMA_VERSION = 4
 _PROJECTION_SCHEMA_VERSION = 5
@@ -635,14 +638,6 @@ def _verified_inputs(
     return inputs
 
 
-@dataclass(frozen=True, slots=True)
-class SkyPreflight:
-    panels: int
-    width: int
-    height: int
-    channels: int
-
-
 def validate_project_sky(
     project: MosaicProject,
     context: JobContext,
@@ -654,15 +649,12 @@ def validate_project_sky(
     project.validate()
     if destination is not None and not destination.parent.is_dir():
         raise FileNotFoundError(f"The output directory does not exist: {destination.parent}")
-    inputs = _verified_inputs(project, context, band)
-    inputs["refinement"] = None
-    with _prepare_mosaic(
-        spec=project.render, destination=destination, context=context, **inputs
-    ) as sky:
-        if project.refinement is not None:
-            validate_refinement_inputs([panel.source for panel in sky.panels])
-        width, height = sky.size
-        return SkyPreflight(len(sky.panels), width, height, sky.channels)
+    return preflight_sky_mosaic(
+        spec=project.render,
+        destination=destination,
+        context=context,
+        **_verified_inputs(project, context, band),
+    )
 
 
 def render_project(
@@ -709,6 +701,7 @@ def preview_project(
     grid: RenderSpec | None = None,
     window: Region | None = None,
     inspect_crop: bool = False,
+    interpolate: PreviewInterpolator | None = None,
 ) -> PreviewFrame:
     return preview_mosaic(
         spec=grid if grid is not None else project.render,
@@ -720,6 +713,7 @@ def preview_project(
         adaptive_edge=adaptive_edge,
         window=window,
         inspect_crop=inspect_crop,
+        interpolate=interpolate,
         **_verified_inputs(project, context, band, use_photo=allow_visual),
     )
 

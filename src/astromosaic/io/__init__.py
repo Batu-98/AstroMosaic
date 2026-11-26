@@ -4,10 +4,11 @@ from collections.abc import Iterator
 from contextlib import AbstractContextManager, contextmanager
 from dataclasses import replace
 from pathlib import Path
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 import numpy as np
 from astropy.io.fits import Header
+from numpy.typing import NDArray
 
 from astromosaic.core import PanelDescriptor, Region, SourceFingerprint, Tile
 from astromosaic.core.masks import FOREGROUND, SKY, SourceMask
@@ -32,6 +33,13 @@ class PanelSource(Protocol):
     def photo_metadata(self) -> "TiffPhotoMetadata | None": ...
     def tile_bytes(self, region: Region) -> int: ...
     def read_tile(self, region: Region, *, halo: int = 0) -> Tile: ...
+
+
+@runtime_checkable
+class PointSampleSource(Protocol):
+    def read_sample_pixels(
+        self, rows: NDArray[np.intp], columns: NDArray[np.intp]
+    ) -> NDArray[np.float32] | None: ...
 
 
 class _ContentSelectedSource:

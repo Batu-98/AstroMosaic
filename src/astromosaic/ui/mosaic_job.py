@@ -38,7 +38,6 @@ from astromosaic.pipeline.mosaic import (
     SkyCalibrationError,
     SkyCalibrationRequirement,
 )
-from astromosaic.pipeline.photo_fit import PhotoReport
 from astromosaic.storage.project import (
     Layer,
     MosaicProject,
@@ -56,6 +55,8 @@ from astromosaic.storage.project import (
     render_project_photo,
     solve_project_panels,
 )
+from astromosaic.ui.preview_compute import create_preview_surface, open_preview_sampler
+from astromosaic.ui.preview_state import PreviewOverview, PreviewRequest, PreviewResult
 
 
 class BackgroundJob[Result](QThread):
@@ -253,80 +254,86 @@ class MosaicJob(_ProjectJob[MosaicResult]):
         )
 
 
-class PreviewJob(_ProjectJob[DisplayFrame]):
+class PreviewJob(_ProjectJob[PreviewResult]):
     proxy_ready = Signal(object, bool)
     label = "preview"
     progress_label = "Previewing"
 
     def __init__(
         self,
-        project: MosaicProject,
+        request: PreviewRequest,
         parent: QObject,
-        layer: Layer = "sky",
         *,
-        band: str | None = None,
         adaptive_edge: int | None = None,
-        crop_grid: RenderSpec | None = None,
+        use_gpu: bool = False,
     ) -> None:
-        super().__init__(project, parent)
-        self.layer = layer
-        self.band = band
-        self.fitted_grid: RenderSpec | None = None
-        self.visual_only = False
-        self.photo_report: PhotoReport | None = None
+        super().__init__(request.selection.project, parent)
+        self.request = request
         self.adaptive_edge = adaptive_edge
-        self.crop_grid = crop_grid
-        self.suggested_crop: Region | None = None
-        self.suggested_rotation: float | None = None
+        self.gpu_sampled = False
+        self._surface = create_preview_surface(
+            self, enabled=use_gpu and request.selection.layer == "sky"
+        )
 
     def _publish_proxy(self, preview: PreviewFrame) -> None:
         self.proxy_ready.emit(normalize_preview(preview), preview.visual_only)
 
-    def perform(self, context: JobContext) -> DisplayFrame:
-        preview = (
-            preview_project(
-                self.project, context, self._publish_proxy, band=self.band, allow_visual=True,
+    def perform(self, context: JobContext) -> PreviewResult:
+        selection = self.request.selection
+        crop_grid = self.request.crop_grid
+        if selection.layer == "sky":
+            with open_preview_sampler(self._surface) as sampler:
+                preview = preview_project(
+                    self.project, context, self._publish_proxy, band=selection.band,
+                    allow_visual=True,
+                    adaptive_edge=self.adaptive_edge, grid=crop_grid,
+                    inspect_crop=crop_grid is not None, interpolate=sampler,
+                )
+                self.gpu_sampled = sampler is not None and sampler.used
+        else:
+            preview = preview_project_layer(
+                self.project, selection.layer, context, self._publish_proxy, band=selection.band,
                 adaptive_edge=self.adaptive_edge,
-                grid=replace(self.crop_grid, crop=None) if self.crop_grid is not None else None,
-                inspect_crop=self.crop_grid is not None,
             )
-            if self.layer == "sky"
-            else preview_project_layer(
-                self.project, self.layer, context, self._publish_proxy, band=self.band,
-                adaptive_edge=self.adaptive_edge,
-            )
-        )
         frame = normalize_preview(preview)
         context.check_cancelled()
-        self.fitted_grid = preview.fitted_grid
-        self.visual_only = preview.visual_only
-        self.photo_report = preview.photo
-        self.suggested_crop = preview.suggested_crop
-        self.suggested_rotation = preview.suggested_rotation
-        return frame
+        return PreviewResult(
+            frame,
+            visual_only=preview.visual_only,
+            fitted_grid=preview.fitted_grid,
+            suggested_crop=preview.suggested_crop,
+            suggested_rotation=preview.suggested_rotation,
+            photo=preview.photo,
+            overview_edge=self.adaptive_edge or 0,
+        )
 
 
 class PreviewDetailJob(_ProjectJob[DisplayFrame]):
     def __init__(
-        self, project: MosaicProject, parent: QObject, layer: Layer, window: Region,
-        levels: tuple[float, float], *, band: str | None, grid: RenderSpec | None,
+        self, overview: PreviewOverview, parent: QObject, window: Region, *, use_gpu: bool = False
     ) -> None:
-        super().__init__(project, parent)
-        self.layer = layer
+        super().__init__(overview.selection.project, parent)
+        self.overview = overview
         self.window = window
-        self.levels = levels
-        self.band = band
-        self.grid = grid
+        self.gpu_sampled = False
+        self._surface = create_preview_surface(
+            self, enabled=use_gpu and overview.selection.layer == "sky"
+        )
 
     def perform(self, context: JobContext) -> DisplayFrame:
-        if self.layer == "sky":
-            frame = preview_project(
-                self.project, context, band=self.band, grid=self.grid, window=self.window,
-                allow_visual=True,
-            )
+        selection = self.overview.selection
+        levels = self.overview.frame.tone_levels
+        assert levels is not None
+        if selection.layer == "sky":
+            with open_preview_sampler(self._surface) as sampler:
+                frame = preview_project(
+                    self.project, context, band=selection.band, grid=self.overview.grid,
+                    window=self.window, allow_visual=True, interpolate=sampler,
+                )
+                self.gpu_sampled = sampler is not None and sampler.used
         else:
-            frame = preview_project_layer(self.project, self.layer, context, window=self.window)
-        display = normalize_preview(frame, levels=self.levels)
+            frame = preview_project_layer(self.project, selection.layer, context, window=self.window)
+        display = normalize_preview(frame, levels=levels)
         context.check_cancelled()
         return display
 

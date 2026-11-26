@@ -1,5 +1,6 @@
 import os
 from dataclasses import replace
+from pathlib import Path
 from typing import cast
 
 import numpy as np
@@ -153,3 +154,96 @@ def test_sky_viewport_pixels_pan_zoom_and_stretch(
         viewport.close()
         viewport.deleteLater()
         app.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+
+
+@pytest.mark.parametrize("use_gpu", [False, True], ids=["cpu", "opengl"])
+def test_overlap_toggle_recolors_the_displayed_detail(
+    use_gpu: bool, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    pytest.importorskip("PySide6")
+    if use_gpu and os.environ.get("ASTROMOSAIC_TEST_OPENGL") != "1":
+        pytest.skip("Set ASTROMOSAIC_TEST_OPENGL=1 on a native desktop with OpenGL 3.2.")
+
+    from PySide6.QtCore import QEvent, QSettings
+    from PySide6.QtWidgets import QApplication
+
+    from astromosaic.ui.preview_gl import BACKGROUND_RGB, OpenGLPreview
+    from astromosaic.ui.preview_state import PreviewResult
+    from astromosaic.ui.project_window import ProjectWindow
+
+    if not use_gpu and "QT_QPA_PLATFORM" not in os.environ:
+        monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
+    app = cast(QApplication | None, QApplication.instance()) or QApplication([])
+    quit_on_close = app.quitOnLastWindowClosed()
+    app.setQuitOnLastWindowClosed(False)
+    window = ProjectWindow(
+        use_gpu=use_gpu,
+        preferences=QSettings(str(tmp_path / "preferences.ini"), QSettings.Format.IniFormat),
+    )
+    viewport = window.viewport
+    window.layer_box.setCurrentText("Composition")
+
+    rgba = np.full((2, 4, 4), 0.4, dtype=np.float32)
+    rgba[..., 3] = 1
+    rgba[0, 3, 3] = 0
+    common = np.array([[True, True, False, False], [False] * 4])
+    overview = DisplayFrame((4, 2), rgba, True, common_coverage=common)
+    region = Region(1, 0, 3, 1)
+    detail = DisplayFrame(
+        overview.output_size,
+        np.array([[[0.25, 0.25, 0.25, 1], [0.15, 0.15, 0.15, 1], [0, 0, 0, 0]]], np.float32),
+        True,
+        common_coverage=common[region.slices],
+    )
+
+    def row_colors() -> list[tuple[int, int, int]]:
+        app.processEvents()
+        canvas = viewport.canvas
+        image = (
+            canvas.grabFramebuffer() if isinstance(canvas, OpenGLPreview) else canvas.grab().toImage()
+        )
+        assert not image.isNull()
+        rect = viewport.image_rect()
+        y = int((rect.y() + rect.height() / 4) * image.height() / canvas.height())
+        colors = []
+        for column in range(4):
+            color = image.pixelColor(
+                int((rect.x() + rect.width() * (column + 0.5) / 4) * image.width() / canvas.width()),
+                y,
+            )
+            colors.append((color.red(), color.green(), color.blue()))
+        return colors
+
+    try:
+        secondary = next((screen for screen in app.screens() if screen != app.primaryScreen()), None)
+        if secondary is not None:
+            window.move(secondary.availableGeometry().center() - window.rect().center())
+        window.show()
+        selection = window._preview_selection()
+        state = window._preview_state
+        assert state.complete(state.start(selection), selection, PreviewResult(overview)) is not None
+        window._update_preview_view()
+        viewport.midtones.setValue(37)
+        viewport.set_detail(region, detail)
+        before = row_colors()
+        rect = viewport.image_rect()
+        assert viewport.backend == ("OpenGL" if use_gpu else "CPU")
+        assert before[0] != before[1] and before[3] == BACKGROUND_RGB
+        assert window.overlap_check.isEnabled()
+
+        window.overlap_check.click()
+        highlighted = row_colors()
+        assert highlighted[0] != before[0]
+        np.testing.assert_allclose(highlighted[1], highlighted[0], atol=1, rtol=0)
+        assert highlighted[2:] == before[2:]
+        assert viewport.detail == region and viewport.image_rect() == rect
+        assert viewport._backend.text().endswith(" · 1:1")
+
+        window.overlap_check.click()
+        assert row_colors() == before
+        assert viewport.detail == region and viewport.image_rect() == rect
+    finally:
+        window.close()
+        window.deleteLater()
+        app.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        app.setQuitOnLastWindowClosed(quit_on_close)

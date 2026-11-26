@@ -24,6 +24,8 @@ from astromosaic.photometry.photo import (
 )
 from astromosaic.pipeline.mosaic import PreviewFrame
 
+_OVERLAP_RGB = (0.0, 0.7, 0.85)
+
 
 @dataclass(frozen=True, slots=True, eq=False)
 class DisplayFrame:
@@ -58,7 +60,7 @@ def highlight_overlap(frame: DisplayFrame) -> DisplayFrame:
     if frame.common_coverage is None:
         return frame
     rgba = frame.rgba.copy()
-    rgba[frame.common_coverage, :3] = (0.0, 0.7, 0.85)
+    rgba[frame.common_coverage, :3] = _OVERLAP_RGB
     rgba.setflags(write=False)
     return replace(frame, rgba=rgba)
 
@@ -92,14 +94,21 @@ def normalize_tile(
 
 
 def stretch_rgba(
-    frame: DisplayFrame, midtones: float, *, preserve_tone: bool = False
+    frame: DisplayFrame,
+    midtones: float,
+    *,
+    preserve_tone: bool = False,
+    highlight_common: bool = False,
 ) -> NDArray[np.uint8]:
-    """Apply the midtone transfer to the cached display values and retain coverage."""
+    """Apply display tone and optional overlap coloring while retaining coverage."""
     validate_midtones(midtones)
     if preserve_tone and frame.preserved_rgba is not None:
         stretched = frame.preserved_rgba[..., :3].copy()
     else:
         stretched = stretch_midtones(frame.rgba[..., :3], midtones)
+        if highlight_common and (common := frame.common_coverage) is not None:
+            color = np.asarray(_OVERLAP_RGB, dtype=np.float32)
+            stretched[common] = stretch_midtones(color, midtones)
     if frame.photo_levels is not None:
         encode_srgb(stretched)
     rgba = np.empty(frame.rgba.shape, dtype=np.uint8)

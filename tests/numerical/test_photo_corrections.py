@@ -144,6 +144,26 @@ def test_assignment_precedence_and_saved_icc_identity(
         )
 
 
+@pytest.mark.parametrize("origin", ["embedded", "assigned"])
+def test_photo_profile_reservations_share_one_budget(tmp_path: Path, origin: str) -> None:
+    profile = imagecodecs.cms_profile("displayp3")
+    grid = RenderSpec((120, -25), (8, 8), 4, max_working_bytes=4 * len(profile))
+    pixels = np.full((8, 8, 3), 32768, np.uint16)
+    first = _write(tmp_path / "first.tif", pixels, grid, icc=profile)
+    second = _write(
+        tmp_path / "second.tif", pixels, grid, icc=profile if origin == "embedded" else None
+    )
+    if origin == "assigned":
+        path = tmp_path / "assigned.icc"
+        path.write_bytes(profile)
+        second = replace(second, photo_profile=PhotoProfile.capture(path))
+
+    destination = tmp_path / "photo.tiff"
+    with pytest.raises(ValueError, match=f"The {origin} ICC profiles exceed the working byte budget"):
+        render_project_photo(MosaicProject((first, second), grid), destination, _JOB, tone=None)
+    assert not destination.exists() and not list(tmp_path.glob("*.part"))
+
+
 def test_exif_srgb_and_untagged_assumption(tmp_path: Path) -> None:
     grid = RenderSpec((120, -25), (8, 8), 4)
     pixels = np.full((8, 8, 3), 32768, np.uint16)
@@ -236,10 +256,19 @@ def test_standard_fit_is_shared_saved_and_cancelable(tmp_path: Path) -> None:
     cropped = render_project_photo(project, destination, _JOB, tone=None, grid=spec)
     assert cropped.photo == preview.photo
     assert cropped.peak_reserved_bytes <= grid.max_working_bytes
+    exported = tifffile.imread(destination)
     np.testing.assert_allclose(
-        tifffile.imread(destination)[..., :3],
+        exported[..., :3],
         _encode(preview.tile.pixels[49:121, 51:147].astype(np.float64)),
         atol=1,
+    )
+    window = Region(12, 7, 31, 22)
+    detail = preview_project(project, _JOB, allow_visual=True, grid=spec, window=window)
+    assert detail.photo == cropped.photo
+    expected = exported[7:29, 12:43]
+    np.testing.assert_array_equal(detail.tile.valid, expected[..., 3] == 65535)
+    np.testing.assert_allclose(
+        _encode(detail.tile.pixels.astype(np.float64)), expected[..., :3], atol=1
     )
     reversed_preview = preview_project(
         replace(project, panels=(peer, source)), _JOB, allow_visual=True

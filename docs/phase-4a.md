@@ -21,7 +21,7 @@ poetry run astromosaic project create data/panel-a.fits data/panel-b.fits -o out
 poetry run astromosaic project validate output/session.astromosaic -o output/session.fits --json
 ```
 
-Validation opens the saved sky inputs and checks fingerprints, effective masks and WCS, the common channel layout and calibration, the output grid and the refinement prerequisites. With `-o`, it also checks the proposed output directory, path occupancy, format compatibility and preliminary byte limit. The render checks actual coverage, measures refinement and enforces the writer's exact limits. `astromosaic project create --help` lists the shared render settings.
+Validation opens the saved sky inputs and checks fingerprints, effective masks and WCS, the common channel layout and calibration, the output grid and the refinement prerequisites. It stops at metadata and reports the selected panel count, cropped dimensions and number of channels. With `-o`, it also checks the proposed output directory, path occupancy, extension, format compatibility and preliminary byte limit. The render checks actual coverage, measures refinement and enforces the writer's exact limits. `astromosaic project create --help` lists the shared render settings.
 
 ## Prepare a Project Without the Desktop
 
