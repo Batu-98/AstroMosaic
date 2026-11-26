@@ -1,6 +1,6 @@
 # Phase 9 - Desktop undo and redo
 
-**Status** In progress. Stages 9A through 9C have local Windows verification. The 9D export and portable acceptance gate is next.
+**Status** Complete on Windows 11 x64. Stages 9A through 9D passed with the locally verified `0.1.0b20` portable build.
 
 ## Starting point
 
@@ -84,3 +84,17 @@ Each history retains up to **100 steps** or **8 MiB** of accounted immutable val
 | Applied labels on a real Paranal panel, 384 × 323 grid | 80 | 65 | 8,342,834 | 8,509,956 B |
 
 The draft retained 23,754,814 accounted bytes with an unrestricted cursor. Python allocation peaks were measured with tracemalloc after opening the real project manifests. Windows reported a 159,358,976-byte process working-set high water across both bounded and unrestricted workloads. Releasing the bounded mask draft left 360 B of traced allocations. The tests cover entry and byte eviction, branch replacement, oversized edits, failed save, dirty recovery and closing before renaming a source. [Cursor tests](../tests/integration/test_edit_history.py) · [Desktop history regression](../tests/integration/test_desktop_project_history.py)
+
+## 9D Windows acceptance results
+
+The native CPU and OpenGL source runs independently reopened all four outputs for each project. Undo matched the baseline and Redo matched the edited samples, coverage and metadata exactly. The saved edits also reproduced in the standalone source CLI. FITS and photo WCS were checked at both corners and the center with an absolute tolerance of `1e-9` degrees. The photo retained its sRGB2014 profile. The mixed TIFF retained its coverage and layer planes. Input and sidecar hashes matched before and after the replay.
+
+| Observation and output | Baseline | Edited |
+| --- | --- | --- |
+| M17 scientific FITS | 1,024 × 1,320, 969,235 covered pixels, DN | 650 × 750, 473,896 covered pixels, DN |
+| PA4 photo TIFF | 1,460 × 1,531, 1,028,380 covered pixels | 1,000 × 1,000, 744,162 covered pixels |
+| Paranal composition TIFF | 1,680 × 950, 1,434,510 covered pixels | 1,680 × 950, 1,434,510 covered pixels |
+
+The probe reopened project manifests at versions 1, 4 and 10 with empty history. Mask and terrain dialogs, the main window, and the terminal text entry exercise the Windows shortcuts in the focused regressions. [Real observation replay](../tools/phase9_history_acceptance.py) · [Shortcut and history regressions](../tests/integration/test_desktop_project_history.py)
+
+The offscreen suite passed 275 tests. The nine skipped cases passed separately in the native Windows OpenGL and isolated OpenCV runs. The portable desktop replay matched the three source workflows in both CPU and OpenGL modes. The frozen check used the copied desktop runtime, and all 81 application modules in the production desktop archive matched the check. The copied CLI reproduced the edited FITS and both edited TIFFs. The production window title and CLI reported `0.1.0b20`, and the launcher hashes matched their build records. [Windows build and checksums](windows-release.md#verification-status)

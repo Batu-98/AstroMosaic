@@ -48,21 +48,24 @@ def test_close_real_preview_releases_opengl(
         if kind in (QtMsgType.QtWarningMsg, QtMsgType.QtCriticalMsg, QtMsgType.QtFatalMsg):
             messages.append(text)
 
+    def wait_idle() -> None:
+        deadline = monotonic() + 30
+        while window._is_running() or window._inspection_job is not None:
+            assert monotonic() < deadline, window.status.text()
+            app.processEvents()
+            sleep(0.005)
+
     previous_handler = qInstallMessageHandler(collect)
     try:
         window.show()
         monkeypatch.setattr(QFileDialog, "getOpenFileName", lambda *_args: (str(_ATLAS), ""))
         window._file_actions[1].trigger()
         assert window.project_path == _ATLAS
+        wait_idle()
+        assert window.preview_button.isEnabled()
         window.preview_button.click()
         assert window.job is not None
-        deadline = monotonic() + 30
-        while monotonic() < deadline:
-            app.processEvents()
-            if not window._is_running() and window._inspection_job is None:
-                break
-            sleep(0.005)
-        assert window.job is None and window._inspection_job is None
+        wait_idle()
         surface = window.viewport.canvas
         assert isinstance(surface, OpenGLPreview) and surface.isValid()
         assert not surface.grabFramebuffer().isNull() and surface._texture is not None
