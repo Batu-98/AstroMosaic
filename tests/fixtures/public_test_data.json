@@ -1,0 +1,165 @@
+{
+  "schema_version": 1,
+  "datasets": [
+    {
+      "id": "nightscape-images",
+      "source_page": "https://www.nightscapeimages.com.au/workshops---online.html",
+      "credit": "Richard Tatti, Nightscape Images",
+      "usage": "Public practice download. Credit the photographer and keep the original images in the local library.",
+      "files": [
+        {
+          "name": "milky_way_tree_1.nef",
+          "url": "https://www.nightscapeimages.com.au/uploads/8/5/3/6/8536676/milky_way_tree_1.nef",
+          "size_bytes": 28926136,
+          "sha256": "0b21cc9124a2db48ebaa9941b383ab409150e6ad70c318aff1ca1edda702dd3c"
+        },
+        {
+          "name": "milky_way_tree_2.nef",
+          "url": "https://www.nightscapeimages.com.au/uploads/8/5/3/6/8536676/milky_way_tree_2.nef",
+          "size_bytes": 28612052,
+          "sha256": "fc887156ae7fbb7ff25f8d90957037b61853037addcf1962c3e63cc0dcc0cb6f"
+        },
+        {
+          "name": "milky_way_tree_3.nef",
+          "url": "https://www.nightscapeimages.com.au/uploads/8/5/3/6/8536676/milky_way_tree_3.nef",
+          "size_bytes": 28962365,
+          "sha256": "aa8d822d97a6148ca12a1f29792a9e8dcc1b688f71c428976bb24727d515c18a"
+        },
+        {
+          "name": "tree_vertical_panorama_raw_files.zip",
+          "url": "https://www.nightscapeimages.com.au/uploads/8/5/3/6/8536676/tree_vertical_panorama_raw_files.zip",
+          "size_bytes": 137502062,
+          "sha256": "785886caa6bef7b7c1ee2b3cdfc0e6a63c654ce3b0152d3afcf1d137519f75a7"
+        }
+      ]
+    },
+    {
+      "id": "moana",
+      "source_page": "https://erellaz.com/moana/open-datasets/lagoon-nebula/",
+      "credit": "Moana Project",
+      "usage": "CC BY 4.0",
+      "files": [
+        {
+          "name": "M8_T1_300_RGB.zip",
+          "url": "https://erellaz.com/wp-content/uploads/2023/07/M8_T1_300_RGB.zip",
+          "size_bytes": 472159191,
+          "sha256": "39f7f2f3df772fc4d76d0765b2857ae4215154fab04455b354c2c3330dc86515"
+        },
+        {
+          "name": "M8_T2_300_RGB.zip",
+          "url": "https://erellaz.com/wp-content/uploads/2023/07/M8_T2_300_RGB.zip",
+          "size_bytes": 302984447,
+          "sha256": "2be2fc10f25a69c7b967de0ddfee7cecf58c791812f45812fd97abcbc6f897f5"
+        },
+        {
+          "name": "Calibration_Masters_G90.zip",
+          "url": "https://erellaz.com/wp-content/uploads/2022/12/Calibration_Masters_G90.zip",
+          "size_bytes": 390224784,
+          "sha256": "2ae14c36cff295511f3d0674ae94c32aa079aea86656d96860fd483301604911"
+        },
+        {
+          "name": "M8_T1P1_RGB.zip",
+          "url": "https://erellaz.com/wp-content/uploads/2023/07/M8_T1P1_RGB.zip",
+          "size_bytes": 890576097,
+          "sha256": "de9f1a8841e7238f71e01a926d1e920ed39bf82de2c2301808f21785ba47e53d"
+        },
+        {
+          "name": "M8_T2P1_RGB.zip",
+          "url": "https://erellaz.com/wp-content/uploads/2023/07/M8_T2P1_RGB.zip",
+          "size_bytes": 1150665915,
+          "sha256": "9c5205441e806275e57bdc53ce7ff4adc08c6536704fe0abd4d0dffd33025763"
+        }
+      ]
+    },
+    {
+      "id": "originstack",
+      "source_page": "https://originstack.site/sample-sessions.html",
+      "credit": "OriginStack",
+      "usage": "CC BY 4.0. Cite the corresponding Zenodo record.",
+      "files": [
+        {
+          "name": "02_large_galaxy_NGC253_Sculptor.zip",
+          "url": "https://zenodo.org/api/records/23896454/files/02_large_galaxy_NGC253_Sculptor.zip/content",
+          "size_bytes": 505945048,
+          "sha256": "1d2a669aee61e17f0260c9351cf7f23a1b6f1163146a45390144c8174dc1306c"
+        },
+        {
+          "name": "04_emission_nebula_Flame.zip",
+          "url": "https://zenodo.org/api/records/23896467/files/04_emission_nebula_Flame.zip/content",
+          "size_bytes": 476238599,
+          "sha256": "4d089b055892b685444874dded71ef8e4808c0708cdeb0b8565ed5685b7d0cee"
+        },
+        {
+          "name": "08_globular_cluster_M13_Hercules.zip",
+          "url": "https://zenodo.org/api/records/23896480/files/08_globular_cluster_M13_Hercules.zip/content",
+          "size_bytes": 539837102,
+          "sha256": "38b9ac9b1e4750858a55ad93af1f9cee8f91e6d7d06ce26ad4fb1aef5e0fcc5b"
+        },
+        {
+          "name": "10_wide_field_Sagittarius_Star_Cloud.zip",
+          "url": "https://zenodo.org/api/records/23896487/files/10_wide_field_Sagittarius_Star_Cloud.zip/content",
+          "size_bytes": 537532566,
+          "sha256": "8ca7ec9a46eb21dfaf7596ccb2a14a463922de1aa6056c7dfa57853ad2dad3ca"
+        }
+      ]
+    },
+    {
+      "id": "nocturne",
+      "source_page": "https://nocturneastro.com/sample-data.html",
+      "credit": "Nocturne (nocturneastro.com)",
+      "usage": "CC BY 4.0",
+      "files": [
+        {
+          "name": "M16_92x20s_31min.fits",
+          "url": "https://nocturneastro.com/data/samples/M16_92x20s_31min.fits",
+          "size_bytes": 74433600,
+          "sha256": "361ee3db43b8f3a4e91145de678653559f6f6775cc8bd7e1141cab7b0da33787"
+        },
+        {
+          "name": "M45_300x10s_50min.fits",
+          "url": "https://nocturneastro.com/data/samples/M45_300x10s_50min.fits",
+          "size_bytes": 99535680,
+          "sha256": "1e390a1b9ea70018ae2607badddb1112f426c1c9ded6e65b85439c9358ecb70e"
+        },
+        {
+          "name": "M8_460x10s_77min.fits",
+          "url": "https://nocturneastro.com/data/samples/M8_460x10s_77min.fits",
+          "size_bytes": 96353280,
+          "sha256": "d87db64d10ffedcf75972668367ab745d5c72e176d4492bcd50f5834f43228e5"
+        },
+        {
+          "name": "NGC7000_163x20s_54min.fits",
+          "url": "https://nocturneastro.com/data/samples/NGC7000_163x20s_54min.fits",
+          "size_bytes": 99535680,
+          "sha256": "99fa3999e3950c054bfc63d355fb98ad90074a87ade9e186c1f0e61cb0133436"
+        }
+      ]
+    },
+    {
+      "id": "astrobackyard",
+      "source_page": "https://astrobackyard.com/your-astrophoto-skills/",
+      "credit": "Trevor Jones, AstroBackyard",
+      "usage": "Public practice data. Credit and link to the photographer when sharing results.",
+      "files": [
+        {
+          "name": "witch-head.tif",
+          "url": "https://drive.usercontent.google.com/download?export=download&confirm=t&id=1LrzKJflM3kJXQuzQC5AEH6DT2hgjrt-c",
+          "size_bytes": 294551938,
+          "sha256": "325b1652637c4c7824e0aa8104f42a136f6b722b32d5bec71b7b74b92dc28b1c"
+        },
+        {
+          "name": "tulip-nebula.tif",
+          "url": "https://drive.usercontent.google.com/download?export=download&confirm=t&id=1XqC2TAEf2y4X62rttovX5gMvljLRiKvF",
+          "size_bytes": 232774416,
+          "sha256": "0ba8e757bac1e3ad8983636d5c4c29469964d8e84ec90bfb80eb25ac9b2a210a"
+        },
+        {
+          "name": "andromeda.tif",
+          "url": "https://drive.usercontent.google.com/download?export=download&confirm=t&id=1E0YqTdZIbVKGY7yzcXltnk6-NRRem-2H",
+          "size_bytes": 432599092,
+          "sha256": "d126b2b2050fb0637c31e5a36256d2e1a89b4caa7f3cda748d240fed8036ceab"
+        }
+      ]
+    }
+  ]
+}

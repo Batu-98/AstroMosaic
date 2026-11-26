@@ -64,3 +64,43 @@ def test_calibrated_comparison_recovers_background_without_changing_gain() -> No
     measured = np.asarray(list(models["fixed-gain-plane"].values()))
     np.testing.assert_array_equal(measured[:, 0], 1.0)
     np.testing.assert_allclose(measured[:, 1:], truth, atol=1e-12, rtol=0)
+
+
+def test_block_background_separates_linked_spatial_variation_from_color() -> None:
+    y, x = np.mgrid[0:256:4, 0:384:4].reshape(2, -1)
+    xy = np.column_stack((2 * x / 383 - 1, 2 * y / 255 - 1))
+    rgb = np.full((len(x), 3), 0.025)
+    moving = rgb + 0.002 * (x // 64)[:, None] + [0.0, 0.001, 0.004]
+    panels = [PanelSamples("A", rgb, xy), PanelSamples("B", moving, xy)]
+
+    report = measure(panels, x, y, background_support=True)
+    assert report == measure(panels[::-1], x, y, background_support=True)
+    assert "background_support" not in measure(panels, x, y)
+    background = report["background_support"]
+    assert isinstance(background, list)
+    summary = background[0]
+    assert summary["panels"] == ["A", "B"]
+    for name in ("training", "selection", "final"):
+        assert summary[name]["blocks"] >= 2
+        assert summary[name]["linked_color_floor_p95"] == pytest.approx(0.002)
+        assert summary[name]["linked_level_span_p05_p95"] > 0.004
+
+
+@pytest.mark.parametrize(("sparse_color", "expected"), [(False, 0.002), (True, 0.0)])
+def test_linked_offset_bound_uses_pooled_channel_errors(sparse_color: bool, expected: float) -> None:
+    y, x = np.mgrid[0:256:4, 0:384:4].reshape(2, -1)
+    xy = np.column_stack((2 * x / 383 - 1, 2 * y / 255 - 1))
+    rgb = np.full((len(x), 3), 0.025)
+    color = (x % 64 == 0) if sparse_color else np.ones(len(x), dtype=bool)
+    # A single discrepant channel in 1/16 of the samples occupies under 5%
+    # of the pooled RGB errors, even though over 5% of locations disagree.
+    moving = rgb + 0.003 * xy[:, :1] + color[:, None] * [0.0, 0.0, 0.004]
+    panels = [PanelSamples("A", rgb, xy), PanelSamples("B", moving, xy)]
+
+    report = measure(panels, x, y, linked_offset_bound=True)
+    assert report == measure(panels[::-1], x, y, linked_offset_bound=True)
+    bounds = report.pop("linked_offset_lower_bound_rgb_p95")
+    assert report == measure(panels, x, y)
+    assert isinstance(bounds, dict)
+    for fold in ("training", "selection", "final"):
+        assert bounds[fold] == pytest.approx([expected])

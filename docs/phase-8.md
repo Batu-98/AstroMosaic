@@ -1,6 +1,8 @@
 # Phase 8 Configurable Color Photometry and Optics
 
-**Status** The 8A contract is frozen. The 8B photo export passed local Windows verification in `0.1.0b11`, and the adaptive preview and crop follow-up passed in `0.1.0b12`. Each subsequent delivery qualifies its corrections against prepared references. [Architecture and milestones](../astro_mosaic_python_first_architecture_en.md#106-phase-8-delivery-stages) · [ADR-0026](adr/0026-configurable-color-photometry-and-optics.md)
+**Status** Closed on 2026-11-26 at the request of the project owner. [Phase 8 closure](#phase-8-closure)
+
+**Verified milestones** The 8A contract is frozen. The 8B photo export passed local Windows verification in `0.1.0b11`, adaptive preview and crop in `0.1.0b12`, and preserved tone and transparent canvas in `0.1.0b13`. The 8C color and exposure workflow passed local Windows verification in `0.1.0b14`. [Architecture and milestones](../astro_mosaic_python_first_architecture_en.md#106-phase-8-delivery-stages) · [8C Windows results](#8c-local-windows-package-results)
 
 AstroMosaic 0.1.0b7 already frames selected sky panels from their WCS, decodes recognized sRGB TIFFs for Visual Preview and renders scientific mosaics from compatible linear inputs. Its optional scientific relative refinement currently uses mono panels. The new options extend those paths through the same bounded CPU renderer. [Current sky workflow](phase-3c.md#desktop-workflow) · [Existing relative refinement](phase-2.md#relative-refinement)
 
@@ -32,7 +34,7 @@ The output profile is the February 2015 revision of `sRGB2014.icc` from the Inte
 | Linear FITS, TIFF and XISF with existing mixed-layer control | Preserve exact samples and masks, and WCS within 1e-9 degrees. Use the [Phase 6 parity products](phase-6.md#local-windows-lifecycle-and-package-results) and existing numerical TIFF and XISF references. Reuse PA4 only under the real-data protocol when replaying its Phase 6 or 7 outcomes. |
 | Resource and failure checks | Require the default 64 MiB tile working-byte reservation and 2 GiB output limit on the real pair. The uncompressed photo payload is 7 bytes per output pixel, with TIFF and ICC overhead checked against the same limit. Record elapsed time and cache state. Exercise cancellation during tile writes, verify no output or part file remains, then retry the same destination. Check refusal of an occupied destination, unsupported output format and grids without coverage. |
 
-The ICC conversion matrix and reference patches, known exposure or background corrections, measured lens calibration, compatible flats and stable exposure brackets still need fixtures before the related 8C–8F methods can be qualified. Track their data and backend choices in Q-029.
+The initial ICC and exposure references are frozen in 8C. Independent lookup-table and rendering-intent references, measured lens calibration, compatible flats and stable exposure brackets are tracked in Q-029. [8C reference results](#8c-frozen-color-and-exposure-references)
 
 ## 8B Export a photo mosaic
 
@@ -55,6 +57,10 @@ Without `--grid`, the CLI uses the project's saved preview mode. `--midtones` al
 Beta 13 writes contiguous RGBA UInt16 with TIFF associated alpha. The coverage alpha is 65,535 for covered pixels, including black sky, and zero for areas outside valid panel coverage. RGB codes are zero wherever alpha is zero. The ICC profile, WCS description, band and tone metadata describe the same sky grid. The tile writer accounts for eight bytes per output pixel plus TIFF and ICC overhead and publishes atomically.
 
 AstroMosaic reopens beta 11 and 12 photo TIFFs using their binary coverage SubIFD. Open beta 13 photo TIFFs in beta 13 or an editor that supports 16-bit TIFF alpha. Source panels remain the render inputs when re-exporting a previously stretched photo. [Photo alpha and tone decision](adr/0028-transparent-photo-tiff.md)
+
+The copied beta 13 console exported the original 8917 × 10259 owner grid using the default tone. Every RGB code matched the earlier Preserve Tone reference. The alpha matched its coverage at all 43,897,047 opaque pixels and 47,582,456 transparent pixels. The ICC profile, WCS and original file hashes matched their references. The 731,841,752-byte TIFF fit the default output and working reservations. On the same covered grid, the sampled median code value was 7,878 DN with Preserve Tone and 33,410 DN in the owner's earlier preview-tone export. The respective counts of pixels with at least one channel at full scale were 5,844 and 228,623.
+
+The copied CPU and OpenGL desktops exported the same real footprint crop as the console, matching the full TIFF's crop exactly. Photoshop 27.7 opened the full TIFF as a 16-bit layer with transparency and reproduced the expected alpha in a PNG crop. The nine scientific references matched their samples and masks. The full source suite passed 235 tests with two native cases skipped offscreen, and three native checks passed separately. Ruff, scoped mypy and the Poetry lock check passed. [Local Windows packages](windows-release.md#verification-status)
 
 ### 8B Source verification
 
@@ -87,6 +93,171 @@ Both desktop modes and the copied Qt-free console produced byte-identical 8917 �
 The three jobs ran concurrently on a Windows 11 Pro x64 build 26200 host with an i5-14600K and RTX 4070, after earlier reads of both 6000 × 4000 inputs. The desktop figures cover the parent process through solve, preview and export. The CLI reservation tracks the renderer's bounded buffers. The output occupied 640,362,687 bytes.
 
 The source and copied console also matched nine real scientific and layer references for float32 values, coverage, applicable contribution masks and WCS. These included the M17 and atlas chain FITS, the M42 solved FITS, wide RGB TIFF, ALPACA sky and foreground plus FITS and XISF composition, and Paranal TIFF composition. The two historical PA4 exports retain the current encoded-sRGB scientific rejection. A separate clean Windows installation run remains open. Local measurements and the independent reopen report are in `.tooling/desktop-0.1.0b11/`. [Windows launchers and build records](windows-release.md#verification-status)
+
+### 8B Owner overlap baseline
+
+The overlap diagnostic replays the original `20.TIF` and `21.TIF` with the saved Gaia SIP solutions and the full beta 13 Preserve Tone export. It projects linear-light samples from each original onto the 8917 × 10259 TAN grid and checks the normalized weighted mean against the TIFF. The WCS matched at nine positions. Coverage matched at all 9,951 lattice positions, including 4,764 covered positions, and the largest RGB difference was one UInt16 code. The two source SHA-256 hashes matched their frozen references before and after the run. [Replay tool](../tools/phase8_photo_overlap.py) · [Real-data regression](../tests/integration/test_phase8_photo_overlap.py)
+
+| Stellar comparison | Matches | Median | RMS | P95 |
+| --- | ---: | ---: | ---: | ---: |
+| Saved WCS, all matched stars | 221 | 0.340 px | 0.424 px | 0.692 px |
+| Saved WCS, held-out stars | 56 | 0.374 px | 0.430 px | 0.751 px |
+| Trial translation, same held-out stars | 56 | 0.338 px | 0.423 px | 0.662 px |
+
+The tool detected stellar centroids independently in each original, paired mutual nearest neighbors, and removed candidates with a clipped or invalid sample in either aperture. It reserved every fourth pair in output-x order when fitting the translation. That split tests the translation relative to the saved WCS. The trial shift applied to the second panel's positions was (+0.042, +0.101) output pixels. Both held-out P95 values exceed the 0.5 px starting target. [Numerical targets](../astro_mosaic_python_first_architecture_en.md#11-validation-and-acceptance-criteria)
+
+On the 96 px lattice, 697 of 1,001 common positions survived the detected-star and clipping masks. The median paired difference `20.TIF − 21.TIF` was −0.000136 in linear Rec. 709 luminance on the unit scale. The absolute difference had a median of 0.00776 and a P95 of 0.03089. Rank correlations with position, detector radius and sampled horizontal overlap width had magnitudes of 0.18 or less on this pair. The horizontal width is the count of common grid samples on each row times 96 px. A radial illumination fit requires independent calibration evidence.
+
+At the left edge of `20.TIF`, 78 crossing strips measured a median step of +0.00039 and a P95 absolute step of 0.01160 in linear luminance. At the right edge of `21.TIF`, 59 strips measured +0.00301 and 0.01204, respectively. Each estimate uses the star-masked overlap samples 2–8 source pixels inside the entering panel's boundary and checks the continuing panel's coverage on both sides. It measures the contribution added by the weighted mean relative to the continuing panel on the same output pixels.
+
+On the development host, reproduce the run with the saved project used for the beta 13 reference export.
+
+```powershell
+.\.venv\Scripts\python.exe tools/phase8_photo_overlap.py .tooling/desktop-0.1.0b11/final-owner-cpu/Owner.astromosaic output/phase8b13/Photo-mosaic-preserved-transparent.tiff
+```
+
+The diagnostic emits JSON with input fingerprints, sample support and per-edge results. The local result is in `output/phase8-overlap/owner-baseline.json`. The subsequent spatial holdout checks the stellar residuals with both a same-camera pair and an independent observatory control. Use the background samples to compare the 8C exposure and offset candidates on held-out regions. [Spatial holdout results](#8b-spatial-holdout-and-alignment-controls) · [Q-029](../questions_open_topics.md#q-029---configurable-color-photometry-and-optics)
+
+Two warm-cache source runs on an Intel Core i5-14600K with one OpenBLAS thread reproduced the measurements. The 64 MiB window budget took 26.5 seconds with a 183.0 MiB peak working set and 189.6 MiB peak commit. The 32 MiB replay took 27.5 seconds with a 159.9 MiB peak working set and 166.8 MiB peak commit.
+
+### 8B Spatial holdout and alignment controls
+
+Divide the matched-star extent on the output grid into nine rectangular regions. Hold out each occupied region in turn and compare the saved WCS, a median translation, and a least-squares similarity transform with translation, rotation and uniform scale. Each fit uses the other regions and requires at least 12 training pairs and a smaller-to-larger positional singular-value ratio of at least 0.05. Score all three models on the same held-out stars. Report individual regions with at least five matches. The outer statistic combines matches within an outer 20% strip of either source detector and requires at least ten pairs. [Replay tool](../tools/phase8_photo_overlap.py)
+
+| Observations and output scale | All / outer matches | Saved WCS P95 | Translation P95 | Similarity P95 |
+| --- | ---: | ---: | ---: | ---: |
+| Owner `20.TIF`–`21.TIF`, 34.591″/px | 221 / 167 | 0.692 / 0.691 px | 0.713 / 0.716 px | 0.757 / 0.762 px |
+| PA4 `10.TIF`–`11.TIF`, 34.595″/px | 117 / 112 | 1.148 / 1.142 px | 1.007 / 1.008 px | 0.919 / 0.903 px |
+| ESO ALPACA A/B, 140″/px | 30 / 18 | 0.179 / 0.209 px | 0.183 / 0.213 px | 0.191 / 0.223 px |
+
+The owner pair's highest regional P95 was 0.941 px in the upper-right block, supported by 21 stars. The median horizontal displacement changed sign across the overlap. Both global corrections increased the whole-region holdout P95 on this pair. The similarity fit improved the same-camera PA4 pair while its P95 stayed above the 0.5 px starting target. The independently exposed ALPACA pair stayed below 0.5 px with its saved WCS. Its retained FITS crops have no declared saturation threshold. The M17 atlas pair triggered the insufficient-support diagnostic with three matches. [PA4 capture and overlap inventory](application-test-findings.md#local-evidence) · [Independent ALPACA calibration](phase-6.md#calibrated-alpaca-mixed-reference) · [M17 source](application-tests.md#source-credits-and-fixture-limits)
+
+The separate Gaia sidecar holdouts had P95 values of 0.781 and 0.764 source px for `20.TIF` and `21.TIF`. The outer values were 0.837 and 0.874 source px. For PA4 `10.TIF` and `11.TIF`, the corresponding whole-detector values were 0.831 and 0.901 source px. These are absolute catalog checks on the saved solutions. The table reports relative panel agreement in output pixels.
+
+The owner command above also emits the spatial report. For the independent case, pass the saved ALPACA project by itself. The local PA4 control project selects frames 10 and 11 from the existing PA4 sky project and uses automatic TAN framing at native scale with zero rotation and no saved crop. The JSON reports under `output/phase8-overlap/` are `owner-spatial.json`, `pa4-10-11-spatial.json` and `alpaca-spatial.json`.
+
+```powershell
+.\.venv\Scripts\python.exe tools/phase8_photo_overlap.py output/application-tests/phase6b-work/alpaca-mixed/mixed.astromosaic
+.\.venv\Scripts\python.exe tools/phase8_photo_overlap.py output/phase8-overlap/pa4-10-11.astromosaic
+```
+
+The Gaia holdout below compares the saved SIP solutions with fresh fits on both wide-angle pairs. The ALPACA case provides a separate control for already well-aligned geometry. [Numerical targets](../astro_mosaic_python_first_architecture_en.md#11-validation-and-acceptance-criteria) · [Open Phase 8 work](../questions_open_topics.md#q-029---configurable-color-photometry-and-optics)
+
+### 8B Gaia holdout for WCS candidates
+
+The replay reproduced all four saved SIP-3 headers with the installed Gaia DR3 catalog and blind index. Frame 10 matched when replayed with its original project and solve options. Its 1,500 raw detections matched at the original 128 MiB budget and the comparison's 64 MiB budget. The catalog and index SHA-256 values matched the local bundle manifest. The candidate comparison uses the frozen saved headers and the same original images and TAN output grids as the spatial holdout. [Local catalog setup](phase-2.md#catalog-setup-and-updates) · [Candidate comparison tool](../tools/phase8_wcs_validation.py)
+
+Measure stars in linear-light sRGB and associate them with Gaia using the saved WCS and the solver's mutual-match and shifted-control checks. Reject clipped or invalid apertures. Reserve catalog matches whose measured and saved-projected positions are both more than five source pixels from the replayed raw solver detections. Exclude the union of those Gaia coordinates from both panel fits. Fit TAN, SIP-2 and SIP-3 to the same remaining stars. Check detector coverage, parity and inverse round trips. Score the fixed overlap pairs on their original output grid and use a separate overlap holdout with neither centroid near a raw solver or candidate fit position.
+
+For this comparison, a candidate needs at least 10% lower whole-detector catalog P95 on each panel and outer catalog P95 within the existing Phase 3.6 allowance. The independent overlap needs at least 15 pairs, including 10 outer pairs, and P95 below 0.5 output px both overall and at the outer detector. These thresholds apply to the Phase 8 comparison. The plate solver retains its own astrometric acceptance criteria. [Existing SIP and edge limits](phase-36.md#6-sip-and-field-edge-accuracy)
+
+| Panel | Reserved Gaia matches, all / outer | Saved SIP-3 P95, all / outer source px | Linear-light SIP-3 refit P95, all / outer source px |
+| --- | ---: | ---: | ---: |
+| `20.TIF` | 327 / 203 | 0.804 / 0.844 | 0.707 / 0.748 |
+| `21.TIF` | 383 / 218 | 0.808 / 0.873 | 0.702 / 0.737 |
+| `10.TIF` | 409 / 257 | 0.833 / 0.900 | 0.722 / 0.756 |
+| `11.TIF` | 414 / 230 | 0.879 / 0.958 | 0.735 / 0.801 |
+
+| Independent overlap | All / outer pairs | Saved WCS P95 | TAN P95 | SIP-2 P95 | SIP-3 refit P95 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `20.TIF`–`21.TIF` | 42 / 32 | 0.748 / 0.748 px | 7.258 / 7.423 px | 6.219 / 6.247 px | 0.700 / 0.716 px |
+| `10.TIF`–`11.TIF` | 25 / 22 | 1.348 / 1.375 px | 10.431 / 10.466 px | 7.248 / 7.336 px | 1.200 / 1.224 px |
+
+The SIP-3 refit improved the absolute catalog P95 on every panel. The independent overlap still exceeded 0.5 px on both pairs. On the full fixed pair samples, the refit moved P95 from 0.692 to 0.720 px on the owner pair and from 1.148 to 0.885 px on the PA4 pair. The low-order candidates in this comparison leave the alignment gate open. Save the results as geometry evidence for later optical work. The exposure and ICC reference checks for 8C can proceed on qualified controls. [Phase 8 delivery stages](#delivery-stages)
+
+Run the comparison from the checkout root. The local JSON and native solve replay evidence are stored under `output/phase8-overlap/wcs-candidates/`.
+
+```powershell
+.\.venv\Scripts\python.exe -m tools.phase8_wcs_validation .tooling/desktop-0.1.0b11/final-owner-cpu/Owner.astromosaic --catalog .tooling/phase2-gaia/stars-deep-gaia17.bin
+.\.venv\Scripts\python.exe -m tools.phase8_wcs_validation output/phase8-overlap/pa4-10-11.astromosaic --catalog .tooling/phase2-gaia/stars-deep-gaia17.bin
+```
+
+## 8C Frozen color and exposure references
+
+### Color patches and profile assignment
+
+The reference derives double-precision RGB-to-XYZ matrices from the documented primaries and D65 white point, then converts into linear sRGB. It evaluates 11 RGB UInt16 patches, including the sRGB toe and saturated primaries, plus all 65,536 neutral input codes. The profile-assignment fixture holds the same RGB codes constant across embedded, explicitly assigned and untagged inputs. It defines precedence, expected linear triplets, and outcomes for conflicts and invalid profile bytes. The TIFF check verifies that these inputs preserve their stored codes. [ICC reference program](../tools/phase8c_color_reference.py) · [Profile-assignment fixture](../tests/fixtures/phase8c_profile_assignment.json) · [W3C color-space definitions](https://www.w3.org/TR/2026/CRD-css-color-4-20261029/#predefined)
+
+Use relative colorimetric intent with black point compensation off for the first matrix candidate. Compare UInt16 and normalized float32 inputs to a float32 linear working buffer. The candidate limit is `1.5e-4` absolute linear error against the reference and `2e-7` between the two input representations. The neutral ramp must retain every step and the wide-gamut primaries must retain negative and above-one working values until output encoding.
+
+| Profile tested | Maximum absolute linear error | Repeated neutral steps per channel | Result |
+| --- | ---: | ---: | --- |
+| Display P3 v4 | 0.00003221 | 0 | Matrix candidate passed |
+| Adobe RGB compatible v2 | 0.00003756 | 0 | Matrix candidate passed |
+| Sampled sRGB2014 v2 | 0.00030279 | 18,818 | Use the existing canonical sRGB transfer for this recognized encoding |
+
+The locked `imagecodecs 2026.11.11` wheel uses Little CMS `2.20.0`. A separate Windows x64 PyInstaller probe reproduced the source report exactly with the same `_cms` binary and only system folders on `PATH`. Include `imagecodecs._cms` with the existing shared extensions when the matrix path is wired into the application package. The beta 13 package contains the Little CMS notice. Independent profile lookup-table, perceptual intent and black point compensation checks remain open. [Little CMS tutorial](https://www.littlecms.com/LittleCMS2.18%20tutorial.pdf) · [Native distribution review](../questions_open_topics.md#q-005---application-licensing-and-distribution-model)
+
+### Exposure and background controls
+
+Use a registered, unresampled 768 × 512 crop at source pixel (2048, 1408) in `20.TIF`. Decode the original samples with an independent sRGB calculation. Generate the paired UInt16 observations by applying a known linear gain and offset, then re-encoding. The affine reference uses `adjusted = gain × sample + offset`. Express the offset relative to the selected sky pedestal when comparing the Standard formulation. Keep coverage, masked photometry samples and the holdout separate. The fit uses the training blocks, and the P95 comparison and three stellar apertures use the reserved 64 × 64 blocks. This isolates photometry from reprojection and records the synthetic correction applied to a real capture. [Exposure reference program](../tools/phase8c_exposure_reference.py)
+
+| Control | Known affine correction | Expected effective method |
+| --- | --- | --- |
+| Identity | Gain 1, offset 0 | Off |
+| One stop | Gain 2, offset 0 | Manual +1 EV |
+| Pedestal difference | Gain 1, offset −0.004 | Sky Offset |
+| Gain and pedestal | Gain 1.25, offset −0.003 | Standard |
+| Masked contamination | Gain 1.25, offset −0.003 with a masked brightness patch | Standard on the eligible samples |
+| Weak gain | Gain 1, offset −0.0025 with low signal variation | Offset Only |
+| Insufficient overlap | Same gain and pedestal with 16 training and 16 held-out samples | Off with a support diagnostic |
+
+The independent reference calculation recovered gain 1.2500004 and offset −0.0030000 on the gain-and-pedestal control. On 61,057 held-out pixels, RGB P95 decreased from 0.002837 to 0.00000167 in normalized linear units. The largest stellar aperture-flux error across the usable controls was 0.00493%. Require gain within 1%, absolute linear offset within `2e-4`, held-out RGB P95 at most `3e-5`, and aperture-flux error within 1% on these controlled samples. The weak case has a training luminance span of `9.66e-5` between the 5th and 95th percentiles. A measurable gain control needs a span of `0.003` and at least 128 eligible samples in each split.
+
+The unchanged owner TIFF metadata records 10 seconds, f/4 and ISO 6400 in both exposures. The metadata controls cover unity for equal settings with compatible provenance, a gain of two for half shutter time, four for doubling the f-number, and unresolved gain for missing aperture or an ISO change without a sensor response model. The owner pair remains the separate real overlap challenge.
+
+The local reports and the 29 numerical arrays are under `output/phase8c-references/`. Its `reference-lock.json` records the program, profile, report, sample and Windows probe hashes. Run from the checkout root and choose a new path for each NPZ replay.
+
+```powershell
+.\.venv\Scripts\python.exe tools/phase8c_color_reference.py
+.\.venv\Scripts\python.exe -m tools.phase8c_exposure_reference tests/20.TIF tests/21.TIF --samples output/phase8c-references/exposure-replay.npz
+```
+
+Use the frozen controls to implement the shared profile resolution and matrix conversion in preview and photo export, followed by exposure metadata, manual EV and Standard matching. The geometry and brightness gates still apply to the subsequent Distance Feather comparison. [8C regression checks](../tests/numerical/test_phase8c_references.py) · [Delivery stages](#delivery-stages)
+
+## 8C Photo color and exposure workflow
+
+1. In **Mosaic Settings → Photo**, choose the input profile, exposure normalization, and brightness matching for the selected sky band. **Auto (embedded or EXIF)**, exposure **Off** and brightness **Off** are the defaults.
+2. In **Panel Settings → Photo**, inspect the source color, assign a profile if needed, and enter the panel EV when **Manual EV** is selected. The per-panel choice takes precedence. **Assume sRGB when untagged** supplies a fallback when the source has no usable declaration and no embedded profile.
+3. Build the sky preview. The Command Panel reports the effective profile and provenance, exposure gain, reference panel, overlap support, brightness correction and fallback reasons. **Export Photo Mosaic** writes the same effective methods into the 16-bit TIFF history. The CLI also reports them in the `photo` object with `--json`.
+
+The photo reader supports RGB UInt16 TIFFs. Assignable profiles include sRGB, linear sRGB, Display P3, Adobe RGB and local RGB matrix ICC files. Auto uses a supported embedded profile or an explicit EXIF/XMP sRGB declaration. Conflicts call for a named panel assignment. Manifest version 10 stores non-default photo settings, and an assigned file retains its local path and SHA-256. Older manifests load with the default controls. [Matrix color and overlap design](adr/0029-photo-matrix-color-and-overlap-fit.md)
+
+```powershell
+astromosaic project set-photo "Solved.astromosaic" -o "Photo.astromosaic" --panel-profile "2=DisplayP3.icc" --exposure metadata --brightness standard
+astromosaic project export-photo "Photo.astromosaic" -o "Matched.tiff" --progress --json
+astromosaic project export-photo "Photo.astromosaic" -o "Baseline.tiff" --exposure off --brightness off
+```
+
+The export overrides apply to one run. Use `--photo-profile` for the project default and `--panel-profile PANEL=inherit` to clear a panel override. Use `--exposure manual --panel-ev 2=1` for one stop on panel 2. Exposure metadata uses shutter and aperture for compatible cameras with matching ISO. Missing or conflicting capture values produce a unity gain with a reason.
+
+**Sky Offset** fits linked RGB at unit gain. **Standard** estimates the sky pedestal and a linked affine correction using spatially separated fit and validation blocks. It requires at least 128 samples and two blocks in each split. The gain fit also requires a 5th-to-95th percentile luminance span of 0.003. The fit uses the full resolved grid so preview zoom and output cropping share its correction. The reference is selected by source path within the band, and eligible overlaps can extend that reference to connected panels. [Photo fit](../src/astromosaic/pipeline/photo_fit.py)
+
+### 8C Local source results
+
+| Control | Effective method | Gain | Affine offset | Frozen held-out RGB P95 |
+| --- | --- | ---: | ---: | ---: |
+| Identity | Off | 1.0 | 0 | 0 |
+| One stop | Manual EV | 2.0 | 0 | 1.85e-6 |
+| Pedestal | Sky Offset | 1.0 | −0.004000 | 1.56e-6 |
+| Gain and pedestal | Standard | 1.249999 | −0.003000 | 1.67e-6 |
+| Masked contamination | Standard | 1.249999 | −0.003000 | 1.67e-6 |
+| Weak gain | Offset Only | 1.0 | −0.002500 | 1.11e-6 |
+| Insufficient overlap | Off | 1.0 | 0 | 0.00510 |
+
+The largest aperture-flux error was 0.00494%. The reopened Standard TIFF matched the independent RGB codes and coverage. On the mixed Display P3/sRGB control, Standard reduced held-out RGB P95 from 0.002860 to 2.83e-6. The source rendered nine scientific products that matched their references and retained both PA4 scientific eligibility diagnostics. Peak reservation was 23.83 MiB on the controlled preview and 63.78 MiB on the fitted owner grid.
+
+The unchanged owner pair resolved a metadata gain of 1.0 for both panels. The overlap for `21.TIF` yielded 11,356 fit samples and 3,444 held-out samples. The gain candidate exceeded the fitting range, and the validation RGB P95 of 0.02927 favored Off over the sky offset. The wide-field geometry qualification remains open. [Gaia holdout](#8b-gaia-holdout-for-wcs-candidates)
+
+The source suite passed 248 checks with two offscreen OpenGL skips. Native CPU and OpenGL runs exercised both Photo tabs, local ICC assignment, save and reopen, preview and export on the secondary display. The source CLI also exported a project whose panel name required escaping in redirected ASCII output. Ruff, scoped mypy and Poetry lock validation passed.
+
+### 8C Local Windows package results
+
+The local `0.1.0b14` desktop and console came from clean commit `2e39e7908b3f45d5e6258346571a57f45f3aedad` with the locked CPython 3.13.18 build environment. Both copied bundles loaded the same Little CMS 2.20.0 extension binary as the locked wheel. The desktop title and the CLI version identified beta 14. [Launchers and build records](windows-release.md#verification-status)
+
+- On the secondary display, the CPU desktop exported the mixed-profile control through the photo button and the OpenGL desktop used `session export-photo`. Both reopened the version 10 project with the assigned ICC. Their RGB and alpha samples matched the standalone CLI and source over 389,120 covered pixels. Independent reopening checked UInt16 RGBA, the sRGB2014 ICC and WCS.
+- The copied console tested metadata gain, Standard overlap diagnostics, and an export with a Unicode source name and redirected ASCII output. The full fitted owner pair reproduced beta 13 RGBA across the 8,917 × 10,259 grid with 43,897,047 covered pixels. A cold process rendering and independently comparing the result took 143.3 seconds and reserved 19.39 MiB at peak. Both original TIFF hashes matched the frozen reference.
+- The copied console reproduced all nine scientific products, including the FITS, TIFF and XISF controls. It retained the PA4 scientific eligibility diagnostics on both grids. The local record is in `.tooling/desktop-0.1.0b14/release-verification/verification.json`. Clean-machine Windows acceptance and the native distribution review remain open. [Clean-machine gate](phase-3f.md#pending-clean-machine-check) · [Distribution tracking](../questions_open_topics.md#q-005---application-licensing-and-distribution-model)
 
 ## Workflow and settings
 
@@ -166,6 +337,8 @@ First align the sky pedestal with the reference using robust background samples.
 `adjusted = sky + gain × (sample − sky) + offset`
 
 Use robust residual rejection and require spatial coverage and signal variation after masking. A weak gain fit retains a qualified sky offset and reports **Offset only**. A weak sky offset leaves the panel at identity under the documented auto policy. Report overlap area, retained samples, gain, offset, before-and-after residuals and the reference. Evaluate the method with several predetermined panel orders. Mosaic Master shows the precedent for sky pedestal and overlap matching. [Mosaic Master Standard method](https://github.com/setiastro/setiastrosuitepro/blob/V1.24.7/src/setiastro/saspro/docs/mosaic_master.html#L138-L145) · [Overlap implementation](https://github.com/setiastro/setiastrosuitepro/blob/V1.24.7/src/setiastro/saspro/mosaic_master.py#L5790-L5826)
+
+Standard also requires independent stellar aperture evidence for material gains. When the evidence is weak or the gain fails the stellar check, use the validated sky offset or Off. [Production Standard gate](phase-8d.md#standard-photo-gain-integration)
 
 ### Advanced global matching
 
@@ -307,6 +480,19 @@ Store stable method identifiers and version their settings independently of the 
 | Metadata normalization with Standard or Advanced | Use it as a recorded seed or prior when selected. The fit estimates the remaining change on the effective sample scale. |
 | Insufficient overlap, field coverage or signal | The automatic policy can select an eligible simpler result and explain the fallback. A requested fit with explicit prerequisites reports the missing support. |
 
+## Phase 8 closure
+
+Phase 8 closed on the locally verified Windows beta 15 scope on 2026-11-26. The delivery table below preserves the original criteria for future work.
+
+| Stage | Outcome at closure |
+| --- | --- |
+| 8A through 8C | Contract frozen. Tagged 16-bit photo TIFF export, adaptive preview and crop, tone and transparency choices, matrix-profile conversion, exposure controls and Standard brightness matching verified locally. |
+| 8D | The Standard gain safeguard checks independent stars before applying a material gain. Advanced matching and optical corrections still require independent RGB, visible flat and lens evidence and subsequent production integration. |
+| 8E | Additional optical fits, joint exposure and illumination fitting and seam methods deferred. |
+| 8F | Local package checks recorded. Separate Windows acceptance and native redistribution review remain publication gates. Bracket-response and HDR research deferred. |
+
+[Standard verification](phase-8d.md#standard-local-windows-results) | [Deferred methods and revisit conditions](../questions_open_topics.md#q-029---configurable-color-photometry-and-optics) | [Wide-field astrometry](../questions_open_topics.md#q-016---plate-solve-quality-incorrect-scale-recovery-and-distortion) | [Clean Windows checks](phase-3f.md#pending-clean-machine-check) | [Distribution review](../questions_open_topics.md#q-005---application-licensing-and-distribution-model)
+
 ## Delivery stages
 
 | Stage | Deliverable and impact | Acceptance evidence |
@@ -314,7 +500,7 @@ Store stable method identifiers and version their settings independently of the 
 | 8A | Freeze photo and scientific intents, supported method settings, coordinate frames and test data. Define profile and calibration provenance, compatibility rules and diagnostics. | Document the outcome of each legal and rejected first-release method combination. Freeze representative fixture inputs, known corrections, reference outputs and numerical limits before tuning. |
 | 8B | Add full-resolution photo TIFF output from the existing visual sky workflow. Reuse known sRGB conversion, current geometry, simple weighting, preview tone and the atomic writer. Add equivalent dialog-free operation. | Open the two original sRGB TIFFs, solve, preview and export a tagged 16-bit mosaic. Independently reopen RGB, bit depth, ICC, WCS and coverage. Check source hashes, preview/export samples at coincident positions, earlier science output parity and cancellation cleanup. |
 | 8C | Add profile assignment and qualified ICC conversion. Deliver manual EV, exposure metadata, sky offset and Standard matching with overlap diagnostics. | Verify ICC reference patches and high-bit-depth gradients. Compare Off and Standard on held-out overlaps, with positive controls and weak or contaminated cases. Test absent profiles and exposure metadata and show each effective fallback. |
-| 8D | Add Advanced global matching and the first qualified optical corrections. Retain the existing stellar mono control. Start optics with imported calibration geometry and a matched flat or verified lens vignetting profile. | Verify order stability and disconnected groups. Compare held-out stars, background residuals and diffuse signal. Check masks, corner WCS, no double geometry or illumination correction, flat normalization, and full-field sample and coverage parity. |
+| 8D | Add Advanced global matching and the first qualified optical corrections. Retain the existing stellar mono control. Start optics with imported calibration geometry and a matched flat or verified lens vignetting profile. | Verify order stability and disconnected groups. Compare held-out stars, background residuals and diffuse signal. Check masks, corner WCS, no double geometry or illumination correction, flat normalization, and full-field sample and coverage parity. [Frozen 8D controls and local results](phase-8d.md) |
 | 8E | Evaluate additional optical fits, joint exposure and illumination optimization, and photo seam methods as independent candidates. Compare manual and catalog model options. | Each method improves its target metric on independent control data, passes visual and scientific eligibility checks, and stays within its measured CPU and memory limits. Weak, ambiguous and extrapolated cases remain diagnosable. |
 | 8F | Verify each shipped option on Windows. Evaluate bracket-response and HDR research when calibrated bracket data is ready. | Reopen old and new projects, exercise commands and native CPU/OpenGL display, independently verify exports, and test cancellation, cleanup and dependency loading from a clean Windows package. Qualify each bracket method against measured exposures before adding it to production choices. |
 

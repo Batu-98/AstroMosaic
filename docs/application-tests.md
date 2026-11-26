@@ -12,6 +12,8 @@ Optional owner-supplied cases appear in `local_cases` in the local `fixtures.jso
 
 Ten additional cases cover an atlas chain, polar geometry, unequal scales, SIP distortion, scaled FITS, input coverage, separate filter bands and three wide-angle nightscapes. Their fixtures and runner use the `extended/` pack. [Extended test guide](application-tests-extension.md)
 
+The local public observation library provides additional wide-angle panels, separate mosaic exposures, calibration frames and integrated RGB masters. The catalog records acquisition, format, test purpose and verification for each dataset. [Public observation test data](public-test-data.md)
+
 Sky overlap is the number of shared valid sample positions divided by the count supported by the smaller panel on the saved TAN grid. It is measured with a nearest-pixel footprint and the saved sky labels where applicable. Foreground overlap uses the same denominator on the ground alignment grid, using the known image-space crop offsets. The ground controls use same-size, same-scale, same-orientation panels. Composition seam overlap is a separate placement setting.
 
 | Case | Folder | Panel size and format | Horizontal field per panel | Sky overlap | Ground overlap |

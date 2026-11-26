@@ -1,0 +1,70 @@
+{
+  "schema_version": 1,
+  "rgb_uint16": [1200, 4900, 12455],
+  "linear_srgb_tolerance": 0.00015,
+  "reference_linear_srgb": {
+    "srgb": [0.001417246616, 0.006543439043, 0.030089165805],
+    "displayp3": [0.000264159988, 0.006759031086, 0.032503755025],
+    "adobergb": [-0.001117121394, 0.003334801682, 0.026917168783],
+    "linear_srgb": [0.018310826276, 0.074769207294, 0.190051117723]
+  },
+  "cases": [
+    {
+      "id": "embedded_srgb",
+      "embedded": "srgb",
+      "effective": "srgb",
+      "origin": "embedded"
+    },
+    {
+      "id": "embedded_p3",
+      "embedded": "displayp3",
+      "effective": "displayp3",
+      "origin": "embedded"
+    },
+    {
+      "id": "embedded_exif_conflict",
+      "embedded": "displayp3",
+      "exif_color_space": "srgb",
+      "issue": "profile_conflict"
+    },
+    {
+      "id": "assignment_over_embedded",
+      "embedded": "displayp3",
+      "panel_assignment": "adobergb",
+      "effective": "adobergb",
+      "origin": "panel_assignment"
+    },
+    {
+      "id": "panel_over_group",
+      "embedded": "srgb",
+      "group_assignment": "displayp3",
+      "panel_assignment": "linear_srgb",
+      "effective": "linear_srgb",
+      "origin": "panel_assignment"
+    },
+    {
+      "id": "untagged_exif_srgb",
+      "embedded": null,
+      "exif_color_space": "srgb",
+      "effective": "srgb",
+      "origin": "exif_color_space"
+    },
+    {
+      "id": "untagged_auto",
+      "embedded": null,
+      "issue": "profile_required"
+    },
+    {
+      "id": "untagged_assume_srgb",
+      "embedded": null,
+      "policy": "assume_srgb",
+      "effective": "srgb",
+      "origin": "assumption"
+    },
+    {
+      "id": "invalid_embedded",
+      "embedded": "truncated",
+      "issue": "invalid_icc"
+    }
+  ]
+}

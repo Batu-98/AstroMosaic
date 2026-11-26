@@ -370,6 +370,8 @@ Record selected backend, fallback reason, dtype conversions, failed coordinate c
 | 5: Extended formats and channels | Optional XISF, projections, and per-band outputs | Format, geometry, mask, unit, packaging, and channel-consistency checks pass for each added workflow. |
 | 6: Real-observation reliability and Windows acceptance | Real-data baseline, foreground and plate-solve diagnostics, ZEA preview reliability, and native Windows lifecycle | Pass the [Phase 6A–6E gates](#104-phase-6-delivery-stages) using exclusively real observational data, with independently reopened exports and clean Windows 11 x64 evidence for the intended build. |
 | 7: Terrain panorama registration | Ground control points, an anchored robust fit, and a verified camera model for real wide-angle captures | Pass the [Phase 7A–7F gates](#105-phase-7-delivery-stages). Demonstrate improvement on previously unsupported real terrain and retain the legacy, negative and sky regression checks. |
+| 8: Photo export and corrections | Full-resolution photo export, color profiles, exposure and brightness | See the [Phase 8 disposition](#106-phase-8-delivery-stages) for delivered and deferred criteria. |
+| 9: Desktop undo and redo | Reversible project edits, local mask and terrain editing, and safe restoration of worker results | Pass the [Phase 9A–9D gates](#107-phase-9-delivery-stages) for history, save state, resource bounds and Windows workflows. |
 
 Memory and portability contracts begin in Phase 0; Phase 4 scales and verifies them. Do not postpone their architectural design until after the GUI or blend engine is complete.
 
@@ -495,7 +497,13 @@ Start 7A when the Phase 6A terrain references and 6B diagnostic checks are ready
 
 ### 10.6 Phase 8 Delivery Stages
 
+**Disposition, 2026-11-26.** The owner closed Phase 8 with the locally verified photo workflow through beta 15. The outstanding 8D criteria and remaining 8E and 8F work are recorded for follow-up. [Delivered scope and deferred criteria](docs/phase-8.md#phase-8-closure)
+
 Phase 8 starts with full-resolution photo export from the current sRGB sky preview. Stage 8A freezes the sky photo and scientific output intents, source coordinate frame, color transfer, profiles, fixtures and numerical limits for 8B. Later stages qualify selectable profile, color conversion, exposure, brightness, lens geometry and vignetting methods with independent measurements. The delivery gates cover scientific output parity, bounded sampling, saved project compatibility and desktop/CLI automation. [8A contract](docs/phase-8.md#8a-frozen-photo-export-contract) · [Delivery and acceptance](docs/phase-8.md#delivery-stages) · [ADR-0026](docs/adr/0026-configurable-color-photometry-and-optics.md)
+
+### 10.7 Phase 9 Delivery Stages
+
+Plan session-scoped undo and redo for the desktop. Begin with panel edits and the saved-project checkpoint in 9A. Extend coverage to accepted dialogs and editor gestures in 9B, then handle worker results, sidecar references and bounded retention in 9C. In 9D, compare exports before and after history navigation and verify the packaged Windows workflow. [Detailed scope and acceptance criteria](docs/phase-9.md)
 
 ## 11. Validation and Acceptance Criteria
 

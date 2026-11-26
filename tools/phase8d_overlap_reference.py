@@ -39,6 +39,7 @@ _PA4 = ("19.TIF", "20.TIF", "21.TIF", "22.TIF")
 _BUDGET = 64 * 1024**2
 _MIN_SAMPLES = 128
 _MIN_BLOCKS = 2
+_MIN_BACKGROUND_SAMPLES = 8
 _P95_MARGIN = 2e-6
 _RANK_RATIO = 0.015
 _IDENTITY = np.array([1.0, 0.0, 0.0, 0.0])
@@ -166,15 +167,23 @@ def _control(
     return frames, x[sampled], y[sampled], truth
 
 
-def _edges(panels: Sequence[PanelSamples], x: Indices, y: Indices) -> list[Edge]:
+def _spatial_partition(x: Indices, y: Indices) -> tuple[Indices, Indices]:
     col, row = x // 64, y // 64
     block = row * (int(col.max()) + 1) + col
     assignment = (row + 2 * col) % 5
     fold = np.where(assignment == 0, 2, np.where(assignment == 1, 1, 0))
+    return block, fold
+
+
+def _common_samples(left: PanelSamples, right: PanelSamples) -> NDArray[np.bool_]:
+    return np.isfinite(left.rgb).all(axis=1) & np.isfinite(right.rgb).all(axis=1)
+
+
+def _edges(panels: Sequence[PanelSamples], block: Indices, fold: Indices) -> list[Edge]:
     result = []
     for i, j in combinations(range(len(panels)), 2):
         a, b = panels[i], panels[j]
-        valid = np.isfinite(a.rgb).all(axis=1) & np.isfinite(b.rgb).all(axis=1)
+        valid = _common_samples(a, b)
         if not valid.any():
             continue
         split = fold[valid]
@@ -189,6 +198,34 @@ def _edges(panels: Sequence[PanelSamples], x: Indices, y: Indices) -> list[Edge]
             )
         )
     return result
+
+
+def _background_support(edge: Edge, block: Indices) -> dict[str, dict[str, object]]:
+    """Describe color and spatial variation of block medians at fixed unity gain."""
+    ordered = np.argsort(block, kind="stable")
+    regions = np.split(ordered, np.flatnonzero(np.diff(block[ordered])) + 1)
+    differences: list[list[Values]] = [[], [], []]
+    for region in regions:
+        if len(region) >= _MIN_BACKGROUND_SAMPLES:
+            difference = edge.rgb[region, 1] - edge.rgb[region, 0]
+            differences[int(edge.fold[region[0]])].append(np.median(difference, axis=0))
+
+    results = {}
+    for name, rows in zip(("training", "selection", "final"), differences, strict=True):
+        metrics: dict[str, object] = {"blocks": len(rows)}
+        if rows:
+            rgb = np.stack(rows)
+            low, high = rgb.min(axis=1), rgb.max(axis=1)
+            midpoint = (low + high) / 2
+            p05, p95 = np.percentile(midpoint, [5, 95])
+            # The midpoint is the best possible scalar correction within each block.
+            metrics.update(
+                median_rgb_difference=np.median(rgb, axis=0).tolist(),
+                linked_level_span_p05_p95=float(p95 - p05),
+                linked_color_floor_p95=float(np.percentile((high - low) / 2, 95)),
+            )
+        results[name] = metrics
+    return results
 
 
 def _candidate(
@@ -259,6 +296,19 @@ def _errors(edges: Sequence[Edge], coefficients: Values, fold: int) -> list[floa
     return errors
 
 
+def _linked_offset_bound(edge: Edge, fold: int) -> float:
+    """Bound the pooled RGB P95 for any linked additive correction at unity gain."""
+    rgb = edge.rgb[edge.fold == fold]
+    differences = np.sort(rgb[:, 1] - rgb[:, 0], axis=1)
+    gaps = np.diff(differences, axis=1)
+    # The second- and third-smallest errors must cover at least two or three
+    # channels within the same interval around the linked correction.
+    bounds = np.zeros_like(differences)
+    bounds[:, 1] = gaps.min(axis=1) / 2
+    bounds[:, 2] = (differences[:, 2] - differences[:, 0]) / 2
+    return float(np.percentile(bounds, 95))
+
+
 def _standard(edges: Sequence[Edge], group: tuple[int, ...], count: int) -> Values:
     coefficients = np.tile(_IDENTITY, (count, 1))
     visited = {group[0]}
@@ -314,10 +364,13 @@ def measure(
     preserve_calibrated_scale: bool = False,
     stellar_apertures: Mapping[str, Sequence[Aperture]] | None = None,
     additional_gains: Mapping[str, Coefficients] | None = None,
+    background_support: bool = False,
+    linked_offset_bound: bool = False,
 ) -> dict[str, object]:
     panels = sorted(panels, key=lambda panel: panel.name)
     names = [panel.name for panel in panels]
-    edges = _edges(panels, x, y)
+    block, fold = _spatial_partition(x, y)
+    edges = _edges(panels, block, fold)
     groups = components(len(names), [edge.indices for edge in edges if edge.qualified])
     reference = groups[0]
     accepted = [e for e in edges if e.qualified and set(e.indices).issubset(reference)]
@@ -372,6 +425,20 @@ def measure(
         "unavailable_candidates": rejected,
         "sample_rgb_sha256": hashes,
     }
+    if linked_offset_bound:
+        report["linked_offset_lower_bound_rgb_p95"] = {
+            name: [_linked_offset_bound(edge, fold_id) for edge in accepted]
+            for fold_id, name in enumerate(("training", "selection", "final"))
+        }
+    if background_support:
+        background = []
+        for edge in accepted:
+            left, right = edge.indices
+            shared = _common_samples(panels[left], panels[right])
+            background.append(
+                {"panels": [names[left], names[right]], **_background_support(edge, block[shared])}
+            )
+        report["background_support"] = background
     if stellar_apertures is not None:
         stellar = qualify_gains(report, stellar_apertures, additional=additional_gains)
         eligible = stellar["eligible"]
@@ -420,6 +487,8 @@ def measure_project(
     preserve_calibrated_scale: bool = False,
     stellar_gain: bool = False,
     additional_gains: Mapping[str, Coefficients] | None = None,
+    background_support: bool = False,
+    linked_offset_bound: bool = False,
 ) -> dict[str, object]:
     project = load_project(project_path)
     records = sorted(
@@ -514,6 +583,8 @@ def measure_project(
         preserve_calibrated_scale=preserve_calibrated_scale,
         stellar_apertures=apertures,
         additional_gains=additional_gains,
+        background_support=background_support,
+        linked_offset_bound=linked_offset_bound,
     )
     reordered = measure(
         panels[::-1],
@@ -522,6 +593,8 @@ def measure_project(
         preserve_calibrated_scale=preserve_calibrated_scale,
         stellar_apertures=apertures,
         additional_gains=additional_gains,
+        background_support=background_support,
+        linked_offset_bound=linked_offset_bound,
     )
     if report != reordered:
         raise ValueError("Reversing input order changed the reference result.")
@@ -551,6 +624,16 @@ def main() -> int:
         help="Require independent stellar support for inferred relative gains in --project.",
     )
     parser.add_argument(
+        "--background-support",
+        action="store_true",
+        help="Report spatial variation and linked RGB color limits in the project overlaps.",
+    )
+    parser.add_argument(
+        "--linked-offset-bound",
+        action="store_true",
+        help="Bound overlap RGB P95 for any linked additive correction at unity gain.",
+    )
+    parser.add_argument(
         "--audit-standard-export",
         type=Path,
         help="Score gains from the current application's Standard JSON export of --project.",
@@ -561,6 +644,10 @@ def main() -> int:
         parser.error("--preserve-calibrated-scale requires --project.")
     if args.stellar_gain and args.project is None:
         parser.error("--stellar-gain requires --project.")
+    if args.background_support and args.project is None:
+        parser.error("--background-support requires --project.")
+    if args.linked_offset_bound and args.project is None:
+        parser.error("--linked-offset-bound requires --project.")
     if args.audit_standard_export is not None and not args.stellar_gain:
         parser.error("--audit-standard-export requires --stellar-gain.")
     if _digest(args.owner) != _OWNER_HASH:
@@ -597,6 +684,8 @@ def main() -> int:
             preserve_calibrated_scale=args.preserve_calibrated_scale,
             stellar_gain=args.stellar_gain,
             additional_gains=additional,
+            background_support=args.background_support,
+            linked_offset_bound=args.linked_offset_bound,
         )
     if _digest(args.owner) != _OWNER_HASH:
         raise ValueError("The owner original changed during reference sampling.")
