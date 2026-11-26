@@ -24,7 +24,7 @@ The selected band's available filter labels and brightness units appear in Mosai
 
 ## Geometry and Display
 
-The desktop first offers a 160-edge proxy, then a fixed reference preview and a viewport-sized overview within the job budget. When minifying, it averages a bounded grid of sub-samples per display cell in linear light and excludes invalid samples. At close zoom a cancellable worker reads an in-bounds visible rectangle, sampling the exact output pixel centers. The detail reuses the overview tone and is composited over the overview. Its maximum size is 1,048,576 output pixels. The original headless point-preview API remains available for coincident sample checks.
+The desktop builds a progressive overview from a proxy of up to 160 pixels on its longest edge, a fixed reference for display tone, and an overview sized to the viewport and working budget. When minifying, it averages a bounded grid of sub-samples per display cell in linear light and excludes invalid samples. At close zoom a cancellable worker reads an in-bounds visible rectangle, sampling the exact output pixel centers. The detail reuses the overview tone and is composited over the overview. Its maximum size is 1,048,576 output pixels. The original headless point-preview API remains available for coincident sample checks.
 
 **Resolution Scale** in the preview toolbar starts at **50%**. Choose **25%**, **50%**, **75%**, or **100%** of the normal viewport-based overview resolution. Changing the scale rebuilds an existing preview. The original output grid, 1:1 detail, fixed tone reference, and export resolution are independent of this choice.
 

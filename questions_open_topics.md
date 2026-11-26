@@ -163,16 +163,6 @@ This register tracks unresolved decisions, problems, and risks. It is not a work
 - **Next action on revisit** Obtain a calibrated independent RGB network with coherent spatial variation on two or more overlaps. Keep the Lagoon and M33 controls. For visible optics, use a reference with stronger measured flat response leverage. For the locally checked F606W M5 path, obtain observing time and confirm guide stars through the allocated program. Require at least 15 precision-qualified test stars in three blocks after common-pixel and donor screening. Run the wider-dither screen after every geometry-qualified link reaches full-test flux P95 at or below 1%. Arrange a separate Windows 11 x64 environment for portable acceptance. Jellyfish remains at calibration intake pending matching original capped CR2s. Track wide-field lens calibration and overlap under Q-016. Retain the NIRCam, MOANA and visible HST references. Prepare stable exposure brackets and separate lookup-table, rendering-intent and black point controls. [Delivery stages](docs/phase-8.md#delivery-stages)
 - **Closure condition** Each shipped method exposes its data requirements, effective settings and fit diagnostics. Verify source preservation, desktop/CLI parity, reproducible tagged photo export and scientific output parity on the frozen cases.
 
-### Q-032 - Desktop edit history budget
-
-- **Status / priority** Open / P1
-- **Opened / updated** 2026-11-26
-- **Affected phase** Phase 9C resource limits.
-- **Impact and evidence** Mask edits retain distinct label grids. An entry count alone cannot bound their total retained bytes. [Phase 9 plan](docs/phase-9.md)
-- **Current assumption** Share unchanged project data and bound retained entries and bytes across project and draft histories.
-- **Next action / responsibility** During 9C, the implementer measures representative panel and mask sessions on Windows and selects retention limits and behavior for an oversized edit.
-- **Closure condition** Record the workload, limits and peak memory. Verify eviction, oversized edits, saved-state tracking, redo branching and resource release on close.
-
 ### Q-035 - Desktop panel import and sky preview latency
 
 - **Status / priority** Open / P2
@@ -184,6 +174,14 @@ This register tracks unresolved decisions, problems, and risks. It is not a work
 - **Closure condition** Verify improvement on representative real projects with cold and warm measurements, documented peak memory, responsive cancellation, and unchanged reference WCS, coverage, and export results.
 
 ## Resolved Topics
+
+### Q-032 - Desktop edit history budget
+
+- **Status / priority** Resolved / P1
+- **Opened / updated** 2026-11-26
+- **Affected phase** Phase 9C resource limits.
+- **Resolution** Each project or draft history keeps up to 100 steps or 8 MiB of accounted immutable values. Shared values count once. An oversized edit remains applied and the Undo control reports the limit.
+- **Evidence** Measured a six-panel session and full-sized mask histories on Windows. The regressions cover both eviction limits, branching, oversized edits, saved-state reporting and release on close. [9C measurements](docs/phase-9.md#9c-worker-and-retention-verification)
 
 ### Q-001 - Python, dependency, and platform compatibility matrix
 

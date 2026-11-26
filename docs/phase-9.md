@@ -1,10 +1,10 @@
 # Phase 9 - Desktop undo and redo
 
-**Status** Planned. A user should be able to try a crop, correct a mask or apply a solve, then step backward and forward to the exact project they were editing. History belongs to the open desktop project and lasts for that session.
+**Status** In progress. Stages 9A through 9C have local Windows verification. The 9D export and portable acceptance gate is next.
 
 ## Starting point
 
-The desktop already compares the current `MosaicProject` with its saved state for discard prompts. Panel edits, accepted dialogs and worker completions assign new project values in several handlers. Mask reset, crop reset and terminal command recall each serve a narrower purpose. The inspected source has no project-wide history or Undo and Redo actions. Start with these existing mutation paths and the immutable render snapshot contract. [Project window](../src/astromosaic/ui/project_window.py) · [Project model](../src/astromosaic/storage/project.py) · [Project persistence and workers](adr/0012-project-manifest-and-render-worker.md)
+The desktop already compared the current `MosaicProject` with its saved state for discard prompts. Panel edits, accepted dialogs and worker completions supplied new project values. Phase 9A uses those same values for the session history cursor and retains the saved-value comparison. [Project window](../src/astromosaic/ui/project_window.py) · [Project model](../src/astromosaic/storage/project.py) · [History decision](adr/0032-desktop-project-history.md)
 
 ## What counts as one edit
 
@@ -47,3 +47,40 @@ Pan, zoom, display stretch, selection, draft crop movement, progress and termina
 - Replay a saved real sky project through crop and photo edits, and a mixed project through mask, terrain and composition edits. Capture project fields and independently reopen representative exports at baseline, after editing, after undo and after redo. Compare WCS, coverage and scientific samples with the existing workflow tolerances. Compare photo pixels and profile at matching states. [Application tests](application-tests.md) · [Extended export checks](application-tests-extension.md)
 - Verify current and supported older manifests open with empty history. Saving the current state uses the existing manifest schema. Check that a standalone CLI export of the saved state agrees with the desktop export. Exercise shortcuts with main-window, modal-editor, text-field and terminal focus.
 - **Gate** Record focused history tests, the existing regression suite, the native Windows CPU and OpenGL replays, and the same changed workflow in the versioned portable build. Report source and packaged results separately. Update the user guide with shortcuts, session lifetime and the measured retention limit before marking the phase complete. [Windows build and verification](windows-release.md)
+
+## 9A desktop edit inventory
+
+| Entry point | History behavior |
+| --- | --- |
+| `_add_paths` from Add Panels or `session add` | One **Add Panels** entry for all new files. The automatic foreground check completes that entry. Duplicate and failed adds preserve redo. |
+| `_remove` and `_relink_panel`, including `session relink` | **Remove Panel** and **Relink Panel** retain panel order, metadata, saved foreground and placement values. |
+| `_update_panel` from table edits, Panel Settings or `_finish_mask_editor` | **Change Panel Settings** for a table edit or accepted settings dialog. **Edit Sky Mask** for applying or removing an attachment. Brush and horizon gestures stay in the mask dialog. |
+| `_settings`, `_set_auto_frame`, `_adopt_preview_grid`, `_apply_crop` | **Change Mosaic Settings**, **Change Sky Framing**, **Use Preview Grid** or **Apply Crop**. Session preview grid and grid adoption commands use the same handlers. |
+| `_review_terrain_points` and `_composition_settings` | **Apply Terrain Alignment** for an accepted fit and **Change Composition Settings** for accepted placement or seam parameters. Point operations stay in the terrain dialog. |
+| `_finish_foreground_check`, `_finish_plate_solve`, `_finish_layer_job` | **Check Foreground**, **Apply Plate Solve**, **Align Foreground** or **Apply Placement Proposal** for changes that reach the active project. Worker revision and reference replay acceptance is tracked in 9C. |
+| `_new_project`, `_open_project`, `_save_project`, `closeEvent` | Lifecycle and saved checkpoint. Successful New, Open and Close clear the old history. Save retains it. Failed reads or writes and rejected discard prompts preserve the active session. |
+| View and job controls, application settings, and export commands | Selection, pan, zoom, display stretch, overlap highlighting, preview resolution and draft movement affect the view. Inspection and render jobs supply transient results. Preferences and terminal recall have their own lifetime. Export writes a file and adds no project entry. |
+
+All committed project changes use the same history path so a later undo restores a complete earlier value. The desktop regression covers the 9A panel gate, including the foreground result, saved checkpoint, rejected discard prompts, failed open and save, alternative redo shortcut and native text editing. [History regression](../tests/integration/test_desktop_project_history.py)
+
+## 9B editor history verification
+
+- The Sky Mask dialog groups a brush drag or horizon trace into one step. Undo and Redo restore the three label values and preserve the corresponding sky fingerprint. Reset Edits restores the starting labels and can itself be undone. Cancel discards the draft while keeping any project redo available. In the attached FITS control, project Undo restores the external mask reference and its validated WCS sidecar. Redo restores the authored labels and the sidecar's invalid status. The source image, external mask and sidecar bytes match throughout. [Mask and external WCS regression](../tests/integration/test_desktop_project_history.py) · [Horizon replay](../tests/integration/test_desktop_project.py)
+- The terrain editor restores point coordinates, order and flags. It records a new pair once both observations are present. Oxford's real similarity workflow reconstructs the same accepted fit after redo. On the real Paranal project, undo restores the prior terrain evidence and composition placement and re-enables composition export. Redo restores the new alignment and requires a new placement. [Terrain editor regressions](../tests/integration/test_terrain_editor.py)
+- The sky photo test checks an interactive crop and one accepted profile, exposure and brightness edit against the captured project values. History navigation clears the outdated crop overlay and rebuilds the preview at the restored dimensions. Preview and export wait for current inspection metadata and band availability. [Crop and photo settings replay](../tests/integration/test_desktop_project.py)
+
+## 9C worker and retention verification
+
+Each project value change and session transition advances a revision counter. Undo and Redo also advance it. Inspection, preview and detail completions require their launch revision. Mutating jobs hold history controls until their UI-thread completion. A normal preview can be cancelled by history navigation. A partial plate solve attaches its completed results once, and replay uses those saved file references.
+
+The Windows regression cancels after one accepted WCS, verifies both sidecar identity and bytes through Undo and Redo, and checks solver call counts. Cancelling an attempt that produces zero attachments preserves the redo branch. Removing a recorded sidecar before Redo produces the existing Link and WCS diagnostics and disables sky preview and export. Returning the file allows a fresh inspection to recover the controls. [Plate solve regression](../tests/integration/test_desktop_plate_solve.py)
+
+Each history retains up to **100 steps** or **8 MiB** of accounted immutable values. The project and an open editor each use this limit. Accounting counts shared values once, including masks, and includes the active value in the history. The saved checkpoint remains independently available for dirty-state comparison. History evicts the oldest steps first. If even the newest pair exceeds the budget, the edit applies and the Undo control displays **history limit reached**. A single active value can exceed the budget.
+
+| Windows workload | Accepted edits | Steps retained | Accounted bytes | Python allocation peak |
+| --- | ---: | ---: | ---: | ---: |
+| Six PA4 panels, cycling manual EV | 240 | 100 | 637,226 | 174,328 B |
+| Mask draft on a 384 × 384 label grid | 160 | 55 | 8,262,589 | 8,568,146 B |
+| Applied labels on a real Paranal panel, 384 × 323 grid | 80 | 65 | 8,342,834 | 8,509,956 B |
+
+The draft retained 23,754,814 accounted bytes with an unrestricted cursor. Python allocation peaks were measured with tracemalloc after opening the real project manifests. Windows reported a 159,358,976-byte process working-set high water across both bounded and unrestricted workloads. Releasing the bounded mask draft left 360 B of traced allocations. The tests cover entry and byte eviction, branch replacement, oversized edits, failed save, dirty recovery and closing before renaming a source. [Cursor tests](../tests/integration/test_edit_history.py) · [Desktop history regression](../tests/integration/test_desktop_project_history.py)

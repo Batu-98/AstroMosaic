@@ -245,7 +245,9 @@ def test_session_commands_use_the_live_project_without_modal_dialogs(
         run(f'session save "{saved.with_suffix("")}"')
         assert window.project_path == saved and load_project(saved) == window.project
 
-        window.project = replace(window.project, render=replace(spec, crop=Region(1, 1, 9, 7)))
+        window._commit_project(
+            replace(window.project, render=replace(spec, crop=Region(1, 1, 9, 7))), "Apply Crop"
+        )
         run('session export -o "Live sky.fits"')
         wait_until(idle)
         assert fits.getdata(tmp_path / "Live sky.fits").shape == (7, 9)

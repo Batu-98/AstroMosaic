@@ -1,7 +1,7 @@
 """Edit a source-coordinate mask over a bounded panel preview."""
 
 import numpy as np
-from PySide6.QtCore import QPointF, QRectF, Qt, Signal
+from PySide6.QtCore import QEvent, QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import QColor, QImage, QMouseEvent, QPainter, QPaintEvent
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -18,6 +18,8 @@ from PySide6.QtWidgets import (
 
 from astromosaic.core.masks import FOREGROUND, SKY, UNCLASSIFIED, SourceMask, paint_stroke
 from astromosaic.display import DEFAULT_MIDTONES, stretch_rgba
+from astromosaic.ui.draft_history import add_draft_history_controls
+from astromosaic.ui.edit_history import EditHistory
 from astromosaic.ui.mosaic_job import MaskEditorFrame
 
 _COLORS = np.array([(175, 129, 214, 90), (64, 183, 231, 95), (246, 161, 67, 130)], dtype=np.uint8)
@@ -31,18 +33,23 @@ class _MaskCanvas(QWidget):
         super().__init__(parent)
         self.setMinimumSize(360, 260)
         self.setAccessibleName("Panel sky mask overlay")
+        self.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
         self.setCursor(Qt.CursorShape.CrossCursor)
         self.source_size = frame.image.output_size
         self.width_cells, self.height_cells = frame.image.size
         self._base = self._image(stretch_rgba(frame.image, DEFAULT_MIDTONES / 100).tobytes())
         self._uncovered = frame.image.rgba[..., 3] == 0
-        self._initial = frame.proposed or frame.saved
+        initial = frame.proposed or frame.saved
+        self._initial_labels = (
+            initial.labels if initial is not None else bytes(self.width_cells * self.height_cells)
+        )
+        self.history = EditHistory(self._initial_labels)
         self.grid = np.zeros((self.height_cells, self.width_cells), dtype=np.uint8)
         self.tool: int | None = None
         self.radius = 8
         self.show_overlay = True
         self._point: tuple[int, int] | None = None
-        self.restore()
+        self._restore_grid()
 
     def _image(self, rgba: bytes) -> QImage:
         return QImage(
@@ -53,9 +60,26 @@ class _MaskCanvas(QWidget):
             QImage.Format.Format_RGBA8888,
         ).copy()
 
-    def restore(self) -> None:
-        self.grid[:] = self._initial.grid() if self._initial is not None else UNCLASSIFIED
+    @property
+    def painting(self) -> bool:
+        return self._point is not None
+
+    def reset_edits(self) -> None:
+        if not self.painting and self.history.commit(self._initial_labels, "Reset Edits"):
+            self._restore_grid()
+
+    def undo(self) -> None:
+        if not self.painting and self.history.undo() is not None:
+            self._restore_grid()
+
+    def redo(self) -> None:
+        if not self.painting and self.history.redo() is not None:
+            self._restore_grid()
+
+    def _restore_grid(self) -> None:
+        self.grid[:] = np.frombuffer(self.history.value, dtype=np.uint8).reshape(self.grid.shape)
         self._update_overlay()
+        self.edited.emit()
 
     def _update_overlay(self) -> None:
         rgba = _COLORS[self.grid]
@@ -93,13 +117,19 @@ class _MaskCanvas(QWidget):
         paint_stroke(self.grid, self._point or end, end, self.tool, self.radius)
         self._point = end
         self._update_overlay()
-        self.edited.emit()
+
+    def event(self, event: QEvent) -> bool:
+        if event.type() == QEvent.Type.UngrabMouse and self.painting:
+            self._point = None
+            self._restore_grid()
+        return super().event(event)
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
         if event.button() == Qt.MouseButton.LeftButton and self.image_rect().contains(
             event.position()
         ):
             self._paint_to(event.position())
+            self.edited.emit()
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
         if self._point is not None and event.buttons() & Qt.MouseButton.LeftButton:
@@ -109,6 +139,9 @@ class _MaskCanvas(QWidget):
         if self._point is not None and event.button() == Qt.MouseButton.LeftButton:
             self._paint_to(event.position())
             self._point = None
+            label = "Trace Horizon" if self.tool is None else "Paint Mask"
+            self.history.commit(self.grid.tobytes(), label)
+            self.edited.emit()
 
 
 class MaskEditor(QDialog):
@@ -157,9 +190,13 @@ class MaskEditor(QDialog):
         overlay.setChecked(True)
         overlay.toggled.connect(self._show_overlay)
         controls.addWidget(overlay)
-        reset = QPushButton("Reset Edits")
-        reset.clicked.connect(self._reset)
-        controls.addWidget(reset)
+        self.undo_action, self.redo_action = add_draft_history_controls(
+            controls, self, self.canvas.undo, self.canvas.redo
+        )
+        self.reset_button = QPushButton("Reset Edits")
+        self.reset_button.setAutoDefault(False)
+        self.reset_button.clicked.connect(self.canvas.reset_edits)
+        controls.addWidget(self.reset_button)
         layout.addLayout(controls)
 
         width, height = frame.image.size
@@ -197,15 +234,18 @@ class MaskEditor(QDialog):
         self.canvas.show_overlay = visible
         self.canvas.update()
 
-    def _reset(self) -> None:
-        self.canvas.restore()
-        self._update_actions()
-
     def _update_actions(self) -> None:
-        self.apply_button.setEnabled(bool(self.canvas.grid.any()))
+        idle = not self.canvas.painting
+        self.tool.setEnabled(idle)
+        self.radius.setEnabled(idle and self.canvas.tool is not None)
+        self.undo_action.setText("Undo (history limit reached)" if self.canvas.history.limit_reached else "Undo")
+        self.undo_action.setEnabled(idle and self.canvas.history.undo_label is not None)
+        self.redo_action.setEnabled(idle and self.canvas.history.redo_label is not None)
+        self.reset_button.setEnabled(idle)
+        self.apply_button.setEnabled(idle and bool(self.canvas.grid.any()))
 
     def _apply(self) -> None:
-        self.result_mask = SourceMask(self.canvas.source_size, self.canvas.grid.tobytes())
+        self.result_mask = SourceMask(self.canvas.source_size, self.canvas.history.value)
         self.accept()
 
     def _remove(self) -> None:

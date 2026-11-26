@@ -38,6 +38,8 @@ from astromosaic.pipeline.control_points import (
     ModelChoice,
 )
 from astromosaic.storage.project import MosaicProject
+from astromosaic.ui.draft_history import add_draft_history_controls
+from astromosaic.ui.edit_history import EditHistory
 from astromosaic.ui.terrain_job import TerrainFitJob, TerrainImageJob
 from astromosaic.ui.terrain_view import TerrainView
 
@@ -184,7 +186,7 @@ class TerrainPointEditor(QDialog):
         if len(self._panels) < 2:
             raise ValueError("Apply foreground masks to at least two panels.")
         terrain = project.reviewable_terrain()
-        self._points = list(terrain.points) if terrain is not None else []
+        self._history = EditHistory(terrain.points if terrain is not None else ())
         self._serial = 1
         current = project.current_foreground()
 
@@ -275,6 +277,9 @@ class TerrainPointEditor(QDialog):
         self.cancel_edit = QPushButton("Cancel Edit")
         for button in (self.add_pair, self.move_point, self.remove_pair, self.cancel_edit):
             controls.addWidget(button)
+        self.undo_action, self.redo_action = add_draft_history_controls(
+            controls, self, self._undo, self._redo
+        )
         controls.addStretch()
         point_layout.addLayout(controls)
         point_layout.addWidget(self.points_table, 1)
@@ -393,6 +398,10 @@ class TerrainPointEditor(QDialog):
             return self.point_model.rows[index.row()]
         return None
 
+    @property
+    def _points(self) -> tuple[GroundControlPoint, ...]:
+        return self._history.value
+
     def _sync_points(self, selected_id: str | None = None) -> None:
         left, right = self._pair()
         pair = left, right
@@ -437,6 +446,9 @@ class TerrainPointEditor(QDialog):
         self.move_point.setEnabled(idle and images and selected and not editing)
         self.remove_pair.setEnabled(idle and selected and not editing)
         self.cancel_edit.setEnabled(idle and editing)
+        self.undo_action.setText("Undo (history limit reached)" if self._history.limit_reached else "Undo")
+        self.undo_action.setEnabled(idle and not editing and self._history.undo_label is not None)
+        self.redo_action.setEnabled(idle and not editing and self._history.redo_label is not None)
         self.fit_button.setEnabled(idle and not editing and any(p.enabled for p in self._points))
         self.apply_button.setEnabled(idle and not editing and self._candidate is not None)
         self.cancel_job.setEnabled(not idle and not self._cancel_requested)
@@ -479,7 +491,8 @@ class TerrainPointEditor(QDialog):
                 f"Point {self._serial}", self._pair(), self._pending[0], self._pending[1]
             )
             self._serial += 1
-            self._points.append(point)
+            self._set_mode(None)
+            self._store_points(self._points + (point,), "Add Pair", point.id)
         elif self._mode == "move":
             selected = self._selected()
             if selected is None:
@@ -490,22 +503,40 @@ class TerrainPointEditor(QDialog):
                 if panel == selected.panels[0]
                 else replace(selected, right_xy=xy)
             )
-            self._points[self._points.index(selected)] = point
-        else:
-            return
-        self._set_mode(None)
-        self._invalidate_fit(point.id)
+            self._set_mode(None)
+            self._replace_point(point, "Move Point")
 
     def _update_point(self, point: GroundControlPoint) -> None:
+        self._replace_point(point, "Change Point Flags")
+
+    def _replace_point(self, point: GroundControlPoint, label: str) -> None:
         index = next(i for i, old in enumerate(self._points) if old.id == point.id)
-        self._points[index] = point
-        self._invalidate_fit(point.id)
+        points = self._points
+        self._store_points(points[:index] + (point,) + points[index + 1 :], label, point.id)
 
     def _remove_pair(self) -> None:
         point = self._selected()
         if point is not None:
-            self._points.remove(point)
-            self._invalidate_fit()
+            self._store_points(
+                tuple(candidate for candidate in self._points if candidate.id != point.id),
+                "Remove Pair",
+            )
+
+    def _store_points(
+        self, points: tuple[GroundControlPoint, ...], label: str, selected_id: str | None = None
+    ) -> None:
+        if self._history.commit(points, label):
+            self._invalidate_fit(selected_id)
+
+    def _undo(self) -> None:
+        if self.undo_action.isEnabled() and self._history.undo() is not None:
+            selected = self._selected()
+            self._invalidate_fit(selected.id if selected is not None else None)
+
+    def _redo(self) -> None:
+        if self.redo_action.isEnabled() and self._history.redo() is not None:
+            selected = self._selected()
+            self._invalidate_fit(selected.id if selected is not None else None)
 
     def _open_link(self, row: int, _column: int) -> None:
         if self._fit is None:
@@ -557,7 +588,7 @@ class TerrainPointEditor(QDialog):
         model = _MODELS[self.model.currentIndex()]
         anchor = self._panels[self.anchor.currentIndex()]
         self._start(
-            TerrainFitJob(self.project, tuple(self._points), model, anchor, self),
+            TerrainFitJob(self.project, self._points, model, anchor, self),
             "Fitting foreground control points…",
         )
 

@@ -225,33 +225,69 @@ def test_oxford_editor_adds_moves_disables_and_reopens_real_pairs(
     window._open_project(path)
 
     def edit(dialog: TerrainPointEditor) -> None:
+        from PySide6.QtCore import Qt
+        from PySide6.QtTest import QTest
+
         _wait(app, lambda: dialog._job is None)
         assert dialog.model.currentText() == "Similarity"
         assert dialog.anchor.currentIndex() == 1
         assert dialog.point_model.rowCount() == len(seed)
+        initial = tuple(dialog.point_model.rows)
+        assert not dialog.undo_action.isEnabled()
         dialog.add_pair.click()
-        for view, xy in zip(dialog.views, (new.left_xy, new.right_xy), strict=True):
+        for side, (view, xy) in enumerate(
+            zip(dialog.views, (new.left_xy, new.right_xy), strict=True)
+        ):
             _click_image(view, xy, detail=True)
             _wait(app, lambda: dialog._job is None)
             _click_image(view, xy)
+            if side == 0:
+                assert tuple(dialog.point_model.rows) == initial
+                assert not dialog.undo_action.isEnabled()
         added = dialog._selected()
         assert added is not None and added.id.startswith("Point ")
         np.testing.assert_allclose(added.left_xy, new.left_xy, atol=1, rtol=0)
         np.testing.assert_allclose(added.right_xy, new.right_xy, atol=1, rtol=0)
+        after_add = tuple(dialog.point_model.rows)
+        dialog.points_table.setFocus()
+        QTest.keyClick(dialog.points_table, Qt.Key.Key_Z, Qt.KeyboardModifier.ControlModifier)
+        assert tuple(dialog.point_model.rows) == initial and dialog.redo_action.isEnabled()
+        QTest.keyClick(dialog.points_table, Qt.Key.Key_Y, Qt.KeyboardModifier.ControlModifier)
+        assert tuple(dialog.point_model.rows) == after_add
 
+        dialog.points_table.selectRow(len(after_add) - 1)
         dialog.move_point.click()
-        dialog.views[1].picked.emit(new.right_xy)
+        revised_xy = (new.right_xy[0] + 0.125, new.right_xy[1])
+        dialog.views[1].picked.emit(revised_xy)
         moved = dialog._selected()
         assert (
-            moved is not None and moved.right_xy == new.right_xy and moved.left_xy == added.left_xy
+            moved is not None and moved.right_xy == revised_xy and moved.left_xy == added.left_xy
         )
+        dialog.undo_action.trigger()
+        assert tuple(dialog.point_model.rows) == after_add
+        dialog.redo_action.trigger()
+        assert dialog.point_model.rows[-1] == moved
         dialog.points_table.selectRow(0)
         removed_id = dialog.point_model.rows[0].id
         dialog.remove_pair.click()
         assert all(point.id != removed_id for point in dialog.point_model.rows)
+        dialog.undo_action.trigger()
+        assert dialog.point_model.rows[0].id == removed_id
+        dialog.redo_action.trigger()
+        assert all(point.id != removed_id for point in dialog.point_model.rows)
         disabled = dialog.point_model.rows[0]
         assert not disabled.held_out
         _enable_flag(dialog, 0, 1, False)
+        _enable_flag(dialog, 0, 2, True)
+        assert dialog.point_model.rows[0] == replace(disabled, enabled=False, held_out=True)
+        dialog.undo_action.trigger()
+        assert dialog.point_model.rows[0] == replace(disabled, enabled=False)
+        _enable_flag(dialog, 0, 2, False)
+        assert dialog.redo_action.isEnabled()
+        dialog.undo_action.trigger()
+        assert dialog.point_model.rows[0] == disabled
+        dialog.redo_action.trigger()
+        assert dialog.point_model.rows[0] == replace(disabled, enabled=False)
 
         dialog.model.setCurrentText("Translation")
         dialog.fit_button.click()
@@ -263,6 +299,7 @@ def test_oxford_editor_adds_moves_disables_and_reopens_real_pairs(
         dialog.model.setCurrentText("Similarity")
         dialog.fit_button.click()
         assert dialog.cancel_job.isEnabled()
+        assert not dialog.undo_action.isEnabled() and not dialog.redo_action.isEnabled()
         dialog.cancel_job.click()
         _wait(app, lambda: dialog._job is None)
         assert "cancelled" in dialog.status.text()
@@ -280,11 +317,37 @@ def test_oxford_editor_adds_moves_disables_and_reopens_real_pairs(
             row.status == "disabled" and row.id == disabled.id
             for row in dialog.point_model.diagnostics.values()
         )
+        candidate = dialog._candidate
+        dialog.undo_action.trigger()
+        assert dialog.point_model.rows[0] == disabled and dialog.links.rowCount() == 0
+        assert not dialog.apply_button.isEnabled() and not dialog.point_model.diagnostics
+        dialog.redo_action.trigger()
+        assert dialog.point_model.rows[0] == replace(disabled, enabled=False)
+        assert not dialog.apply_button.isEnabled()
+        dialog.fit_button.click()
+        _wait(app, lambda: dialog._job is None)
+        assert dialog.apply_button.isEnabled() and dialog._candidate == candidate
         dialog.apply_button.click()
 
     _review(app, window, edit)
     assert window.layer_box.currentText() == "Foreground"
     assert "Applied foreground similarity" in window.status.text()
+    aligned = window.project
+    assert window.undo_action.text() == "&Undo Apply Terrain Alignment"
+    window.undo_action.trigger()
+    assert window.project == saved and window.project.current_foreground() is not None
+
+    def cancel_draft(dialog: TerrainPointEditor) -> None:
+        _wait(app, lambda: dialog._job is None)
+        dialog.points_table.selectRow(0)
+        dialog.remove_pair.click()
+        assert dialog.undo_action.isEnabled()
+        dialog.reject()
+
+    _review(app, window, cancel_draft)
+    assert window.project == saved and window.redo_action.isEnabled()
+    window.redo_action.trigger()
+    assert window.project == aligned and window.project.reviewable_terrain() is not None
     assert window._save()
     assert json.loads(path.read_bytes())["version"] == 8
     window._open_project(path)
@@ -421,6 +484,13 @@ def test_mixed_editor_composition_preserves_the_real_sky_product(
 
     _review(app, window, fit)
     assert window.project.composition is None
+    aligned = window.project
+    window.layer_box.setCurrentText("Composition")
+    assert not window.start_button.isEnabled()
+    window.undo_action.trigger()
+    assert window.project == original and window.start_button.isEnabled()
+    window.redo_action.trigger()
+    assert window.project == aligned and not window.start_button.isEnabled()
     window.placement_action.trigger()
     _wait(app, lambda: window.job is None)
     assert window.layer_box.currentText() == "Composition"

@@ -45,6 +45,8 @@ Use **Tools → Plate Solve Settings** to choose and check the local ASTAP CLI a
 
 The **Command Panel** opens at startup and records summaries of desktop operations alongside CLI output. Use **Tools → Command Panel** to toggle it. The panel runs commands such as `project validate` and `project export` and supports render progress, cancellation and session history. [Command panel workflow](phase-4c.md#desktop-workflow)
 
+Use **Edit → Undo** with **Ctrl+Z** and **Redo** with **Ctrl+Y** or **Ctrl+Shift+Z**. Sky Mask and Terrain Control Points use the same shortcuts for their drafts. Applying a draft creates one project edit. Save keeps the history for the open session. New, Open and Close clear it. Each history keeps up to 100 steps or 8 MiB of project or draft values and drops the oldest steps first. [Desktop edit history](phase-9.md)
+
 Build a visual sky preview from RGB UInt16 TIFFs with supported profiles to enable **Export Photo Mosaic**. Use the **Photo** tab in **Mosaic Settings** for profile, exposure and brightness choices, and **Panel Settings → Photo** for per-panel profile or EV overrides. Choose **Preserve Tone** or **Use Preview Tone** to write a tagged 16-bit TIFF at the full preview grid resolution. [Photo workflow and CLI](phase-8.md#8c-photo-color-and-exposure-workflow)
 
 With **Live Sky Preview** enabled, an opened sky preview refreshes as its inputs change. Zoom for **1:1** detail and use **Edit Crop** to adjust the automatic bounds on the full grid. **Apply Crop** saves the selected pixel rectangle in the project grid for the next export. [Framing locks and crop controls](phase-3c.md#adaptive-framing-and-interactive-crop)

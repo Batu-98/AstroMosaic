@@ -78,6 +78,10 @@ class BackgroundJob[Result](QThread):
     def cancel(self) -> None:
         self._cancel.set()
 
+    @property
+    def cancellation_requested(self) -> bool:
+        return self._cancel.is_set()
+
     def _progress(self, done: int, total: int) -> None:
         now = monotonic()
         if done == total or now - self._last_update >= 0.05:
@@ -400,9 +404,17 @@ class ForegroundJob(_ProjectJob[tuple[MosaicProject, tuple[str, ...]]]):
     progress_label = "Checking"
     progress_units = "panels"
 
-    def __init__(self, project: MosaicProject, indices: tuple[int, ...], parent: QObject) -> None:
+    def __init__(
+        self,
+        project: MosaicProject,
+        indices: tuple[int, ...],
+        parent: QObject,
+        *,
+        after_add: bool = False,
+    ) -> None:
         super().__init__(project, parent)
         self.indices = indices
+        self.after_add = after_add
 
     def perform(self, context: JobContext) -> tuple[MosaicProject, tuple[str, ...]]:
         panels = list(self.project.panels)

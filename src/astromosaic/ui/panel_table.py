@@ -122,6 +122,7 @@ class PanelRow:
     values: dict[str, object]
     detail: str
     linked: bool
+    source_linked: bool
 
 
 def panel_row(
@@ -217,7 +218,7 @@ def panel_row(
                 "Mask sources": ", ".join(descriptor.mask_provenance) or None,
             }
         )
-    return PanelRow(panel, values, "\n".join(detail), not attention)
+    return PanelRow(panel, values, "\n".join(detail), not attention, statuses["Source"] == "Ready")
 
 
 class PanelTableModel(QAbstractTableModel):

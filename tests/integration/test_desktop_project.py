@@ -25,6 +25,7 @@ from astromosaic.core.job import JobContext
 from astromosaic.core.masks import FOREGROUND, MASK_EDGE, SKY, UNCLASSIFIED, SourceMask
 from astromosaic.geometry import tan_output_wcs
 from astromosaic.io import PanelSource, open_panel
+from astromosaic.photometry.photo_settings import PhotoProfile, PhotoSettings
 from astromosaic.pipeline.masking import read_thumbnail
 from astromosaic.pipeline.mosaic import MosaicResult, PreviewFrame, RenderSpec, SkyCalibrationError
 from astromosaic.pipeline.smoke import write_smoke_panel
@@ -46,10 +47,11 @@ def test_photo_desktop_session_and_cli_share_the_fitted_grid_and_tone(
     import os
 
     pytest.importorskip("PySide6")
-    from PySide6.QtCore import QEvent, QPointF, QSettings, Qt
+    from PySide6.QtCore import QEvent, QPointF, QSettings, Qt, QTimer
     from PySide6.QtTest import QTest
     from PySide6.QtWidgets import QApplication, QFileDialog
 
+    from astromosaic.ui.project_settings import ProjectSettings
     from astromosaic.ui.project_window import ProjectWindow
 
     if "QT_QPA_PLATFORM" not in os.environ:
@@ -206,6 +208,56 @@ def test_photo_desktop_session_and_cli_share_the_fitted_grid_and_tone(
         save_project(cropped, window.project)
         assert load_project(cropped) == window.project
         assert json.loads(cropped.read_bytes())["version"] == 9
+        cropped_project = window.project
+        assert window.undo_action.text() == "&Undo Apply Crop"
+        window.undo_action.trigger()
+        assert window.project == current and window.viewport.crop is None
+        assert not window.start_button.isEnabled()
+        wait_for_live_preview()
+        restored = window.viewport.frame
+        assert restored is not None and frame_before_crop is not None
+        assert restored.output_size == frame_before_crop.output_size
+        assert window.start_button.text() == "Export Photo Mosaic…"
+        window.redo_action.trigger()
+        assert window.project == cropped_project and window.viewport.crop is None
+        wait_for_live_preview()
+        restored = window.viewport.frame
+        assert restored is not None and restored.output_size == (edited.width, edited.height)
+        assert not window.crop_controls.isVisible()
+
+        def set_photo_options() -> None:
+            dialog = app.activeModalWidget()
+            assert isinstance(dialog, ProjectSettings)
+            dialog.photo_profile.mode.setCurrentIndex(dialog.photo_profile.mode.findData("srgb"))
+            dialog.photo_exposure.setCurrentIndex(dialog.photo_exposure.findData("manual"))
+            dialog.photo_brightness.setCurrentIndex(dialog.photo_brightness.findData("standard"))
+            dialog.accept()
+
+        QTimer.singleShot(0, set_photo_options)
+        window.settings_button.click()
+        changed = window.project
+        assert changed.photo_settings == PhotoSettings(PhotoProfile("srgb"), "manual", "standard")
+        assert changed.render == cropped_project.render
+        assert changed.frame_locks == cropped_project.frame_locks
+        assert window.undo_action.text() == "&Undo Change Mosaic Settings"
+        wait_for_live_preview()
+        assert window.start_button.text() == "Export Photo Mosaic…"
+        window.undo_action.trigger()
+        assert window.project == cropped_project
+        wait_for_live_preview()
+        window.redo_action.trigger()
+        assert window.project == changed
+        wait_for_live_preview()
+        assert window.band_box.currentData() == "RGB"
+        assert window.start_button.text() == "Export Photo Mosaic…"
+
+        window._update_panel(0, replace(window.project.panels[0], include_sky=False))
+        wait_idle()
+        assert window.band_box.findData("RGB") == -1
+        window.undo_action.trigger()
+        wait_idle()
+        assert window.band_box.findData("RGB") >= 0 and window.band_box.findData("L") >= 0
+        assert window.band_box.currentData() is None and not window.start_button.isEnabled()
 
         window.band_box.setCurrentIndex(window.band_box.findData("L"))
         assert window.start_button.text() == "Export Mosaic…" and window.viewport.frame is None
@@ -605,6 +657,11 @@ def test_desktop_sky_mask_proposal_manual_edits_and_reopen(
         assert not dialog.apply_button.isEnabled() and dialog.tool.currentIndex() == 0
         QTest.mousePress(dialog.canvas, left, pos=point(dialog, 0, 65))
         QTest.mouseRelease(dialog.canvas, left, pos=point(dialog, width - 1, 65))
+        assert np.all(dialog.canvas.grid[:65] == SKY)
+        assert np.all(dialog.canvas.grid[65:] == FOREGROUND)
+        dialog.undo_action.trigger()
+        assert np.all(dialog.canvas.grid == UNCLASSIFIED) and not dialog.apply_button.isEnabled()
+        dialog.redo_action.trigger()
         assert np.all(dialog.canvas.grid[:65] == SKY)
         assert np.all(dialog.canvas.grid[65:] == FOREGROUND)
         QTest.mouseClick(dialog.apply_button, left)

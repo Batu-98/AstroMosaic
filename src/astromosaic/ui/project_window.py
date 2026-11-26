@@ -10,7 +10,7 @@ from time import monotonic
 from typing import cast
 
 from PySide6.QtCore import QSettings, QSignalBlocker, QStandardPaths, Qt, QTimer, Slot
-from PySide6.QtGui import QCloseEvent
+from PySide6.QtGui import QCloseEvent, QKeySequence
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -49,6 +49,7 @@ from astromosaic.storage.project import (
 )
 from astromosaic.ui.appearance import add_theme_menu
 from astromosaic.ui.command_panel import CommandPanel
+from astromosaic.ui.edit_history import EditHistory
 from astromosaic.ui.foreground_details import ForegroundAlignmentDetails
 from astromosaic.ui.mask_editor import MaskEditor
 from astromosaic.ui.mosaic_job import (
@@ -106,7 +107,8 @@ class ProjectWindow(QMainWindow):
         app_version = version("astromosaic")
         beta_label = " (Beta)" if re.match(r"(?:\d+!)?[\d.]+b\d+", app_version) else ""
         self._app_title = f"AstroMosaic {app_version}{beta_label}"
-        self.project = MosaicProject(auto_frame_preview=True)
+        self._history = EditHistory(MosaicProject(auto_frame_preview=True))
+        self._revision = self._job_revision = self._inspection_revision = self._detail_revision = 0
         self._saved = self.project
         self.project_path: Path | None = None
         self.job: _Job | None = None
@@ -146,6 +148,10 @@ class ProjectWindow(QMainWindow):
         self.scientific_export = file_menu.addAction(
             "Export Scientific Mosaic…", self._start_scientific
         )
+        edit_menu = self.menuBar().addMenu("&Edit")
+        self.undo_action = edit_menu.addAction("&Undo", "Ctrl+Z", self._undo)
+        self.redo_action = edit_menu.addAction("&Redo", self._redo)
+        self.redo_action.setShortcuts([QKeySequence("Ctrl+Y"), QKeySequence("Ctrl+Shift+Z")])
         view_menu = self.menuBar().addMenu("&View")
         self._preferences = (
             preferences if preferences is not None else QSettings("AstroMosaic", "AstroMosaic")
@@ -380,6 +386,52 @@ class ProjectWindow(QMainWindow):
             [command_dock], [command_dock.minimumSizeHint().height()], Qt.Orientation.Vertical
         )
 
+    @property
+    def project(self) -> MosaicProject:
+        return self._history.value
+
+    def _commit_project(self, project: MosaicProject, label: str) -> bool:
+        if not self._history.commit(project, label):
+            return False
+        self._revision += 1
+        return True
+
+    def _can_navigate_history(self) -> bool:
+        return (
+            not self._close_after_job
+            and not self.command_panel.is_running
+            and (self.job is None or isinstance(self.job, PreviewJob))
+            and self._preview_state.crop is None
+        )
+
+    def _refresh_history_actions(self) -> None:
+        available = self._can_navigate_history()
+        for action, verb, label in (
+            (self.undo_action, "Undo", self._history.undo_label),
+            (self.redo_action, "Redo", self._history.redo_label),
+        ):
+            text = f"&{verb} {label}" if label is not None else f"&{verb}"
+            if action is self.undo_action and self._history.limit_reached:
+                text = "&Undo (history limit reached)"
+            action.setText(text)
+            action.setEnabled(available and label is not None)
+
+    @Slot()
+    def _undo(self) -> None:
+        if self._can_navigate_history() and (label := self._history.undo()) is not None:
+            self._refresh_restored_project(f"Undid {label}.")
+
+    @Slot()
+    def _redo(self) -> None:
+        if self._can_navigate_history() and (label := self._history.redo()) is not None:
+            self._refresh_restored_project(f"Redid {label}.")
+
+    def _refresh_restored_project(self, summary: str) -> None:
+        self._revision += 1
+        self._invalidate_panel_inspection()
+        self._refresh(self.panels.currentIndex().row())
+        self._report_operation(summary)
+
     def _refresh(self, selected: int = -1) -> None:
         if self._solved_panels is not self.project.panels:
             self._solved_panels = ()
@@ -410,6 +462,7 @@ class ProjectWindow(QMainWindow):
         marker = "*" if self.project != self._saved else ""
         self.setWindowTitle(f"{name}{marker} — {self._app_title}")
         self.command_panel.set_project_path(self.project_path)
+        self._refresh_history_actions()
         self._layer_controls()
         self.cancel_button.setEnabled(self.job is not None)
         self._start_panel_inspection()
@@ -421,9 +474,14 @@ class ProjectWindow(QMainWindow):
             return self._inspections[index]
         return None
 
+    def _invalidate_panel_inspection(self) -> None:
+        if self._inspection_job is not None:
+            self._inspection_job.cancel()
+        self._inspected_panels, self._inspections = (), ()
+
     def _start_panel_inspection(self) -> None:
         if self._inspection_job is not None:
-            if self._inspection_job.project.panels is not self.project.panels:
+            if self._inspection_revision != self._revision:
                 self._inspection_job.cancel()
             return
         if (
@@ -433,6 +491,7 @@ class ProjectWindow(QMainWindow):
         ):
             job = PanelInspectionJob(self.project, self)
             self._inspection_job = job
+            self._inspection_revision = self._revision
             job.finished.connect(self._finish_panel_inspection)
             job.start()
 
@@ -440,7 +499,7 @@ class ProjectWindow(QMainWindow):
     def _finish_panel_inspection(self) -> None:
         job, self._inspection_job = self._inspection_job, None
         assert job is not None
-        if job.project.panels is self.project.panels and not job.cancelled:
+        if self._inspection_revision == self._revision and not job.cancellation_requested:
             self._inspected_panels = job.project.panels
             self._inspections = job.result or (
                 PanelInspection("Unavailable", job.error or "Panel metadata could not be read."),
@@ -488,6 +547,25 @@ class ProjectWindow(QMainWindow):
                 self.band_box.addItem(label, label)
             self.band_box.setCurrentIndex(max(0, self.band_box.findData(self._selected_sky_band)))
 
+    def _references_ready(self, layer: Layer, band: str | None = None) -> bool:
+        rows = self.panels.properties.rows
+        if layer != "sky" and any(
+            not rows[index].source_linked for index, _ in self.project.foreground_inputs()
+        ):
+            return False
+        if layer != "foreground":
+            for index in self.project.sky_indices():
+                row = rows[index]
+                if not row.source_linked:
+                    return False
+                if band is not None and row.values["Band"] != band:
+                    continue
+                if not row.linked or (
+                    row.panel.wcs_sidecar is not None and row.values["WCS"] == "Invalid"
+                ):
+                    return False
+        return True
+
     def _layer_controls(self) -> None:
         draft = self._preview_state.crop
         cropping = draft is not None
@@ -500,14 +578,17 @@ class ProjectWindow(QMainWindow):
         ground = self.project.current_foreground()
         sky = bool(self.project.sky_indices())
         ground_count = len(self.project.foreground_inputs())
-        self.align_menu.setEnabled(idle and ground_count > 0)
-        self.align_action.setEnabled(idle and ground_count > 0)
-        self.review_points_action.setEnabled(idle and ground_count > 1)
+        ground_linked = self._references_ready("foreground")
+        self.align_menu.setEnabled(idle and ground_linked and ground_count > 0)
+        self.align_action.setEnabled(idle and ground_linked and ground_count > 0)
+        self.review_points_action.setEnabled(idle and ground_linked and ground_count > 1)
         if self._foreground_panels is not self.project.panels:
             self._foreground_report = None
             self._foreground_panels = None
         self.foreground_details_action.setEnabled(idle and self._foreground_report is not None)
-        self.placement_action.setEnabled(idle and ground is not None and sky)
+        self.placement_action.setEnabled(
+            idle and ground is not None and sky and self._references_ready("composition")
+        )
         self.composition_action.setEnabled(idle and ground is not None and sky)
         self.layer_box.setEnabled(idle and bool(self.project.panels))
         show_band = layer == "sky" and self.band_box.count() > 2
@@ -553,7 +634,11 @@ class ProjectWindow(QMainWindow):
                     f"  ·  {preview_spec.scale_arcsec:g} arcsec/px"
                 )
             band = self._sky_band()
-            ready = sky and (self.band_box.count() <= 2 or band is not None)
+            ready = (
+                sky
+                and self._inspected_panels is self.project.panels
+                and (self.band_box.count() <= 2 or band is not None)
+            )
             if band is not None:
                 summary += f"  ·  {band}"
         elif ground is None:
@@ -575,6 +660,7 @@ class ProjectWindow(QMainWindow):
                 summary = f"Composition  ·  {canvas.width} × {canvas.height} px  ·  Seam width {seam:.2f} px"
                 ready = True
         self.grid_summary.setText(summary)
+        ready = ready and self._references_ready(layer, self._sky_band())
         photo = self._photo_preview_ready()
         self.start_button.setText("Export Photo Mosaic…" if photo else "Export Mosaic…")
         self.start_button.setEnabled(idle and ready)
@@ -599,20 +685,22 @@ class ProjectWindow(QMainWindow):
 
     def _selection_changed(self) -> None:
         index = self.panels.currentIndex().row()
-        selected = index >= 0 and not self._is_running()
+        rows = self.panels.properties.rows
+        selected = 0 <= index < len(rows) and not self._is_running()
         editable = selected and self._preview_state.crop is None
+        source_ready = editable and rows[index].source_linked
         for control in (
             self.relink_action,
             self.panel_button,
-            self.mask_action,
             self.remove_action,
         ):
             control.setEnabled(editable)
-        self.check_foreground.setEnabled(editable)
+        self.mask_action.setEnabled(source_ready)
+        self.check_foreground.setEnabled(source_ready)
         self.propose_mask.setEnabled(
-            editable and self.project.panels[index].foreground_tag in ("mixed", "uncertain")
+            source_ready and self.project.panels[index].foreground_tag in ("mixed", "uncertain")
         )
-        self.revalidate_solve_action.setEnabled(editable and index in self.project.sky_indices())
+        self.revalidate_solve_action.setEnabled(source_ready and index in self.project.sky_indices())
         info = self._panel_inspection(index)
         self.solve_details_action.setEnabled(
             selected
@@ -640,8 +728,13 @@ class ProjectWindow(QMainWindow):
         self._clear_preview()
         self._foreground_report = None
         self._foreground_panels = None
+        self._solved_panels = ()
+        self._solve_outcomes.clear()
         self._selected_sky_band = None
-        self.project = self._saved = project
+        self._invalidate_panel_inspection()
+        self._history = EditHistory(project)
+        self._revision += 1
+        self._saved = project
         self.project_path = path
         self.progress.setValue(0)
         self._show_job_progress(False)
@@ -656,18 +749,28 @@ class ProjectWindow(QMainWindow):
         self._report_operation("New project.")
 
     def _open(self) -> None:
-        if not self._confirm_discard():
-            return
         name, _ = QFileDialog.getOpenFileName(self, "Open Project", "", _PROJECT_FILTER)
         if not name:
             return
         try:
-            self._open_project(Path(name))
+            self._open_project(Path(name), confirm_discard=True)
         except (OSError, ValueError) as error:
             self._error("Open failed", error)
 
-    def _open_project(self, path: Path) -> None:
-        self._set_project(load_project(path), path)
+    def _open_project(self, path: Path, *, confirm_discard: bool = False) -> None:
+        project = load_project(path)
+        if confirm_discard:
+            saved = self._saved
+            if not self._confirm_discard():
+                return
+            if (
+                saved is not self._saved
+                and self.project_path is not None
+                and self.project_path.resolve() == path.resolve()
+            ):
+                # The discard prompt saved this file after we loaded it.
+                project = self._saved
+        self._set_project(project, path)
         self._report_operation(f"Opened {path.name}.")
 
     def _save(self) -> bool:
@@ -735,12 +838,16 @@ class ProjectWindow(QMainWindow):
                 additions.append(ProjectPanel(source))
                 known.add(source.path)
         start = len(self.project.panels)
-        self.project = replace(self.project, panels=self.project.panels + tuple(additions))
+        added = self._commit_project(
+            replace(self.project, panels=self.project.panels + tuple(additions)), "Add Panels"
+        )
         self._refresh(start)
-        if additions:
+        if added:
             self._report_operation(f"Added {len(additions)} panel(s).")
             indices = tuple(range(start, len(self.project.panels)))
-            self._launch_job(ForegroundJob(self.project, indices, self), "Checking foreground…")
+            self._launch_job(
+                ForegroundJob(self.project, indices, self, after_add=True), "Checking foreground…"
+            )
         else:
             self._report_operation("Panels already added.")
 
@@ -757,7 +864,8 @@ class ProjectWindow(QMainWindow):
                 self._error("Relink failed", error)
 
     def _relink_panel(self, index: int, path: Path) -> None:
-        self.project = self.project.relink_panel(index, path)
+        if not self._commit_project(self.project.relink_panel(index, path), "Relink Panel"):
+            self._invalidate_panel_inspection()
         self._refresh(index)
         self._report_operation(f"Relinked {path.name}.")
 
@@ -814,6 +922,8 @@ class ProjectWindow(QMainWindow):
                 if not self.project.panels:
                     raise ValueError("Add panels to the active project first.")
                 if action == "preview":
+                    if not self._references_ready(self._layer(), self._sky_band()):
+                        raise ValueError("Check the panel Link and WCS columns before building a preview.")
                     if arguments.grid is not None:
                         if self._layer() != "sky":
                             raise ValueError("Select the sky layer to set the sky preview grid.")
@@ -824,6 +934,8 @@ class ProjectWindow(QMainWindow):
                     band = arguments.band if arguments.band is not None else self._sky_band()
                     if arguments.band is not None and layer != "sky":
                         raise ValueError("Select a band only for the sky layer.")
+                    if not self._references_ready(layer, band if layer == "sky" else None):
+                        raise ValueError("Check the panel Link and WCS columns before exporting.")
                     self._export_to(
                         directory / arguments.output, layer, band if layer == "sky" else None
                     )
@@ -842,7 +954,9 @@ class ProjectWindow(QMainWindow):
     def _remove(self) -> None:
         index = self.panels.currentIndex().row()
         panels = self.project.panels
-        self.project = replace(self.project, panels=panels[:index] + panels[index + 1 :])
+        self._commit_project(
+            replace(self.project, panels=panels[:index] + panels[index + 1 :]), "Remove Panel"
+        )
         self._refresh(index)
         self._report_operation(f"Removed {panels[index].source.path.name}.")
 
@@ -872,12 +986,20 @@ class ProjectWindow(QMainWindow):
             self._panel_dialog = None
             dialog.deleteLater()
 
-    def _update_panel(self, index: int, panel: ProjectPanel, *, summary: str | None = None) -> None:
+    def _update_panel(
+        self,
+        index: int,
+        panel: ProjectPanel,
+        *,
+        summary: str | None = None,
+        label: str = "Change Panel Settings",
+    ) -> None:
         panels = self.project.panels
         previous = panels[index]
-        if panel == previous:
+        if not self._commit_project(
+            replace(self.project, panels=panels[:index] + (panel,) + panels[index + 1 :]), label
+        ):
             return
-        self.project = replace(self.project, panels=panels[:index] + (panel,) + panels[index + 1 :])
         # Table edits only change how the project uses the inspected source.
         if self._inspected_panels is panels and panel == replace(
             previous,
@@ -946,10 +1068,11 @@ class ProjectWindow(QMainWindow):
             while dialog.exec():
                 try:
                     previous = self.project
-                    self.project = dialog.settings()
+                    settings = dialog.settings()
                 except (OSError, ValueError, OverflowError) as error:
                     self._error("Invalid mosaic settings", error)
                     continue
+                self._commit_project(settings, "Change Mosaic Settings")
                 self._refresh(self.panels.currentIndex().row())
                 summary = "Mosaic settings applied."
                 if previous.composition is not None and self.project.composition is None:
@@ -1166,6 +1289,8 @@ class ProjectWindow(QMainWindow):
         selected = self._sky_band()
         if self._layer() != "sky" or (self.band_box.count() > 2 and selected is None):
             return
+        if not self._references_ready("sky", selected):
+            return
         ready = False
         for index in self.project.sky_indices():
             info = self._panel_inspection(index)
@@ -1220,6 +1345,7 @@ class ProjectWindow(QMainWindow):
         job = self._detail_job = PreviewDetailJob(
             overview, self, window, use_gpu=self._use_gpu_preview
         )
+        self._detail_revision = self._revision
         job.finished.connect(self._finish_detail)
         job.start()
 
@@ -1231,9 +1357,13 @@ class ProjectWindow(QMainWindow):
         if self.job is not None:
             self.job.start()
         elif not self._close_after_job and request is not None and (
-            self._preview_state.current(self._preview_selection()) is job.overview
+            self._detail_revision == self._revision
+            and self._preview_state.current(self._preview_selection()) is job.overview
         ):
-            if job.result is not None and job.window.contains(request):
+            if (
+                not job.cancellation_requested
+                and job.result is not None and job.window.contains(request)
+            ):
                 self.viewport.set_detail(job.window, job.result)
             elif job.error is None:
                 self._detail_timer.start()
@@ -1243,7 +1373,9 @@ class ProjectWindow(QMainWindow):
     @Slot(bool)
     def _set_auto_frame(self, enabled: bool) -> None:
         if enabled != self.project.auto_frame_preview:
-            self.project = replace(self.project, auto_frame_preview=enabled)
+            self._commit_project(
+                replace(self.project, auto_frame_preview=enabled), "Change Sky Framing"
+            )
             self._refresh(self.panels.currentIndex().row())
 
     @Slot()
@@ -1254,8 +1386,9 @@ class ProjectWindow(QMainWindow):
             raise ValueError("Build an automatically framed sky preview first.")
         previous = self.project
         composition = previous.composition if grid == previous.render else None
-        self.project = replace(
-            previous, render=grid, auto_frame_preview=False, composition=composition
+        self._commit_project(
+            replace(previous, render=grid, auto_frame_preview=False, composition=composition),
+            "Use Preview Grid",
         )
         self._preview_state.adopt_grid(self.project)
         self._refresh(self.panels.currentIndex().row())
@@ -1328,10 +1461,13 @@ class ProjectWindow(QMainWindow):
         if grid is None:
             return
         previous = self.project
-        self.project = replace(
-            previous, render=grid, auto_frame_preview=False,
-            frame_locks=previous.frame_locks | {"crop"},
-            composition=previous.composition if grid == previous.render else None,
+        self._commit_project(
+            replace(
+                previous, render=grid, auto_frame_preview=False,
+                frame_locks=previous.frame_locks | {"crop"},
+                composition=previous.composition if grid == previous.render else None,
+            ),
+            "Apply Crop",
         )
         self._clear_preview()
         self._refresh(self.panels.currentIndex().row())
@@ -1353,7 +1489,8 @@ class ProjectWindow(QMainWindow):
     def _show_proxy(self, frame: DisplayFrame, visual_only: bool) -> None:
         job = self.job
         if (
-            isinstance(job, PreviewJob) and self.sender() is job and self.cancel_button.isEnabled()
+            isinstance(job, PreviewJob) and self.sender() is job
+            and self._job_revision == self._revision and not job.cancellation_requested
             and self._preview_state.show_proxy(job.request, self._preview_selection(), frame)
         ):
             self.preview_title.setText("Visual Preview" if visual_only else "Preview")
@@ -1389,7 +1526,7 @@ class ProjectWindow(QMainWindow):
             if not dialog.exec() or dialog.aligned_project is None:
                 return
             previous = self.project
-            self.project = dialog.aligned_project
+            self._commit_project(dialog.aligned_project, "Apply Terrain Alignment")
         finally:
             dialog.deleteLater()
         self._foreground_report = None
@@ -1439,7 +1576,9 @@ class ProjectWindow(QMainWindow):
                 except (ValueError, OverflowError) as error:
                     self._error("Invalid composition settings", error)
                     continue
-                self.project = replace(self.project, composition=composition)
+                self._commit_project(
+                    replace(self.project, composition=composition), "Change Composition Settings"
+                )
                 self._refresh(self.panels.currentIndex().row())
                 self.layer_box.setCurrentIndex(_LAYERS.index("composition"))
                 self._report_operation("Composition settings applied.")
@@ -1450,6 +1589,7 @@ class ProjectWindow(QMainWindow):
     def _launch_job(self, job: _Job, message: str) -> None:
         self._detail_timer.stop()
         self.job = job
+        self._job_revision = self._revision
         if isinstance(job, PlateSolveJob):
             job.solve_progress.connect(self._plate_solve_progress)
             self._set_solve_elapsed(0)
@@ -1514,11 +1654,14 @@ class ProjectWindow(QMainWindow):
         self._layer_controls()
         self.cancel_button.setEnabled(self.job is not None)
         self.command_panel.set_available(self.job is None and self._preview_state.crop is None)
+        self._refresh_history_actions()
         self._selection_changed()
 
     @Slot(object, object)
     def _progress(self, done: int, total: int) -> None:
         job = self.job
+        if self._job_revision != self._revision:
+            return
         self.progress.setValue((100 * done) // total)
         if job is not None and self.cancel_button.isEnabled():
             self.status.setText(f"{job.progress_label} {done:,} / {total:,} {job.progress_units}.")
@@ -1543,7 +1686,11 @@ class ProjectWindow(QMainWindow):
         job, self.job = self.job, None
         assert job is not None
         self._set_running()
-        if isinstance(job, PreviewJob):
+        if self._job_revision != self._revision:
+            if isinstance(job, PlateSolveJob):
+                self._solve_timer.stop()
+            self._refresh(self.panels.currentIndex().row())
+        elif isinstance(job, PreviewJob):
             self._finish_preview(job)
         elif isinstance(job, ForegroundJob):
             self._finish_foreground_check(job)
@@ -1581,7 +1728,9 @@ class ProjectWindow(QMainWindow):
                 panels[outcome.index] = replace(panels[outcome.index], wcs_sidecar=outcome.sidecar)
                 solved += 1
         if solved:
-            self.project = replace(self.project, panels=tuple(panels))
+            self._commit_project(
+                replace(self.project, panels=tuple(panels)), "Apply Plate Solve"
+            )
         self._solved_panels = self.project.panels
         self._solve_outcomes = {outcome.index: outcome for outcome in job.outcomes}
         self._refresh(self.panels.currentIndex().row())
@@ -1608,19 +1757,19 @@ class ProjectWindow(QMainWindow):
         request = job.request
         selection = self._preview_selection()
         result = job.result
-        if result is None:
+        if result is None or job.cancellation_requested:
             if not self._preview_state.accepts(request, selection):
                 return
             if request.crop_grid is not None:
                 self._restore_crop_preview()
-                if job.cancelled:
+                if job.cancellation_requested:
                     self._report_operation("Crop preview cancelled.")
                 else:
                     self._report_render_failure("Crop preview failed.", job)
                 return
             self._clear_preview()
             self.progress.setValue(0)
-            if job.cancelled:
+            if job.cancellation_requested:
                 self._report_operation("Preview cancelled.")
             else:
                 self._report_render_failure("Preview failed.", job)
@@ -1673,10 +1822,10 @@ class ProjectWindow(QMainWindow):
             self._layer_controls()
             if self._foreground_report is not None:
                 details = " See Layers → Foreground Alignment Details."
-        if job.result is None:
+        if job.result is None or job.cancellation_requested:
             self.progress.setValue(0)
             label = job.label.capitalize()
-            if job.cancelled:
+            if job.cancellation_requested:
                 self._report_operation(f"{label} cancelled.")
             else:
                 self._report_operation(
@@ -1684,14 +1833,16 @@ class ProjectWindow(QMainWindow):
                 )
             return
         if isinstance(job, ForegroundAlignmentJob):
-            self.project = job.result
+            self._commit_project(job.result, "Align Foreground")
             assert self.project.foreground is not None
             alignment = self.project.foreground.alignment
             layer = "foreground"
             message = f"Aligned {len(alignment.panels)} foreground panel(s) across {len(alignment.overlaps)} overlap(s)."
         else:
             placement = job.result
-            self.project = replace(self.project, composition=placement)
+            self._commit_project(
+                replace(self.project, composition=placement), "Apply Placement Proposal"
+            )
             assert placement.reference_panel is not None and placement.placement_rms_px is not None
             layer = "composition"
             message = f"Placement from panel {placement.reference_panel + 1} · {placement.placement_rms_px:.2f} px RMS."
@@ -1701,10 +1852,15 @@ class ProjectWindow(QMainWindow):
         self._report_operation(message + details)
 
     def _finish_foreground_check(self, job: ForegroundJob) -> None:
-        if job.result is None:
+        if job.result is None or job.cancellation_requested:
             self._mask_job_status(job)
             return
-        self.project, problems = job.result
+        project, problems = job.result
+        if job.after_add:
+            if self._history.complete_edit(job.project, project):
+                self._revision += 1
+        else:
+            self._commit_project(project, "Check Foreground")
         self._refresh(self.panels.currentIndex().row())
         self.progress.setValue(100)
         if problems:
@@ -1715,7 +1871,7 @@ class ProjectWindow(QMainWindow):
             self._report_operation(f"Checked {len(job.indices)} panel(s) for foreground.")
 
     def _finish_mask_editor(self, job: MaskEditorJob) -> None:
-        if job.result is None:
+        if job.result is None or job.cancellation_requested:
             self._mask_job_status(job)
             return
         if self._close_after_job:
@@ -1731,12 +1887,13 @@ class ProjectWindow(QMainWindow):
             attached=panel.sky_mask is not None,
             parent=self,
         )
+        revision = self._revision
         try:
             accepted = dialog.exec()
             mask = dialog.result_mask
         finally:
             dialog.deleteLater()
-        if not accepted:
+        if not accepted or revision != self._revision:
             self._report_operation("Sky mask editing cancelled.")
             return
         if (panel.sky_mask is not None and mask is not None and mask == job.result.saved) or (
@@ -1750,13 +1907,16 @@ class ProjectWindow(QMainWindow):
         if panel.wcs_sidecar is not None and (panel.sky_mask is not None or previous != current):
             message += " Recompute or clear the WCS sidecar for the new mask revision."
         self._update_panel(
-            job.index, replace(panel, source_mask=mask, sky_mask=None), summary=message
+            job.index,
+            replace(panel, source_mask=mask, sky_mask=None),
+            summary=message,
+            label="Edit Sky Mask",
         )
 
     def _mask_job_status(self, job: ForegroundJob | MaskEditorJob) -> None:
         self.progress.setValue(0)
         name = job.label.capitalize()
-        if job.cancelled:
+        if job.cancellation_requested:
             self._report_operation(f"{name} cancelled.")
         else:
             self._report_operation(f"{name} failed.", detail=job.error or "No result was returned.")
@@ -1812,7 +1972,7 @@ class ProjectWindow(QMainWindow):
             event.ignore()
         elif self._confirm_discard():
             self.viewport.release_opengl()
-            self._clear_preview()
+            self._set_project(MosaicProject(auto_frame_preview=True), None)
             event.accept()
         else:
             event.ignore()

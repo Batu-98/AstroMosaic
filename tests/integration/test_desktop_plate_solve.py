@@ -225,6 +225,28 @@ def test_desktop_plate_solve_skips_reusable_wcs_and_retries_unsolved_panels(
         assert len(list(sidecars.glob("*.wcs.json"))) == 1
         first_solution = window.project.panels[3].wcs_sidecar
         assert first_solution is not None and first_solution.path.parent == sidecars
+        partial = window.project
+        original_sidecar = first_solution.path.read_bytes()
+        initial_calls = calls[:]
+        assert window.undo_action.text() == "&Undo Apply Plate Solve"
+        window.undo_action.trigger()
+        assert window.project == project and window.redo_action.isEnabled()
+        waiting.clear()
+        window._start_plate_solve(5)
+        wait_for(waiting.is_set)
+        assert not window.undo_action.isEnabled() and not window.redo_action.isEnabled()
+        window.cancel_button.click()
+        wait_for(lambda: window.job is None and window._inspection_job is None)
+        assert window.project == project and window.redo_action.isEnabled()
+        assert "0 solved" in window.status.text()
+        assert calls[:len(initial_calls)] == initial_calls
+        assert [index for index, backend in calls[len(initial_calls):] if backend == "gaia"] == [5]
+        cancelled_calls = calls[:]
+        window.redo_action.trigger()
+        wait_for(lambda: window._inspection_job is None)
+        assert window.project == partial and window.project.panels[3].wcs_sidecar == first_solution
+        assert first_solution.path.read_bytes() == original_sidecar
+        assert calls == cancelled_calls
 
         window._file_actions[2].trigger()
         assert load_project(manifest) == window.project
@@ -239,10 +261,29 @@ def test_desktop_plate_solve_skips_reusable_wcs_and_retries_unsolved_panels(
         assert window.project.panels[3].wcs_sidecar == load_project(manifest).panels[3].wcs_sidecar
         assert window.project.panels[1].wcs_sidecar == panels[1].wcs_sidecar
         assert window.panels.cell(5, "Solve result").data() == "ASTAP hinted"
-        assert [index for index, backend in calls if backend == "gaia"] == [3, 4, 5]
+        assert [index for index, backend in calls if backend == "gaia"] == [3, 4, 5, 5]
         assert len(list(manifest.with_name("night.astromosaic.wcs").glob("*.wcs.json"))) == 2
         assert old_sidecar.read_text(encoding="utf-8") == "{}"
 
+        solved_project = window.project
+        last_sidecar = solved_project.panels[5].wcs_sidecar
+        assert last_sidecar is not None
+        window.undo_action.trigger()
+        moved_sidecar = last_sidecar.path.rename(tmp_path / "moved.wcs.json")
+        try:
+            calls_before_redo = calls[:]
+            window.redo_action.trigger()
+            wait_for(lambda: window._inspection_job is None)
+            assert window.project == solved_project and calls == calls_before_redo
+            assert "WCS sidecar missing" in window.panels.cell(5, "Link").data()
+            assert not window.preview_button.isEnabled() and not window.start_button.isEnabled()
+            assert window.plate_solve_button.isEnabled()
+        finally:
+            moved_sidecar.rename(last_sidecar.path)
+        window.undo_action.trigger()
+        window.redo_action.trigger()
+        wait_for(lambda: window._inspection_job is None)
+        assert window.preview_button.isEnabled() and window.start_button.isEnabled()
         assert window._save()
         window._set_project(load_project(manifest), manifest)
         window.plate_solve_button.click()
