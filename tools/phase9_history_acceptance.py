@@ -15,13 +15,14 @@ import tifffile
 from astropy.io import fits
 from astropy.wcs import WCS
 from numpy.typing import NDArray
-from PySide6.QtCore import QEvent, QPoint, QSettings, Qt, QTimer
-from PySide6.QtTest import QTest
+from PySide6.QtCore import QEvent, QPoint, QPointF, QSettings, Qt, QTimer
+from PySide6.QtGui import QMouseEvent
 from PySide6.QtWidgets import QApplication, QDialog
 
 from astromosaic.core import Region
 from astromosaic.core.masks import FOREGROUND
 from astromosaic.photometry.photo_settings import PhotoProfile, PhotoSettings
+from astromosaic.pipeline.mosaic import RenderSpec
 from astromosaic.storage.project import load_project, save_project
 from astromosaic.ui.mask_editor import MaskEditor
 from astromosaic.ui.mosaic_job import PreviewJob
@@ -156,7 +157,7 @@ class Replay:
         terminal.entry.setText(f'session {command} -o "{path}"')
         terminal.run_button.click()
         self.idle()
-        assert path.is_file(), terminal.output.toPlainText()[-2500:]
+        assert path.is_file(), self.window.status.text()
         return inspect_product(path)
 
     def save(self, name: str) -> Path:
@@ -173,7 +174,56 @@ class Replay:
         self.app.sendPostedEvents(None, QEvent.Type.DeferredDelete)
 
 
-def check_sky(replay: Replay, reference: Path) -> dict[str, object]:
+def apply_crop(replay: Replay, crop: Region) -> None:
+    window = replay.window
+    window.edit_crop_button.click()
+    replay.idle()
+    assert window.crop_controls.isVisible()
+    window.viewport.set_crop(crop, editing=True)
+    window._show_crop_bounds(crop)
+    window.apply_crop_button.click()
+    replay.idle()
+    assert window.project.render.crop == crop and "crop" in window.project.frame_locks
+
+
+def check_wcs(product: dict[str, object], spec: RenderSpec) -> None:
+    header = product["wcs"]
+    assert isinstance(header, str)
+    actual = WCS(fits.Header.fromstring(header)).celestial
+    region = spec.output_region()
+    samples = np.array([(0, 0), (region.width - 1, region.height - 1), (region.width // 2, region.height // 2)])
+    np.testing.assert_allclose(actual.all_pix2world(samples, 0),
+                               spec.output_wcs().all_pix2world(samples, 0), atol=1e-9, rtol=0)
+
+
+def check_science(replay: Replay, reference: Path) -> dict[str, object]:
+    window = replay.window
+    replay.open(reference)
+    original = window.project
+
+    def output(name: str) -> dict[str, object]:
+        replay.save(f"science-{name}")
+        result = replay.export("export", f"science-{name}.fits")
+        check_wcs(result, window.project.render)
+        assert result["unit"] == "DN"
+        return result
+
+    replay.preview()
+    initial = output("baseline")
+    apply_crop(replay, Region(160, 200, 650, 750))
+    edited = window.project
+    changed = output("edited")
+    assert changed != initial
+    window.undo_action.trigger()
+    assert window.project == original
+    assert output("undo") == initial
+    window.redo_action.trigger()
+    assert window.project == edited
+    assert output("redo") == changed
+    return {"baseline": initial, "edited": changed}
+
+
+def check_photo(replay: Replay, reference: Path) -> dict[str, object]:
     window = replay.window
     observed = load_project(reference)
     original = replace(observed, photo_settings=PhotoSettings(PhotoProfile("srgb")))
@@ -185,22 +235,14 @@ def check_sky(replay: Replay, reference: Path) -> dict[str, object]:
         manifest = replay.save(f"sky-{name}")
         assert json.loads(manifest.read_bytes())["version"] == 10
         replay.preview()
-        return {
-            "science": replay.export("export", f"sky-{name}.fits"),
-            "photo": replay.export("export-photo", f"sky-{name}.tiff"),
-        }
+        result = replay.export("export-photo", f"sky-{name}.tiff")
+        check_wcs(result, window.project.render)
+        assert result["icc"] == "384b832de3412066743b52a75ee906b6fb9fb8d9e09e936fc2c43223815c6e0a"
+        return result
 
     initial = outputs("baseline")
-    window.edit_crop_button.click()
-    replay.idle()
-    assert window.crop_controls.isVisible()
-    crop = Region(190, 250, 1000, 1000)
-    window.viewport.set_crop(crop, editing=True)
-    window._show_crop_bounds(crop)
-    window.apply_crop_button.click()
-    replay.idle()
+    apply_crop(replay, Region(190, 250, 1000, 1000))
     cropped = window.project
-    assert cropped.render.crop == crop and "crop" in cropped.frame_locks
 
     def photo_options(dialog: QDialog) -> None:
         assert isinstance(dialog, ProjectSettings)
@@ -215,8 +257,7 @@ def check_sky(replay: Replay, reference: Path) -> dict[str, object]:
     assert edited.photo_settings == PhotoSettings(PhotoProfile("srgb"), "manual", "standard")
     changed = outputs("edited")
     assert changed != initial
-    window.panels.setFocus()
-    QTest.keyClick(window.panels, Qt.Key.Key_Z, Qt.KeyboardModifier.ControlModifier)
+    window.undo_action.trigger()
     assert window.project == cropped
     window.undo_action.trigger()
     assert window.project == original
@@ -258,7 +299,16 @@ def check_mixed(replay: Replay, reference: Path) -> dict[str, object]:
             round(rect.x() + (x + 0.5) * rect.width() / cols),
             round(rect.y() + (y + 0.5) * rect.height() / height),
         )
-        QTest.mouseClick(dialog.canvas, Qt.MouseButton.LeftButton, pos=point)
+        button = Qt.MouseButton.LeftButton
+        for kind, pressed in (
+            (QEvent.Type.MouseButtonPress, button),
+            (QEvent.Type.MouseButtonRelease, Qt.MouseButton.NoButton),
+        ):
+            event = QMouseEvent(
+                kind, QPointF(point), QPointF(dialog.canvas.mapToGlobal(point)),
+                button, pressed, Qt.KeyboardModifier.NoModifier,
+            )
+            QApplication.sendEvent(dialog.canvas, event)
         assert dialog.undo_action.isEnabled()
         dialog.apply_button.click()
 
@@ -316,16 +366,16 @@ def main() -> None:
     data = args.data.resolve()
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=False)
-    sky = data / "owner01-pa4/pair-20-21.astromosaic"
+    photo = data / "owner01-pa4/pair-20-21.astromosaic"
     mixed = data / "mix02-paranal/project.astromosaic"
     m17 = data / "sky01-m17-atlas/project.astromosaic"
     sources = {
         reference.path
-        for manifest in (sky, mixed, m17)
+        for manifest in (photo, mixed, m17)
         for panel in load_project(manifest).panels
         for _, reference in panel.references()
     }
-    originals = {path: digest(path) for path in sources | {sky, mixed, m17}}
+    originals = {path: digest(path) for path in sources | {photo, mixed, m17}}
     app = QApplication([])
     app.setQuitOnLastWindowClosed(False)
     replay = Replay(app, output, use_gpu=args.backend == "OpenGL")
@@ -344,7 +394,8 @@ def main() -> None:
             "version": version("astromosaic"),
             "backend": replay.backend,
             "schemas": [1, source_schema, 10],
-            "sky": check_sky(replay, sky),
+            "science": check_science(replay, m17),
+            "photo": check_photo(replay, photo),
             "mixed": check_mixed(replay, mixed),
         }
         replay.open(output / "sky-edited.astromosaic")
