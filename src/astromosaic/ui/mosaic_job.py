@@ -265,11 +265,13 @@ class PreviewJob(_ProjectJob[PreviewResult]):
         parent: QObject,
         *,
         adaptive_edge: int | None = None,
+        resolution_scale: int = 100,
         use_gpu: bool = False,
     ) -> None:
         super().__init__(request.selection.project, parent)
         self.request = request
         self.adaptive_edge = adaptive_edge
+        self.resolution_scale = resolution_scale
         self.gpu_sampled = False
         self._surface = create_preview_surface(
             self, enabled=use_gpu and request.selection.layer == "sky"
@@ -286,14 +288,15 @@ class PreviewJob(_ProjectJob[PreviewResult]):
                 preview = preview_project(
                     self.project, context, self._publish_proxy, band=selection.band,
                     allow_visual=True,
-                    adaptive_edge=self.adaptive_edge, grid=crop_grid,
+                    adaptive_edge=self.adaptive_edge, resolution_scale=self.resolution_scale,
+                    grid=crop_grid,
                     inspect_crop=crop_grid is not None, interpolate=sampler,
                 )
                 self.gpu_sampled = sampler is not None and sampler.used
         else:
             preview = preview_project_layer(
                 self.project, selection.layer, context, self._publish_proxy, band=selection.band,
-                adaptive_edge=self.adaptive_edge,
+                adaptive_edge=self.adaptive_edge, resolution_scale=self.resolution_scale,
             )
         frame = normalize_preview(preview)
         context.check_cancelled()

@@ -26,6 +26,8 @@ The selected band's available filter labels and brightness units appear in Mosai
 
 The desktop first offers a 160-edge proxy, then a fixed reference preview and a viewport-sized overview within the job budget. When minifying, it averages a bounded grid of sub-samples per display cell in linear light and excludes invalid samples. At close zoom a cancellable worker reads an in-bounds visible rectangle, sampling the exact output pixel centers. The detail reuses the overview tone and is composited over the overview. Its maximum size is 1,048,576 output pixels. The original headless point-preview API remains available for coincident sample checks.
 
+**Resolution Scale** in the preview toolbar starts at **50%**. Choose **25%**, **50%**, **75%**, or **100%** of the normal viewport-based overview resolution. Changing the scale rebuilds an existing preview. The original output grid, 1:1 detail, fixed tone reference, and export resolution are independent of this choice.
+
 Black and white display points use the 1st and 99.5th percentiles of valid samples from the fixed 512-edge reference and are linked across RGB channels. The midtone transfer runs on cached display buffers. Uncovered cells use the canvas background. OpenGL uses coverage-premultiplied mip levels for additional display minification. The CPU smooths the overview when shrinking it to the canvas. Both use the zoomed detail at the same output positions.
 
 ## Windows Verification

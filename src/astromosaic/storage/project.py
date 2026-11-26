@@ -698,6 +698,7 @@ def preview_project(
     band: str | None = None,
     allow_visual: bool = False,
     adaptive_edge: int | None = None,
+    resolution_scale: int = 100,
     grid: RenderSpec | None = None,
     window: Region | None = None,
     inspect_crop: bool = False,
@@ -711,6 +712,7 @@ def preview_project(
         allow_visual=allow_visual,
         frame_locks=project.frame_locks,
         adaptive_edge=adaptive_edge,
+        resolution_scale=resolution_scale,
         window=window,
         inspect_crop=inspect_crop,
         interpolate=interpolate,
@@ -968,18 +970,22 @@ def preview_project_layer(
     *,
     band: str | None = None,
     adaptive_edge: int | None = None,
+    resolution_scale: int = 100,
     window: Region | None = None,
 ) -> PreviewFrame:
     if layer == "sky":
         return preview_project(
-            project, context, on_proxy, band=band, adaptive_edge=adaptive_edge, window=window
+            project, context, on_proxy, band=band, adaptive_edge=adaptive_edge,
+            resolution_scale=resolution_scale, window=window,
         )
     if band is not None:
         raise ValueError("A band selection requires the sky layer.")
     with _project_layer(project, layer, context) as raster:
         if window is not None:
             return _preview_detail(raster, window, context)
-        return _preview_raster(raster, context, on_proxy, adaptive_edge=adaptive_edge)
+        return _preview_raster(
+            raster, context, on_proxy, adaptive_edge=adaptive_edge, resolution_scale=resolution_scale
+        )
 
 
 def render_project_layer(

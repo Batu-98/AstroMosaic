@@ -323,13 +323,15 @@ def test_desktop_project_roundtrip_progress_cancel_and_retry(
         band: str | None,
         allow_visual: bool,
         adaptive_edge: int | None,
+        resolution_scale: int,
         grid: RenderSpec | None,
         inspect_crop: bool,
         interpolate: PreviewInterpolator | None,
     ) -> PreviewFrame:
         return preview_project(
             project, pause_on_progress(context), on_proxy, band=band, allow_visual=allow_visual,
-            adaptive_edge=adaptive_edge, grid=grid, inspect_crop=inspect_crop, interpolate=interpolate,
+            adaptive_edge=adaptive_edge, resolution_scale=resolution_scale,
+            grid=grid, inspect_crop=inspect_crop, interpolate=interpolate,
         )
 
     def set_geometry() -> None:
@@ -418,7 +420,8 @@ def test_desktop_project_roundtrip_progress_cancel_and_retry(
         click(window.preview_button)
         until(lambda: window.job is None)
         preview = window.viewport.frame
-        assert preview is not None and preview.has_coverage and preview.size == (140, 140)
+        assert preview is not None and preview.has_coverage
+        assert preview.size == (70, 70) and preview.output_size == (140, 140)
         assert window.status.text().startswith("Sky preview")
         entered.clear()
         release.clear()

@@ -1137,13 +1137,23 @@ def _preview_raster(
     fitted_grid: RenderSpec | None = None,
     visual_only: bool = False,
     adaptive_edge: int | None = None,
+    resolution_scale: int = 100,
 ) -> PreviewFrame:
-    coarse = _bounded_size(mosaic.size, _PROXY_EDGE)
+    if not 1 <= resolution_scale <= 100:
+        raise ValueError("The preview resolution scale must be between 1 and 100 percent.")
     reference = _bounded_size(mosaic.size, _PREVIEW_EDGE)
     size, samples = (
         (reference, 1) if adaptive_edge is None
         else _overview_sampling(mosaic.size, adaptive_edge, mosaic.spec.max_working_bytes)
     )
+    proxy_edge = _PROXY_EDGE
+    if resolution_scale != 100:
+        edge = max(1, round(max(size) * resolution_scale / 100))
+        size = _bounded_size(mosaic.size, edge)
+        proxy_edge = min(proxy_edge, max(1, edge // 2))
+        if size != mosaic.size and adaptive_edge is not None:
+            samples = max(2, samples)
+    coarse = _bounded_size(mosaic.size, proxy_edge)
     separate_reference = size != reference or samples != 1
     completed = coarse[0] * coarse[1] if on_proxy is not None and coarse != size else 0
     total = completed + size[0] * size[1] * samples**2
@@ -1160,7 +1170,9 @@ def _preview_raster(
         tile = baseline.tile
         if tile.valid.any():
             levels = preview_levels(tile.pixels[tile.valid].astype(np.float64))
-            if on_proxy is not None and reference != coarse:
+            if on_proxy is not None and reference != coarse and (
+                resolution_scale == 100 or max(reference) <= max(size)
+            ):
                 on_proxy(replace(
                     baseline, fitted_grid=fitted_grid, visual_only=visual_only, tone_levels=levels
                 ))
@@ -1220,6 +1232,7 @@ def preview_mosaic(
     allow_visual: bool = False,
     frame_locks: frozenset[FrameLock] = frozenset(),
     adaptive_edge: int | None = None,
+    resolution_scale: int = 100,
     window: Region | None = None,
     inspect_crop: bool = False,
     photo_inputs: PhotoInputs | None = None,
@@ -1254,4 +1267,5 @@ def preview_mosaic(
             fitted_grid=mosaic.spec if auto_frame else None,
             visual_only=mosaic.visual_only,
             adaptive_edge=adaptive_edge,
+            resolution_scale=resolution_scale,
         ), suggested_crop=mosaic.suggested_crop, suggested_rotation=mosaic.suggested_rotation)

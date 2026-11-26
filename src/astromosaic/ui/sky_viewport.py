@@ -120,6 +120,16 @@ class SkyViewport(QWidget):
         self.fit_button = QPushButton("Fit View")
         self.fit_button.clicked.connect(self.fit)
         controls.addWidget(self.fit_button)
+        self.resolution_box = QComboBox()
+        self.resolution_box.setAccessibleName("Preview resolution scale")
+        self.resolution_box.setToolTip("Percentage of the normal viewport-based preview resolution")
+        for percent in (25, 50, 75, 100):
+            self.resolution_box.addItem(f"{percent}%", percent)
+        self.resolution_box.setCurrentIndex(self.resolution_box.findData(50))
+        resolution_label = QLabel("Resolution Scale")
+        resolution_label.setBuddy(self.resolution_box)
+        controls.addWidget(resolution_label)
+        controls.addWidget(self.resolution_box)
         self.midtones = QSlider(Qt.Orientation.Horizontal)
         self.midtones.setRange(MIN_MIDTONES, MAX_MIDTONES)
         self.midtones.setValue(DEFAULT_MIDTONES)
@@ -197,6 +207,9 @@ class SkyViewport(QWidget):
             fitted_edge = round(max(x, y) * min(width / x, height / y))
         physical = fitted_edge * self.canvas.devicePixelRatioF()
         return max(512, min(MAX_OVERVIEW_EDGE, ceil(physical * 1.25 / 128) * 128))
+
+    def resolution_scale(self) -> int:
+        return int(self.resolution_box.currentData())
 
     def visible_detail(self) -> Region | None:
         frame = self._frame

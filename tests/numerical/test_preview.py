@@ -267,8 +267,16 @@ def test_adaptive_preview_averages_valid_subsamples_and_reuses_tone(tmp_path: Pa
     assert filtered.tone_levels == (0.0, 0.0)
     assert filtered.peak_reserved_bytes <= spec.max_working_bytes
 
+    proxies: list[PreviewFrame] = []
+    half = preview_mosaic(
+        [source], spec, adaptive_edge=512, resolution_scale=50, on_proxy=proxies.append
+    )
+    assert half.tile.valid.shape == (1, 256)
+    assert half.output_size == filtered.output_size and half.tone_levels == filtered.tone_levels
+    assert proxies and all(frame.tile.region.width <= 256 for frame in proxies)
+
     window = Region(899, 2, 13, 7)
-    detail = preview_mosaic([source], spec, window=window)
+    detail = preview_mosaic([source], spec, window=window, resolution_scale=50)
     export = tmp_path / "detail.fits"
     cropped = replace(spec, crop=window)
     render_mosaic([source], export, cropped)

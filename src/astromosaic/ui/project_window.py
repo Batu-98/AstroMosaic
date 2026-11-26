@@ -207,6 +207,7 @@ class ProjectWindow(QMainWindow):
         splitter = QSplitter(Qt.Orientation.Vertical)
         splitter.setChildrenCollapsible(False)
         self.viewport = SkyViewport(use_gpu=self._use_gpu_preview)
+        self.viewport.resolution_box.currentIndexChanged.connect(self._resolution_changed)
         self.viewport.view_changed.connect(self._view_changed)
         self.viewport.crop_changed.connect(self._show_crop_bounds)
         self._editor = QWidget(body)
@@ -1263,6 +1264,14 @@ class ProjectWindow(QMainWindow):
             text += " Set the composition placement for the new sky grid."
         self._report_operation(text)
 
+    @Slot()
+    def _resolution_changed(self) -> None:
+        if (
+            not self._close_after_job and self._preview_state.crop is None
+            and self._preview_state.current(self._preview_selection()) is not None
+        ):
+            self._preview()
+
     def _preview(self) -> None:
         if self._is_running() or not self.project.panels:
             return
@@ -1274,7 +1283,10 @@ class ProjectWindow(QMainWindow):
         self._preview_timer.stop()
         layer = selection.layer
         self._live_ready = self._live_ready or layer == "sky"
-        job = PreviewJob(request, self, adaptive_edge=edge, use_gpu=self._use_gpu_preview)
+        job = PreviewJob(
+            request, self, adaptive_edge=edge, resolution_scale=self.viewport.resolution_scale(),
+            use_gpu=self._use_gpu_preview,
+        )
         job.proxy_ready.connect(self._show_proxy)
         self._launch_job(job, f"Preparing {layer} preview…")
 
@@ -1290,7 +1302,8 @@ class ProjectWindow(QMainWindow):
         self._clear_preview_view()
         self._show_crop_bounds(draft.grid.output_region())
         job = PreviewJob(
-            request, self, adaptive_edge=self.viewport.overview_edge(), use_gpu=self._use_gpu_preview
+            request, self, adaptive_edge=self.viewport.overview_edge(),
+            resolution_scale=self.viewport.resolution_scale(), use_gpu=self._use_gpu_preview,
         )
         job.proxy_ready.connect(self._show_proxy)
         self._launch_job(job, "Preparing the full sky grid for crop editing…")
@@ -1495,6 +1508,7 @@ class ProjectWindow(QMainWindow):
             action.setEnabled(can_edit)
         self.plate_solve_settings_action.setEnabled(can_edit)
         self.gpu_settings_action.setEnabled(can_edit)
+        self.viewport.resolution_box.setEnabled(can_edit)
         self._editor.setEnabled(can_edit)
         self.settings_button.setEnabled(can_edit)
         self._layer_controls()
