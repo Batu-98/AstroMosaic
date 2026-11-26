@@ -25,6 +25,8 @@ poetry run python -m astromosaic.ui
 
 For a sky preview, choose **Add Panels → Plate Solve → Build Preview**. **Auto Frame** starts on in a new desktop project. Use **Use Preview Grid** to adopt a fitted sky grid for export, or set a grid in **Mosaic Settings**. Use the layer selector for sky, foreground, or composition. The **Layers** menu contains foreground alignment and composition controls. [Sky workflow](phase-3c.md#desktop-workflow) · [Mixed-panel workflow](phase-3e.md#desktop-workflow)
 
+**Settings → GPU Acceleration** lets you switch preview acceleration on or off. It starts on and remembers your choice. AstroMosaic uses CPU sampling automatically when hardware OpenGL compute is unavailable. [Preview settings](phase-3c.md#desktop-workflow)
+
 The panel control table opens in **Overview**. Choose **Optics**, **Files**, or **All properties** to compare additional columns. Double-click a weight, band, focal length, or pixel size to edit it. Use the **Sky** checkbox to include a panel in the sky layer. The desktop starts in dark mode. Choose **View → Theme** to switch between dark and light appearances. [Panel controls](phase-3b.md#panel-control-table)
 
 Choose **TAN** or **ZEA** under **Mosaic Settings → Sky projection**. Set a new composition placement after changing the projection. [Sky projection](phase-5b.md)

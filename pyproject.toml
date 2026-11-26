@@ -1,6 +1,6 @@
 [project]
 name = "astromosaic"
-version = "0.1.0b17"
+version = "0.1.0b18"
 description = "Assemble linear astronomical image panels into reproducible mosaics."
 readme = "README.md"
 license = "GPL-3.0-only"

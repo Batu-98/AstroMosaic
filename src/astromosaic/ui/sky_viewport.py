@@ -243,11 +243,21 @@ class SkyViewport(QWidget):
             self.fit()
         self.fit_button.setEnabled(frame is not None)
         self.tone_box.setVisible(frame is not None and frame.photo_levels is not None)
+        self._select_canvas()
+
+    def set_gpu_enabled(self, enabled: bool) -> None:
+        self._use_gpu = enabled and QApplication.platformName() not in {"minimal", "offscreen"}
+        if not self._use_gpu:
+            self.release_opengl()
+        self._backend.setToolTip("")
+        self._select_canvas()
+
+    def _select_canvas(self) -> None:
+        frame = self._frame
         if frame is not None and self._use_gpu and self._gl is None:
             gl = self._gl = OpenGLPreview(self.image_rect, self._paint_gl_overlay)
             gl.failed.connect(self._fallback, Qt.ConnectionType.QueuedConnection)
             self._configure_canvas(gl)
-            self._pages.setCurrentWidget(gl)
         if frame is None:
             if self._gl is not None:
                 self._gl.set_display(None, self.midtones.value() / 100)
@@ -263,7 +273,7 @@ class SkyViewport(QWidget):
     @Slot()
     def _check_context(self) -> None:
         if self._gl is not None and self._gl.isVisible() and not self._gl.isValid():
-            self._fallback("Qt could not create the OpenGL preview context.")
+            self._gl.failed.emit("Qt could not create the OpenGL preview context.")
 
     def release_opengl(self) -> None:
         """Release the preview's resources on the UI thread before removing its widget."""
@@ -277,16 +287,10 @@ class SkyViewport(QWidget):
 
     @Slot(str)
     def _fallback(self, reason: str) -> None:
-        if self._gl is None:
+        if self._gl is None or self.sender() is not self._gl:
             return
-        self._use_gpu = False
-        self.release_opengl()
+        self.set_gpu_enabled(False)
         self._backend.setToolTip(reason)
-        self._backend.setText(
-            f"{self.backend} · 1:1" if self._detail is not None
-            else self.backend if self._frame is not None else ""
-        )
-        self._update_display()
 
     @Slot()
     def _update_display(self) -> None:

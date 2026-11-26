@@ -15,6 +15,8 @@ from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
     QComboBox,
+    QDialog,
+    QDialogButtonBox,
     QDockWidget,
     QFileDialog,
     QHBoxLayout,
@@ -78,6 +80,7 @@ _PROJECT_FILTER = "AstroMosaic project (*.astromosaic)"
 _TIFF_FILTER = "TIFF mosaic (*.tiff *.tif)"
 _FITS_FILTER = "FITS mosaic (*.fits *.fit *.fts)"
 _XISF_FILTER = "XISF mosaic (*.xisf)"
+_GPU_ACCELERATION_SETTING = "preview/gpuAcceleration"
 _Button = QMessageBox.StandardButton
 _Job = (
     MosaicJob
@@ -144,19 +147,21 @@ class ProjectWindow(QMainWindow):
             "Export Scientific Mosaic…", self._start_scientific
         )
         view_menu = self.menuBar().addMenu("&View")
-        application_preferences = (
+        self._preferences = (
             preferences if preferences is not None else QSettings("AstroMosaic", "AstroMosaic")
         )
+        self._allow_gpu_preview = use_gpu
+        self._use_gpu_preview = use_gpu and self._gpu_acceleration_preference()
         self.live_preview_action = view_menu.addAction("Live Sky Preview")
         self.live_preview_action.setCheckable(True)
         self.live_preview_action.setChecked(bool(
-            application_preferences.value("view/liveSkyPreview", True, type=bool)
+            self._preferences.value("view/liveSkyPreview", True, type=bool)
         ))
         self.live_preview_action.toggled.connect(self._toggle_live_preview)
         self.live_preview_action.toggled.connect(
-            lambda enabled: application_preferences.setValue("view/liveSkyPreview", enabled)
+            lambda enabled: self._preferences.setValue("view/liveSkyPreview", enabled)
         )
-        add_theme_menu(view_menu, application_preferences)
+        add_theme_menu(view_menu, self._preferences)
         panel_menu = self.menuBar().addMenu("&Panel")
         self.check_foreground = panel_menu.addAction("Check Foreground", self._check_foreground)
         self.propose_mask = panel_menu.addAction("Propose Sky Mask…", self._propose_mask)
@@ -173,6 +178,8 @@ class ProjectWindow(QMainWindow):
         self.composition_action = layers_menu.addAction(
             "Composition Settings…", self._composition_settings
         )
+        settings_menu = self.menuBar().addMenu("&Settings")
+        self.gpu_settings_action = settings_menu.addAction("GPU Acceleration…", self._gpu_settings)
         tools_menu = self.menuBar().addMenu("&Tools")
         self.plate_solve_settings_action = tools_menu.addAction(
             "Plate Solve Settings…", self._plate_solve_settings
@@ -199,8 +206,7 @@ class ProjectWindow(QMainWindow):
         layout.setSpacing(12)
         splitter = QSplitter(Qt.Orientation.Vertical)
         splitter.setChildrenCollapsible(False)
-        self.viewport = SkyViewport(use_gpu=use_gpu)
-        self._use_gpu_preview = use_gpu
+        self.viewport = SkyViewport(use_gpu=self._use_gpu_preview)
         self.viewport.view_changed.connect(self._view_changed)
         self.viewport.crop_changed.connect(self._show_crop_bounds)
         self._editor = QWidget(body)
@@ -952,6 +958,42 @@ class ProjectWindow(QMainWindow):
         finally:
             dialog.deleteLater()
 
+    def _gpu_acceleration_preference(self) -> bool:
+        return bool(self._preferences.value(_GPU_ACCELERATION_SETTING, True, type=bool))
+
+    def _gpu_settings(self) -> None:
+        dialog = QDialog(self)
+        dialog.setWindowTitle("GPU Acceleration")
+        dialog.setMinimumWidth(370)
+        layout = QVBoxLayout(dialog)
+        enabled = QCheckBox("Enable GPU acceleration for previews")
+        enabled.setChecked(self._gpu_acceleration_preference())
+        enabled.setEnabled(self._allow_gpu_preview)
+        layout.addWidget(enabled)
+        help_text = QLabel(
+            "AstroMosaic uses the CPU automatically when GPU acceleration is unavailable."
+            if self._allow_gpu_preview else "CPU preview is forced for this session by --cpu-preview."
+        )
+        help_text.setWordWrap(True)
+        layout.addWidget(help_text)
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        layout.addWidget(buttons)
+        try:
+            if dialog.exec() == QDialog.DialogCode.Accepted and self._allow_gpu_preview:
+                requested = enabled.isChecked()
+                if requested != self._use_gpu_preview:
+                    self._preferences.setValue(_GPU_ACCELERATION_SETTING, requested)
+                    self._use_gpu_preview = requested
+                    if self._detail_job is not None:
+                        self._detail_job.cancel()
+                    self.viewport.set_gpu_enabled(requested)
+        finally:
+            dialog.deleteLater()
+
     def _plate_solve_settings(self) -> None:
         dialog = PlateSolveSettings(self)
         dialog.operation_summary.connect(self.command_panel.append_summary)
@@ -1452,6 +1494,7 @@ class ProjectWindow(QMainWindow):
         for action in self._file_actions:
             action.setEnabled(can_edit)
         self.plate_solve_settings_action.setEnabled(can_edit)
+        self.gpu_settings_action.setEnabled(can_edit)
         self._editor.setEnabled(can_edit)
         self.settings_button.setEnabled(can_edit)
         self._layer_controls()
@@ -1593,8 +1636,8 @@ class ProjectWindow(QMainWindow):
             if frame.has_coverage
             else "No coverage at this preview resolution."
         )
-        if job.gpu_sampled:
-            text += " OpenGL GPU sampling."
+        if layer == "sky" and frame.has_coverage:
+            text += " OpenGL GPU sampling." if job.gpu_sampled else " CPU sampling."
         if layer == "sky" and not frame.has_coverage:
             if job.project.auto_frame_preview:
                 text += " Try a smaller selection or choose a sky grid in Mosaic Settings."
