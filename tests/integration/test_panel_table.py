@@ -12,11 +12,10 @@ def test_workspace_reflows_across_full_hd_display_scales(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     pytest.importorskip("PySide6")
-    from PySide6.QtCore import QPoint, QSettings, Qt
+    from PySide6.QtCore import QSettings, Qt
     from PySide6.QtTest import QTest
-    from PySide6.QtWidgets import QApplication, QSplitter
+    from PySide6.QtWidgets import QApplication
 
-    from astromosaic.ui.panel_table import COLUMNS
     from astromosaic.ui.project_window import ProjectWindow
 
     if "QT_QPA_PLATFORM" not in os.environ:
@@ -29,44 +28,46 @@ def test_workspace_reflows_across_full_hd_display_scales(
         window.setScreen(app.screens()[1])
         window.move(app.screens()[1].availableGeometry().topLeft())
     window.show()
+    window.activateWindow()
+    app.processEvents()
+    navigation = window.navigation
     try:
-        splitter = window.findChild(QSplitter)
-        assert splitter is not None
-        # Logical client sizes allow for the Windows taskbar and window frame.
-        for width, height in ((1280, 648), (1536, 800), (1920, 1008)):
+        assert window.panels.isVisible() and not window.viewport.isVisible()
+        assert window.command_toggle.isVisible() and not window.command_panel.isVisible()
+        assert navigation.selectedItems()[0].text() == "Panels"
+        for width, height in ((630, 650), (800, 650), (1280, 648), (1536, 800), (1920, 1008)):
             window.resize(width, height)
+            navigation.setFocus()
+            QTest.keyClick(navigation, Qt.Key.Key_Down)
+            assert window.viewport.isVisible() and navigation.selectedItems()[0].text() == "Preview"
+            assert not window.panels.isVisible()
+            window.command_toggle.click()
             app.processEvents()
-            if splitter.orientation() == Qt.Orientation.Horizontal:
-                assert window.viewport.canvas.height() >= height // 3
-                assert window.viewport.canvas.width() >= width * 0.4
-            else:
-                required = sum(splitter.widget(i).minimumSizeHint().width() for i in (0, 1))
-                assert required + splitter.handleWidth() > splitter.width()
             assert window.command_panel.entry.isVisibleTo(window)
+            assert window.size().toTuple() == (width, height)
+            expanded = window.viewport.canvas.height()
+            window.command_panel.entry.setText("draft")
+            window.command_toggle.click()
+            app.processEvents()
             if width == 1920:
-                assert splitter.orientation() == Qt.Orientation.Horizontal
-                table = window.panels
-                band = COLUMNS.index("Band")
-                assert table.columnViewportPosition(band) + table.columnWidth(band) <= (
-                    table.viewport().width()
-                )
+                assert window.viewport.canvas.height() >= expanded + 100
 
-        handle = splitter.handle(1)
-        center = handle.rect().center()
-        previous = splitter.sizes()
-        QTest.mousePress(handle, Qt.MouseButton.LeftButton, pos=center)
-        QTest.mouseMove(handle, center + QPoint(36, 0))
-        QTest.mouseRelease(handle, Qt.MouseButton.LeftButton, pos=handle.rect().center())
-        adjusted = splitter.sizes()
-        assert adjusted[0] > previous[0]
-
-        window.resize(800, 650)
-        app.processEvents()
-        assert splitter.orientation() == Qt.Orientation.Vertical
-        assert window.width() == 800 and window.viewport.canvas.height() >= 100
-        window.resize(1920, 1008)
-        app.processEvents()
-        assert abs(splitter.sizes()[0] - adjusted[0]) <= 1
+            QTest.keyClick(navigation, Qt.Key.Key_F,
+                           Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.ShiftModifier)
+            app.processEvents()
+            assert window.focus_mode_action.isChecked() and window.exit_focus_button.isVisible()
+            assert not window.command_toggle.isVisible()
+            if width == 1920:
+                assert window.viewport.canvas.width() >= 0.9 * window.centralWidget().width()
+            window.command_panel_action.trigger()
+            assert not window.focus_mode_action.isChecked()
+            assert window.command_panel.entry.isVisible()
+            assert window.command_panel.entry.text() == "draft"
+            window.command_toggle.click()
+            item = navigation.item(0)
+            QTest.mouseClick(navigation.viewport(), Qt.MouseButton.LeftButton,
+                             pos=navigation.visualItemRect(item).center())
+            assert window.panels.isVisible() and navigation.selectedItems()[0].text() == "Panels"
     finally:
         window.close()
 
@@ -77,7 +78,7 @@ def test_workspace_control_states_have_distinct_shapes(
     pytest.importorskip("PySide6")
     from PySide6.QtCore import QSettings
     from PySide6.QtGui import QAction, QImage, QPalette
-    from PySide6.QtWidgets import QApplication, QSplitter
+    from PySide6.QtWidgets import QApplication
 
     from astromosaic.ui.panel_table import panel_row
     from astromosaic.ui.project_window import ProjectWindow
@@ -110,9 +111,6 @@ def test_workspace_control_states_have_distinct_shapes(
         table.properties.refresh(rows)
         table.selectRow(0)
         assert window.add_button.isEnabled() and not window.preview_button.isEnabled()
-        splitter = window.findChild(QSplitter)
-        handle = splitter.handle(1)
-
         themes = {a.text(): a for a in window.findChildren(QAction) if a.text() in {"Dark", "Light"}}
         for theme in ("Dark", "Light"):
             themes[theme].trigger()
@@ -132,10 +130,14 @@ def test_workspace_control_states_have_distinct_shapes(
                 assert pixel(cells, selected.center().x(), selected.bottom()) == accent
                 assert pixel(cells, unselected.center().x(), unselected.top()) != accent
 
-            grip = handle.grab().toImage()
-            center = handle.rect().center()
-            assert all(pixel(grip, center.x() + x, center.y()) == accent for x in (-9, 0, 9))
-            assert all(pixel(grip, center.x() + x, center.y()) != accent for x in (-5, 5))
+            navigation = window.navigation
+            assert navigation.accessibleName() == "Workspace views"
+            assert navigation.item(0).isSelected() and not navigation.item(1).isSelected()
+            nav_image = navigation.viewport().grab().toImage()
+            selected = navigation.visualItemRect(navigation.item(0))
+            unselected = navigation.visualItemRect(navigation.item(1))
+            assert pixel(nav_image, selected.left() + 1, selected.center().y()) == accent
+            assert pixel(nav_image, unselected.left() + 1, unselected.center().y()) != accent
     finally:
         window.close()
 
@@ -194,8 +196,8 @@ def test_panel_grid_edits_and_appearance(tmp_path: Path, monkeypatch: pytest.Mon
         table.setCurrentIndex(table.cell(0, "Size (px)"))
         table.setFocus()
         QTest.keyClick(table, Qt.Key.Key_Tab)
-        assert app.focusWidget() is window.auto_frame_check
-        QTest.keyClick(window.auto_frame_check, Qt.Key.Key_Tab, Qt.KeyboardModifier.ShiftModifier)
+        assert app.focusWidget() is window.command_toggle
+        QTest.keyClick(window.command_toggle, Qt.Key.Key_Tab, Qt.KeyboardModifier.ShiftModifier)
         assert app.focusWidget() is table
         table.setCurrentIndex(table.cell(0, "Panel"))
         QTest.keyClick(table, Qt.Key.Key_Tab, Qt.KeyboardModifier.ShiftModifier)

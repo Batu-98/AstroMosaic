@@ -1,5 +1,7 @@
 """Track which project and grid the desktop preview represents."""
 
+from __future__ import annotations
+
 from dataclasses import dataclass, replace
 
 from astromosaic.core import Region
@@ -20,6 +22,7 @@ class PreviewSelection:
 class PreviewRequest:
     selection: PreviewSelection
     crop_grid: RenderSpec | None = None
+    adaptive_from: PreviewOverview | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -101,6 +104,15 @@ class PreviewState:
         request = self._request = PreviewRequest(selection)
         return request
 
+    def start_adaptive(self, overview: PreviewOverview) -> PreviewRequest:
+        assert self._request is None and self.crop is None and self._overview is overview
+        request = self._request = PreviewRequest(overview.selection, adaptive_from=overview)
+        return request
+
+    def finish_adaptive(self) -> None:
+        assert self._request is not None and self._request.adaptive_from is not None
+        self._request = None
+
     def start_crop(self, selection: PreviewSelection) -> PreviewRequest | None:
         previous = self.sky_overview(selection)
         if previous is None:
@@ -128,6 +140,10 @@ class PreviewState:
             return None
         self._request = None
         self._proxy = None
+        if request.adaptive_from is not None:
+            previous = request.adaptive_from
+            self._overview = replace(previous, frame=result.frame, overview_edge=result.overview_edge)
+            return self._overview
         fitted = (
             result.fitted_grid
             if request.crop_grid is None and result.frame.has_coverage

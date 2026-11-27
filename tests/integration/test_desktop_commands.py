@@ -71,6 +71,8 @@ def test_command_panel_fits_a_short_window_with_large_text(
         assert panel.directory_field.isReadOnly()
 
         window.resize(800, 650)
+        window.navigation.setCurrentRow(1)
+        window.command_toggle.click()
         app.processEvents()
         assert window.size() == QSize(800, 650)
 
@@ -164,9 +166,10 @@ def test_command_panel_runs_saved_projects_and_cleans_cancelled_exports(
 
     window.show()
     try:
-        assert panel.isVisible() and window.command_panel_action.isChecked()
+        assert not panel.isVisible() and window.command_panel_action.isChecked()
+        assert window.command_toggle.isVisible()
         window.command_panel_action.trigger()
-        assert not panel.isVisible() and not window.command_panel_action.isChecked()
+        assert not window.command_toggle.isVisible() and not window.command_panel_action.isChecked()
         new, *_ = window._file_actions
         new.trigger()
         window._set_project(project, manifest)
@@ -201,13 +204,17 @@ def test_command_panel_runs_saved_projects_and_cleans_cancelled_exports(
         until(lambda: any(text.startswith("Rendering ") for text in ticks))
         assert list((directory / results.parent).glob("*.part"))
         assert not (directory / results).exists()
-        panel.cancel_button.click()
+        window.command_panel_action.trigger()
+        assert not panel.isVisible() and window.cancel_button.isVisible()
+        window.cancel_button.click()
         assert "Cancelling" in panel.status.text()
+        assert window.status.text() == panel.status.text()
         until(lambda: not panel.is_running)
         timer.stop()
         assert reports()[-1]["status"] == "cancelled" and "exit code 130" in panel.status.text()
         assert not (directory / results).exists() and not list(directory.rglob("*.part"))
 
+        window.command_panel_action.trigger()
         run(export)
         until(lambda: not panel.is_running)
         report = reports()[-1]

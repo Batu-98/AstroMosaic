@@ -128,6 +128,7 @@ class _CommandOutput(QPlainTextEdit):
 
 class CommandPanel(QWidget):
     running_changed = Signal()
+    feedback_changed = Signal()
 
     def __init__(
         self, parent: QWidget, run_session: Callable[[Namespace, Path], str | None]
@@ -257,6 +258,7 @@ class CommandPanel(QWidget):
             self._append(f"{error}. Close the quoted argument and run again.\n")
             self.status.setText("Invalid command.")
             self.progress.setValue(0)
+            self.feedback_changed.emit()
             self.entry.setFocus()
             return
         if argv and argv[0].lower() in _LAUNCHERS:
@@ -286,13 +288,16 @@ class CommandPanel(QWidget):
         except _SessionHelp as help_text:
             self._append(str(help_text))
             self.status.setText("Session command help.")
+            self.feedback_changed.emit()
         except (OSError, RuntimeError, ValueError, OverflowError) as error:
             self.append_summary(f"Session command failed. {error}")
             self.status.setText("Session command failed.")
+            self.feedback_changed.emit()
         else:
+            self.status.setText("Session command accepted.")
             if output is not None:
                 self.append_summary(output)
-            self.status.setText("Session command accepted.")
+                self.feedback_changed.emit()
 
     @Slot(str)
     def _append(self, text: str) -> None:
@@ -310,6 +315,7 @@ class CommandPanel(QWidget):
         self.progress.setValue(100 * done // total)
         if self.cancel_button.isEnabled():
             self.status.setText(f"Rendering {done:,} / {total:,} pixels.")
+        self.feedback_changed.emit()
 
     @Slot()
     def cancel(self) -> None:
@@ -317,6 +323,7 @@ class CommandPanel(QWidget):
             self._job.cancel()
             self.cancel_button.setEnabled(False)
             self.status.setText("Cancelling command…")
+            self.feedback_changed.emit()
 
     @Slot()
     def _finished(self) -> None:
@@ -338,5 +345,6 @@ class CommandPanel(QWidget):
         job.deleteLater()
         self._update_input()
         self.running_changed.emit()
+        self.feedback_changed.emit()
         if self.isVisible() and self.isActiveWindow():
             self.entry.setFocus()

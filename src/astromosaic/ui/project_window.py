@@ -7,22 +7,21 @@ from dataclasses import asdict, replace
 from importlib.metadata import version
 from pathlib import Path
 from time import monotonic
-from typing import cast
+from typing import Literal, cast
 
 from PySide6.QtCore import (
-    QEvent,
     QSettings,
     QSignalBlocker,
     QSize,
     QStandardPaths,
     Qt,
     QTimer,
+    Signal,
     Slot,
 )
 from PySide6.QtGui import QCloseEvent, QKeySequence
 from PySide6.QtWidgets import (
     QApplication,
-    QBoxLayout,
     QCheckBox,
     QComboBox,
     QDialog,
@@ -31,15 +30,19 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QHBoxLayout,
     QLabel,
+    QListWidget,
     QMainWindow,
     QMenu,
     QMessageBox,
     QProgressBar,
     QPushButton,
+    QSizePolicy,
+    QStackedWidget,
     QToolButton,
     QVBoxLayout,
     QWidget,
 )
+from shiboken6 import isValid
 
 from astromosaic.astrometry.hints import PanelOptics
 from astromosaic.astrometry.solve import read_solution_diagnostics
@@ -56,7 +59,7 @@ from astromosaic.storage.project import (
     load_project,
     save_project,
 )
-from astromosaic.ui.appearance import WorkspaceSplitter, add_theme_menu
+from astromosaic.ui.appearance import ResponsiveRow, add_theme_menu
 from astromosaic.ui.command_panel import CommandPanel
 from astromosaic.ui.edit_history import EditHistory
 from astromosaic.ui.foreground_details import ForegroundAlignmentDetails
@@ -91,6 +94,8 @@ _TIFF_FILTER = "TIFF mosaic (*.tiff *.tif)"
 _FITS_FILTER = "FITS mosaic (*.fits *.fit *.fts)"
 _XISF_FILTER = "XISF mosaic (*.xisf)"
 _GPU_ACCELERATION_SETTING = "preview/gpuAcceleration"
+_PANELS, _PREVIEW = range(2)
+type _CommandDisplay = Literal["hidden", "collapsed", "expanded"]
 _Button = QMessageBox.StandardButton
 _Job = (
     MosaicJob
@@ -110,40 +115,31 @@ _CALIBRATION_GUIDANCE: dict[SkyCalibrationRequirement, str] = {
 }
 
 
-class _PanelToolbar(QWidget):
-    def __init__(self, heading: QLabel, actions: QHBoxLayout) -> None:
+class _WorkspaceNavigation(QListWidget):
+    def __init__(self) -> None:
         super().__init__()
-        self._heading = heading
-        self._actions = actions
-        self._layout = QBoxLayout(QBoxLayout.Direction.LeftToRight, self)
-        self._layout.setContentsMargins(0, 0, 0, 0)
-        self._layout.setSpacing(4)
-        self._layout.addWidget(heading)
-        self._layout.addLayout(actions, 1)
+        self.setObjectName("workspaceNavigation")
+        self.setAccessibleName("Workspace views")
+        self.addItems(["Panels", "Preview"])
+        self.setCurrentRow(_PANELS)
+        self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Preferred)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+
+    def sizeHint(self) -> QSize:
+        return QSize(self.fontMetrics().horizontalAdvance("Preview") + 26, super().sizeHint().height())
 
     def minimumSizeHint(self) -> QSize:
-        size = super().minimumSizeHint()
-        # The heading can wrap onto its own row when the parent allocates less width.
-        size.setWidth(max(self._heading.minimumSizeHint().width(),
-                          self._actions.minimumSize().width()))
-        return size
+        return QSize(self.sizeHint().width(), 0)
 
-    def event(self, event: QEvent) -> bool:
-        if event.type() in (QEvent.Type.Resize, QEvent.Type.LayoutRequest):
-            row_width = (
-                self._heading.minimumSizeHint().width()
-                + self._actions.minimumSize().width()
-                + self._layout.spacing()
-            )
-            direction = (
-                QBoxLayout.Direction.TopToBottom
-                if self.width() < row_width
-                else QBoxLayout.Direction.LeftToRight
-            )
-            if direction != self._layout.direction():
-                self._layout.setDirection(direction)
-                self.updateGeometry()
-        return super().event(event)
+
+class _CommandDock(QDockWidget):
+    closed = Signal()
+
+    def closeEvent(self, event: QCloseEvent) -> None:
+        super().closeEvent(event)
+        if event.isAccepted():
+            self.closed.emit()
 
 
 class ProjectWindow(QMainWindow):
@@ -178,6 +174,10 @@ class ProjectWindow(QMainWindow):
         self._detail_timer.setSingleShot(True)
         self._detail_timer.setInterval(160)
         self._detail_timer.timeout.connect(self._request_detail)
+        self._adaptive_timer = QTimer(self)
+        self._adaptive_timer.setSingleShot(True)
+        self._adaptive_timer.setInterval(350)
+        self._adaptive_timer.timeout.connect(self._refresh_adaptive_preview)
         self._close_after_job = False
         self.resize(1140, 780)
         self.setMinimumWidth(630)
@@ -213,6 +213,11 @@ class ProjectWindow(QMainWindow):
             lambda enabled: self._preferences.setValue("view/liveSkyPreview", enabled)
         )
         add_theme_menu(view_menu, self._preferences)
+        self.focus_mode_action = view_menu.addAction("Preview Focus Mode")
+        self.focus_mode_action.setCheckable(True)
+        self.focus_mode_action.setShortcut(QKeySequence("Ctrl+Shift+F"))
+        self.focus_mode_action.setEnabled(False)
+        self.focus_mode_action.toggled.connect(self._set_preview_focus_mode)
         panel_menu = self.menuBar().addMenu("&Panel")
         self.check_foreground = panel_menu.addAction("Check Foreground", self._check_foreground)
         self.propose_mask = panel_menu.addAction("Propose Sky Mask…", self._propose_mask)
@@ -237,12 +242,17 @@ class ProjectWindow(QMainWindow):
         )
         self.command_panel = CommandPanel(self, self._session_command)
         self.command_panel.running_changed.connect(self._command_running_changed)
-        command_dock = QDockWidget("Command Panel", self)
-        command_dock.setWidget(self.command_panel)
-        self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, command_dock)
-        self.command_panel_action = command_dock.toggleViewAction()
-        self.command_panel_action.triggered.connect(self._focus_command_panel)
-        tools_menu.addAction(self.command_panel_action)
+        self.command_panel.feedback_changed.connect(self._command_feedback)
+        self._command_display: _CommandDisplay = "collapsed"
+        self.command_dock = _CommandDock("Command Panel", self)
+        self.command_dock.setWidget(self.command_panel)
+        self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.command_dock)
+        self.command_dock.hide()
+        self.command_dock.closed.connect(lambda: self._show_command_panel(False))
+        self.command_panel_action = tools_menu.addAction("Command Panel")
+        self.command_panel_action.setCheckable(True)
+        self.command_panel_action.setChecked(True)
+        self.command_panel_action.toggled.connect(self._show_command_panel)
         self.revalidate_solve_action = panel_menu.addAction(
             "Revalidate Plate Solution", self._revalidate_plate_solve
         )
@@ -253,10 +263,15 @@ class ProjectWindow(QMainWindow):
         body = QWidget(self)
         self.setCentralWidget(body)
         layout = QVBoxLayout(body)
-        layout.setContentsMargins(20, 3, 20, 3)
+        layout.setContentsMargins(16, 3, 16, 3)
         layout.setSpacing(4)
-        splitter = WorkspaceSplitter()
-        splitter.setChildrenCollapsible(False)
+        workspace = QHBoxLayout()
+        workspace.setSpacing(8)
+        self.navigation = _WorkspaceNavigation()
+        workspace.addWidget(self.navigation)
+        self.pages = QStackedWidget()
+        workspace.addWidget(self.pages, 1)
+        layout.addLayout(workspace, 1)
         self.viewport = SkyViewport(use_gpu=self._use_gpu_preview)
         self.viewport.resolution_box.currentIndexChanged.connect(self._resolution_changed)
         self.viewport.view_changed.connect(self._view_changed)
@@ -265,10 +280,14 @@ class ProjectWindow(QMainWindow):
         self._editor = QWidget(body)
         controls = QVBoxLayout(self._editor)
         controls.setContentsMargins(0, 0, 0, 2)
+        main_panel_controls = QWidget()
+        main_panel_row = QHBoxLayout(main_panel_controls)
+        main_panel_row.setContentsMargins(0, 0, 0, 0)
         buttons = QHBoxLayout()
         buttons.setSpacing(4)
         self.panel_heading = QLabel("Panels")
         self.panel_heading.setProperty("sectionTitle", True)
+        main_panel_row.addWidget(self.panel_heading)
         buttons.addStretch()
         self.table_view = QComboBox()
         self.table_view.addItems(list(VIEWS))
@@ -277,14 +296,14 @@ class ProjectWindow(QMainWindow):
         buttons.addWidget(self.table_view)
         self.add_button = QPushButton("Add Panels…")
         self.add_button.clicked.connect(self._add)
-        buttons.addWidget(self.add_button)
+        main_panel_row.addWidget(self.add_button)
         self.panel_button = QPushButton("Panel Settings…")
         self.panel_button.clicked.connect(self._panel_settings)
         buttons.addWidget(self.panel_button)
         self.plate_solve_button = QPushButton("Plate Solve")
         self.plate_solve_button.setToolTip("Solve sky panels that need a usable WCS.")
         self.plate_solve_button.clicked.connect(self._plate_solve)
-        buttons.addWidget(self.plate_solve_button)
+        main_panel_row.addWidget(self.plate_solve_button)
         more = QToolButton()
         more.setText("More")
         more.setAccessibleName("More panel actions")
@@ -296,24 +315,27 @@ class ProjectWindow(QMainWindow):
         self.remove_action = more_menu.addAction("Remove Panel", self._remove)
         more.setMenu(more_menu)
         buttons.addWidget(more)
-        controls.addWidget(_PanelToolbar(self.panel_heading, buttons))
+        controls.addWidget(ResponsiveRow(main_panel_controls, buttons))
         self.panels = PanelTable()
         self.table_view.currentTextChanged.connect(self.panels.show_view)
         self.panels.properties.panelEdited.connect(self._update_panel)
         self.panels.selectionModel().currentRowChanged.connect(self._selection_changed)
         controls.addWidget(self.panels, 1)
-        splitter.addWidget(self._editor)
+        self.pages.addWidget(self._editor)
         preview = QWidget()
         preview_layout = QVBoxLayout(preview)
         preview_layout.setContentsMargins(0, 2, 0, 0)
-        preview_header = QHBoxLayout()
+        preview_heading = QWidget()
+        heading_layout = QHBoxLayout(preview_heading)
+        heading_layout.setContentsMargins(0, 0, 0, 0)
         self.preview_title = QLabel("Preview")
         self.preview_title.setProperty("sectionTitle", True)
-        preview_header.addWidget(self.preview_title)
+        heading_layout.addWidget(self.preview_title)
         self.auto_frame_check = QCheckBox("Auto Frame")
         self.auto_frame_check.setToolTip("Fit the preview to the solved sky panels.")
         self.auto_frame_check.toggled.connect(self._set_auto_frame)
-        preview_header.addWidget(self.auto_frame_check)
+        heading_layout.addWidget(self.auto_frame_check)
+        preview_header = QHBoxLayout()
         preview_header.addStretch()
         self.band_label = QLabel("Sky band")
         self.band_box = QComboBox()
@@ -332,7 +354,11 @@ class ProjectWindow(QMainWindow):
         )
         self.use_preview_grid_button.clicked.connect(self._adopt_preview_grid)
         preview_header.addWidget(self.use_preview_grid_button)
-        preview_layout.addLayout(preview_header)
+        self.exit_focus_button = QPushButton("Exit Focus Mode")
+        self.exit_focus_button.clicked.connect(lambda: self.focus_mode_action.setChecked(False))
+        self.exit_focus_button.hide()
+        heading_layout.addWidget(self.exit_focus_button)
+        preview_layout.addWidget(ResponsiveRow(preview_heading, preview_header))
         self.grid_summary = QLabel()
         self.grid_summary.setTextFormat(Qt.TextFormat.PlainText)
         self.grid_summary.setWordWrap(True)
@@ -359,11 +385,12 @@ class ProjectWindow(QMainWindow):
         crop_row.addWidget(self.cancel_crop_button)
         preview_layout.addWidget(self.crop_controls)
         preview_layout.addWidget(self.viewport, 1)
-        splitter.addWidget(preview)
-        splitter.setStretchFactor(0, 2)
-        splitter.setStretchFactor(1, 3)
-        splitter.setSizes([235, 380])
-        layout.addWidget(splitter, 1)
+        self.pages.addWidget(preview)
+        self.navigation.currentRowChanged.connect(self._switch_workspace)
+        self._workspace_focus: dict[int, QWidget] = {}
+        app = QApplication.instance()
+        assert isinstance(app, QApplication)
+        app.focusChanged.connect(self._remember_workspace_focus)
 
         actions = QHBoxLayout()
         self.settings_button = QPushButton("Mosaic Settings…")
@@ -383,13 +410,19 @@ class ProjectWindow(QMainWindow):
         self.layer_box.currentIndexChanged.connect(self._layer_changed)
         self.overlap_check = QCheckBox("Highlight Overlap")
         self.overlap_check.toggled.connect(self._paint_display)
-        actions.addWidget(self.settings_button)
-        actions.addWidget(self.overlap_check)
+        left_actions = QWidget()
+        left_layout = QHBoxLayout(left_actions)
+        left_layout.setContentsMargins(0, 0, 0, 0)
+        left_layout.addWidget(self.settings_button)
+        left_layout.addWidget(self.overlap_check)
+        self.show_panels_button = QPushButton("Show Panels")
+        self.show_panels_button.clicked.connect(lambda: self.navigation.setCurrentRow(_PANELS))
+        left_layout.addWidget(self.show_panels_button)
         actions.addStretch()
         actions.addWidget(self.layer_box)
         actions.addWidget(self.preview_button)
         actions.addWidget(self.start_button)
-        layout.addLayout(actions)
+        preview_layout.addWidget(ResponsiveRow(left_actions, actions))
 
         self.progress = QProgressBar()
         self.progress.setObjectName("workspaceProgress")
@@ -411,21 +444,21 @@ class ProjectWindow(QMainWindow):
         self._solve_timer.setInterval(1000)
         self._solve_timer.timeout.connect(self._update_solve_elapsed)
         self.status = QLabel("Add linear FITS, TIFF, or XISF panels to begin.")
+        self.status.setAccessibleName("Workspace status")
         self.status.setTextFormat(Qt.TextFormat.PlainText)
         self.status.setWordWrap(True)
         status_row = QHBoxLayout()
-        status_row.addWidget(self.status, 3)
+        self.command_toggle = QPushButton("Expand Command Panel")
+        self.command_toggle.clicked.connect(self._toggle_command_panel)
+        status_row.addWidget(self.command_toggle)
         status_row.addWidget(self.progress_elapsed)
         status_row.addWidget(self.progress, 1)
         status_row.addWidget(self.progress_percent)
         status_row.addWidget(self.cancel_button)
         self._show_job_progress(False)
-        layout.addLayout(status_row)
+        layout.addWidget(ResponsiveRow(self.status, status_row))
         self.panels.properties.invalidEdit.connect(self._invalid_panel_edit)
         self._refresh()
-        output_height = self.command_panel.output.minimumSizeHint().height()
-        dock_height = command_dock.minimumSizeHint().height() + max(0, 100 - output_height)
-        self.resizeDocks([command_dock], [dock_height], Qt.Orientation.Vertical)
 
     @property
     def project(self) -> MosaicProject:
@@ -505,7 +538,6 @@ class ProjectWindow(QMainWindow):
         self.command_panel.set_project_path(self.project_path)
         self._refresh_history_actions()
         self._layer_controls()
-        self.cancel_button.setEnabled(self.job is not None)
         self._start_panel_inspection()
         if self._live_pending and not self._is_running():
             self._preview_timer.start()
@@ -704,6 +736,7 @@ class ProjectWindow(QMainWindow):
         self.grid_summary.setText(summary)
         references_ready = self._references_ready(layer, self._sky_band())
         ready = ready and references_ready
+        self.show_panels_button.setVisible(not ready and not cropping)
         photo = self._photo_preview_ready()
         self.start_button.setText("Export Photo Mosaic…" if photo else "Export Mosaic…")
         self.start_button.setEnabled(idle and ready)
@@ -719,7 +752,7 @@ class ProjectWindow(QMainWindow):
         self._set_primary_action(action)
 
         if not self.project.panels:
-            hint = "Choose Add Panels… to add linear FITS, TIFF, or XISF files."
+            hint = "In Panels, choose Add Panels… to add linear FITS, TIFF, or XISF files."
         elif isinstance(self.job, PreviewJob):
             hint = "Preparing the preview…"
         elif not idle:
@@ -827,6 +860,7 @@ class ProjectWindow(QMainWindow):
             self._new_project()
 
     def _new_project(self) -> None:
+        self.navigation.setCurrentRow(_PANELS)
         self._set_project(MosaicProject(auto_frame_preview=True), None)
         self._report_operation("New project.")
 
@@ -1354,6 +1388,7 @@ class ProjectWindow(QMainWindow):
             self._queue_live_preview()
         elif not enabled:
             self._preview_timer.stop()
+            self._adaptive_timer.stop()
             self._live_pending = False
 
     def _queue_live_preview(self) -> None:
@@ -1384,10 +1419,12 @@ class ProjectWindow(QMainWindow):
                     return
                 ready = True
         if ready:
-            self._preview()
+            self._start_preview()
 
     @Slot()
     def _view_changed(self) -> None:
+        if self.pages.currentIndex() != _PREVIEW:
+            return
         overview = self._preview_state.current(self._preview_selection())
         if (
             overview is None or self.viewport.frame is None
@@ -1395,14 +1432,44 @@ class ProjectWindow(QMainWindow):
         ):
             return
         edge = self.viewport.overview_edge()
-        if self.viewport.visible_detail() is None and overview.overview_edge and (
-            abs(edge - overview.overview_edge) >= 256
+        if (
+            self.live_preview_action.isChecked()
+            and self._preview_state.crop is None
+            and overview.selection.layer == "sky"
+            and self.viewport.visible_detail() is None
+            and overview.overview_edge
+            and abs(edge - overview.overview_edge) >= 256
         ):
-            self._queue_live_preview()
+            self._adaptive_timer.start()
+        else:
+            self._adaptive_timer.stop()
         self._detail_timer.start()
 
     @Slot()
+    def _refresh_adaptive_preview(self) -> None:
+        if self.pages.currentIndex() != _PREVIEW or self._is_running() or self._close_after_job:
+            return
+        selection = self._preview_selection()
+        edge = self.viewport.overview_edge()
+        overview = self._preview_state.current(selection)
+        if (
+            overview is None
+            or self._preview_state.crop is not None
+            or self.viewport.visible_detail() is not None
+            or abs(edge - overview.overview_edge) < 256
+        ):
+            return
+        request = self._preview_state.start_adaptive(overview)
+        job = PreviewJob(
+            request, self, adaptive_edge=edge, resolution_scale=self.viewport.resolution_scale(),
+            use_gpu=self._use_gpu_preview,
+        )
+        self._launch_job(job, "Updating the preview for this window size…")
+
+    @Slot()
     def _request_detail(self) -> None:
+        if self.pages.currentIndex() != _PREVIEW:
+            return
         window = self.viewport.visible_detail()
         if window is None:
             self.viewport.clear_detail()
@@ -1490,6 +1557,12 @@ class ProjectWindow(QMainWindow):
     def _preview(self) -> None:
         if self._is_running() or not self.project.panels:
             return
+        self.navigation.setCurrentRow(_PREVIEW)
+        self._start_preview()
+
+    def _start_preview(self) -> None:
+        if self._is_running() or not self.project.panels:
+            return
         edge = self.viewport.overview_edge()
         selection = self._preview_selection()
         request = self._preview_state.start(selection)
@@ -1570,7 +1643,7 @@ class ProjectWindow(QMainWindow):
             self.preview_title.setText("Visual Preview" if overview.visual_only else "Preview")
             self._update_preview_view()
         self._set_running()
-        if self.edit_crop_button.isEnabled():
+        if self.pages.currentIndex() == _PREVIEW and self.edit_crop_button.isEnabled():
             self.edit_crop_button.setFocus()
         self._report_operation("Crop changes discarded.")
 
@@ -1676,6 +1749,7 @@ class ProjectWindow(QMainWindow):
             dialog.deleteLater()
 
     def _launch_job(self, job: _Job, message: str) -> None:
+        self._adaptive_timer.stop()
         self._detail_timer.stop()
         self.job = job
         self._job_revision = self._revision
@@ -1716,10 +1790,107 @@ class ProjectWindow(QMainWindow):
         if isinstance(self.job, PlateSolveJob):
             self._set_solve_elapsed(monotonic() - self.job.queued_at)
 
+    @Slot(QWidget, QWidget)
+    def _remember_workspace_focus(self, previous: QWidget | None, current: QWidget | None) -> None:
+        if current is None or not isValid(self.pages):
+            return
+        page = self.pages.currentWidget()
+        if page is not None and page.isAncestorOf(current):
+            self._workspace_focus[self.pages.currentIndex()] = current
+
+    def _focus_workspace(self, reason: Qt.FocusReason = Qt.FocusReason.OtherFocusReason) -> bool:
+        index = self.pages.currentIndex()
+        remembered = self._workspace_focus.get(index)
+        default: QWidget = self.add_button if not self.project.panels else self.panels
+        alternatives: tuple[QWidget, ...]
+        if index == _PREVIEW:
+            default = self.auto_frame_check
+            alternatives = (self.layer_box, self.viewport.fit_button, self.exit_focus_button)
+        else:
+            alternatives = (self.add_button,)
+        targets = (remembered, default, *alternatives)
+        for target in targets:
+            if (
+                target is not None and isValid(target) and target.isVisibleTo(self)
+                and target.isEnabled() and target.focusPolicy() != Qt.FocusPolicy.NoFocus
+            ):
+                target.setFocus(reason)
+                return True
+        return False
+
+    def focusNextPrevChild(self, next: bool) -> bool:
+        if (
+            next and self.focusWidget() is self.navigation
+            and self._focus_workspace(Qt.FocusReason.TabFocusReason)
+        ):
+            return True
+        return super().focusNextPrevChild(next)
+
+    @Slot(int)
+    def _switch_workspace(self, index: int) -> None:
+        remembered = self._workspace_focus.get(index)
+        self.pages.setCurrentIndex(index)
+        if remembered is not None and isValid(remembered):
+            self._workspace_focus[index] = remembered
+        if index == _PANELS:
+            self.focus_mode_action.setChecked(False)
+            self._adaptive_timer.stop()
+            self._detail_timer.stop()
+        else:
+            QTimer.singleShot(0, self._view_changed)
+        self.focus_mode_action.setEnabled(index == _PREVIEW)
+        self.navigation.setFocus()
+
     @Slot(bool)
-    def _focus_command_panel(self, visible: bool) -> None:
+    def _set_preview_focus_mode(self, active: bool) -> None:
+        focused = self.focusWidget()
+        restore_focus = focused is self.exit_focus_button or (active and focused is self.command_toggle) or (
+            focused is not None and self.command_dock.isAncestorOf(focused)
+        )
+        self.exit_focus_button.setVisible(active)
+        self._sync_command_display()
+        if restore_focus and not self._focus_workspace():
+            self.navigation.setFocus()
+
+    @Slot()
+    def _toggle_command_panel(self) -> None:
+        if self._command_display == "expanded":
+            self._command_display = "collapsed"
+            self._sync_command_display()
+        else:
+            self._show_command_panel(True)
+
+    @Slot(bool)
+    def _show_command_panel(self, visible: bool) -> None:
+        focused = self.focusWidget()
+        restore_focus = not visible and focused is not None and (
+            self.command_dock.isAncestorOf(focused) or focused is self.command_toggle
+        )
+        self._command_display = "expanded" if visible else "hidden"
         if visible:
+            self.focus_mode_action.setChecked(False)
+        self._sync_command_display()
+        if visible and self.command_panel.entry.isEnabled():
             self.command_panel.entry.setFocus()
+        elif restore_focus and not self._focus_workspace():
+            self.navigation.setFocus()
+
+    def _sync_command_display(self) -> None:
+        display = "hidden" if self.focus_mode_action.isChecked() else self._command_display
+        expand = display == "expanded"
+        was_hidden = self.command_dock.isHidden()
+        self.command_dock.setVisible(expand)
+        if expand and was_hidden:
+            output_height = self.command_panel.output.minimumSizeHint().height()
+            transcript_height = 68 if self.height() < 720 else 100
+            dock_height = self.command_dock.minimumSizeHint().height() + max(
+                0, transcript_height - output_height
+            )
+            self.resizeDocks([self.command_dock], [dock_height], Qt.Orientation.Vertical)
+        self.command_toggle.setText("Collapse Command Panel" if expand else "Expand Command Panel")
+        self.command_toggle.setVisible(display != "hidden")
+        with QSignalBlocker(self.command_panel_action):
+            self.command_panel_action.setChecked(display != "hidden")
 
     @Slot()
     def _command_running_changed(self) -> None:
@@ -1728,11 +1899,31 @@ class ProjectWindow(QMainWindow):
         self._set_running()
         self._finish_close_if_ready()
 
+    @Slot()
+    def _command_feedback(self) -> None:
+        if self.job is not None:
+            return
+        panel = self.command_panel
+        self.status.setText(panel.status.text())
+        self.cancel_button.setEnabled(panel.cancel_button.isEnabled())
+        if panel.is_running:
+            self.progress.setRange(0, panel.progress.maximum())
+            self.progress.setValue(panel.progress.value())
+            self._show_job_progress(True)
+            self.progress_percent.setVisible(panel.progress.maximum() > 0)
+
     def _set_running(self) -> None:
         running = self._is_running()
         can_edit = not running and self._preview_state.crop is None
-        self._show_job_progress(self.job is not None, timed=isinstance(self.job, PlateSolveJob))
-        self.cancel_button.setVisible(self.job is not None)
+        self._show_job_progress(running, timed=isinstance(self.job, PlateSolveJob))
+        self.cancel_button.setVisible(running)
+        if self.command_panel.is_running:
+            self._command_feedback()
+        else:
+            self.progress.setRange(0, 100)
+            self.cancel_button.setEnabled(
+                self.job is not None and not self.job.cancellation_requested
+            )
         for action in self._file_actions:
             action.setEnabled(can_edit)
         self.plate_solve_settings_action.setEnabled(can_edit)
@@ -1741,7 +1932,6 @@ class ProjectWindow(QMainWindow):
         self._editor.setEnabled(can_edit)
         self.settings_button.setEnabled(can_edit)
         self._layer_controls()
-        self.cancel_button.setEnabled(self.job is not None)
         self.command_panel.set_available(self.job is None and self._preview_state.crop is None)
         self._refresh_history_actions()
         self._selection_changed()
@@ -1849,6 +2039,13 @@ class ProjectWindow(QMainWindow):
         if result is None or job.cancellation_requested:
             if not self._preview_state.accepts(request, selection):
                 return
+            if request.adaptive_from is not None:
+                self._preview_state.finish_adaptive()
+                if job.cancellation_requested:
+                    self._report_operation("Preview update cancelled.")
+                else:
+                    self._report_render_failure("Preview update failed.", job)
+                return
             if request.crop_grid is not None:
                 self._restore_crop_preview()
                 if job.cancellation_requested:
@@ -1872,7 +2069,8 @@ class ProjectWindow(QMainWindow):
             self.preview_title.setText("Crop Preview")
             self._update_preview_view()
             self._set_running()
-            self.viewport.focus_crop()
+            if self.pages.currentIndex() == _PREVIEW:
+                self.viewport.focus_crop()
             self._report_operation(
                 "Arrows move the crop. Shift+arrows resize. Ctrl+arrows pan. Esc cancels."
             )
@@ -2018,11 +2216,14 @@ class ProjectWindow(QMainWindow):
             self.job.cancel()
             self.cancel_button.setEnabled(False)
             self.status.setText(f"Cancelling {self.job.label}…")
+        else:
+            self.command_panel.cancel()
 
     def _report_operation(self, summary: str, *, detail: str = "") -> None:
         if self.job is None:
             self._show_job_progress(False)
-        self.status.setText(f"{summary} {detail}" if detail else summary)
+        message = f"{summary} {detail}" if detail else summary
+        self.status.setText(message)
         self.command_panel.append_summary(summary)
 
     def _report_render_failure(self, summary: str, job: MosaicJob | PreviewJob) -> None:
@@ -2054,9 +2255,9 @@ class ProjectWindow(QMainWindow):
         if self._is_running() or self._inspection_job is not None or self._detail_job is not None:
             self._close_after_job = True
             self._preview_timer.stop()
+            self._adaptive_timer.stop()
             self._detail_timer.stop()
             self._cancel()
-            self.command_panel.cancel()
             if self._inspection_job is not None:
                 self._inspection_job.cancel()
             if self._detail_job is not None:

@@ -215,6 +215,8 @@ def test_empty_workspace_guides_the_next_available_action(
         app.processEvents()
 
     try:
+        assert window.panels.isVisible() and not window.viewport.isVisible()
+        window.navigation.setCurrentRow(1)
         assert hint.isVisible() and "Add Panels" in hint.text()
         assert window.add_button.property("primary") and not window.preview_button.isEnabled()
         source = tmp_path / "smoke.fits"
@@ -227,10 +229,17 @@ def test_empty_workspace_guides_the_next_available_action(
         assert window.preview_button.property("primary") and not window.add_button.property("primary")
         window.preview_button.click()
         assert "Preparing the preview" in hint.text()
+        window.navigation.setCurrentRow(0)
         idle()
         assert window.viewport.frame is not None and hint.isHidden()
+        assert window.panels.isVisible() and not window.viewport.isVisible()
+        frame = window.viewport.frame
+        window.navigation.setCurrentRow(1)
+        assert window.viewport.frame is frame and window.job is None
         assert window.start_button.property("primary") and not window.preview_button.property("primary")
         window._new_project()
+        assert window.panels.isVisible() and not window.viewport.isVisible()
+        window.navigation.setCurrentRow(1)
         assert hint.isVisible() and "Add Panels" in hint.text()
     finally:
         window.close()
@@ -377,6 +386,17 @@ def test_photo_desktop_session_and_cli_share_the_fitted_grid_and_tone(
         original_crop = window.viewport.crop
         QTest.keyClick(crop_focus, Qt.Key.Key_Left, Qt.KeyboardModifier.ShiftModifier)
         assert window.viewport.crop == replace(original_crop, width=original_crop.width - 1)
+        crop_frame = window.viewport.frame
+        revision = window._revision
+        undo_text = window.undo_action.text()
+        window.navigation.setCurrentRow(0)
+        assert window.panels.isVisible() and not window.crop_controls.isVisible()
+        window.navigation.setCurrentRow(1)
+        assert window.crop_controls.isVisible() and window.viewport.frame is crop_frame
+        assert window.viewport.crop == replace(original_crop, width=original_crop.width - 1)
+        assert window._revision == revision and window.undo_action.text() == undo_text
+        QTest.keyClick(window.navigation, Qt.Key.Key_Tab)
+        assert app.focusWidget() is crop_focus
         QTest.keyClick(crop_focus, Qt.Key.Key_Escape)
         assert window.project == current and not window.crop_controls.isVisible()
         assert window.viewport.frame is frame_before_crop

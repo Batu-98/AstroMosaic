@@ -90,3 +90,26 @@ def test_crop_cannot_apply_or_restore_to_a_changed_project() -> None:
     assert state.restore_crop(edited) is None
     assert state.crop is None and state.frame is None
     assert state.complete(request, selection, result) is None
+
+
+def test_adaptive_preview_keeps_the_resolved_grid_and_previous_frame() -> None:
+    grid = RenderSpec((32.0, 10.0), (24, 18), 7.2)
+    fitted = replace(grid, crop=Region(2, 3, 18, 12))
+    selection = PreviewSelection(MosaicProject(render=grid), "sky", "R")
+    state = PreviewState()
+    frame = _photo_frame(fitted)
+    result = PreviewResult(frame, visual_only=True, fitted_grid=fitted, overview_edge=512)
+    original = state.complete(state.start(selection), selection, result)
+    assert original is not None
+
+    request = state.start_adaptive(original)
+    assert request.adaptive_from is original and state.frame is frame
+    state.finish_adaptive()
+    assert state.current(selection) is original
+    assert state.complete(request, selection, result) is None
+
+    request = state.start_adaptive(original)
+    updated_frame = _photo_frame(fitted)
+    updated = state.complete(request, selection, PreviewResult(updated_frame, overview_edge=768))
+    assert updated is not None and updated.frame is updated_frame
+    assert updated.fitted_grid == fitted and updated.visual_only and updated.overview_edge == 768

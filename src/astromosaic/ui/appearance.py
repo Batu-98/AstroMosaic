@@ -1,8 +1,8 @@
 """Shared desktop palette and per-user appearance preference."""
 
-from PySide6.QtCore import QEvent, QSettings, Qt
-from PySide6.QtGui import QActionGroup, QColor, QFontDatabase, QPainter, QPaintEvent, QPalette
-from PySide6.QtWidgets import QApplication, QMenu, QSplitter, QSplitterHandle
+from PySide6.QtCore import QEvent, QSettings, QSize, Qt
+from PySide6.QtGui import QActionGroup, QColor, QFontDatabase, QPalette
+from PySide6.QtWidgets import QApplication, QBoxLayout, QHBoxLayout, QMenu, QWidget
 
 _STYLE = """
     QWidget { font-size: BODY_SIZE; }
@@ -27,7 +27,13 @@ _STYLE = """
     QHeaderView::section { background: palette(button); color: palette(button-text);
         padding: 2px 6px; border: 0; border-right: 1px solid palette(mid);
         border-bottom: 1px solid palette(mid); }
-    QSplitter::handle { background: palette(mid); }
+    QListWidget#workspaceNavigation { border: 1px solid palette(mid); border-radius: 4px; }
+    QListWidget#workspaceNavigation:focus { border-color: palette(link); }
+    QListWidget#workspaceNavigation::item { padding: 6px 7px; border-left: 3px solid transparent; }
+    QListWidget#workspaceNavigation::item:selected {
+        border-left: 3px solid palette(accent); background: palette(highlight);
+        color: palette(highlighted-text);
+    }
     QFrame#mosaicPreviewSurface { border: 2px solid palette(mid); }
     QFrame#mosaicPreviewSurface:focus { border-color: palette(link); }
     QProgressBar#workspaceProgress {
@@ -38,47 +44,38 @@ _STYLE = """
 """
 
 
-class _WorkspaceSplitterHandle(QSplitterHandle):
-    def paintEvent(self, event: QPaintEvent) -> None:
-        super().paintEvent(event)
-        painter = QPainter(self)
-        center = self.rect().center()
-        grip = self.palette().color(QPalette.ColorRole.Accent)
-        for offset in (-9, 0, 9):
-            if self.orientation() == Qt.Orientation.Horizontal:
-                painter.fillRect(center.x() - 1, center.y() + offset - 2, 3, 5, grip)
-            else:
-                painter.fillRect(center.x() + offset - 2, center.y() - 1, 5, 3, grip)
-        painter.end()
+class ResponsiveRow(QWidget):
+    def __init__(self, first: QWidget, actions: QHBoxLayout) -> None:
+        super().__init__()
+        self._first = first
+        self._actions = actions
+        self._layout = QBoxLayout(QBoxLayout.Direction.LeftToRight, self)
+        self._layout.setContentsMargins(0, 0, 0, 0)
+        self._layout.setSpacing(4)
+        self._layout.addWidget(first)
+        self._layout.addLayout(actions, 1)
 
-
-class WorkspaceSplitter(QSplitter):
-    def __init__(self) -> None:
-        super().__init__(Qt.Orientation.Vertical)
-        self.setHandleWidth(5)
-        self._pane_sizes = {
-            Qt.Orientation.Vertical: [235, 380],
-            Qt.Orientation.Horizontal: [990, 890],
-        }
-        self.splitterMoved.connect(self._remember_sizes)
-
-    def _remember_sizes(self, position: int, index: int) -> None:
-        self._pane_sizes[self.orientation()] = self.sizes()
+    def minimumSizeHint(self) -> QSize:
+        size = super().minimumSizeHint()
+        size.setWidth(max(self._first.minimumSizeHint().width(), self._actions.minimumSize().width()))
+        return size
 
     def event(self, event: QEvent) -> bool:
-        if event.type() in (QEvent.Type.Resize, QEvent.Type.LayoutRequest) and self.count() == 2:
-            panels, preview = self.widget(0), self.widget(1)
-            assert panels is not None and preview is not None
-            required = panels.minimumSizeHint().width() + preview.minimumSizeHint().width()
-            wide = self.width() >= max(1200, required + self.handleWidth())
-            orientation = Qt.Orientation.Horizontal if wide else Qt.Orientation.Vertical
-            if orientation != self.orientation():
-                self.setOrientation(orientation)
-                self.setSizes(self._pane_sizes[orientation])
+        if event.type() in (QEvent.Type.Resize, QEvent.Type.LayoutRequest):
+            row_width = (
+                self._first.minimumSizeHint().width()
+                + self._actions.minimumSize().width()
+                + self._layout.spacing()
+            )
+            direction = (
+                QBoxLayout.Direction.TopToBottom
+                if self.width() < row_width
+                else QBoxLayout.Direction.LeftToRight
+            )
+            if direction != self._layout.direction():
+                self._layout.setDirection(direction)
+                self.updateGeometry()
         return super().event(event)
-
-    def createHandle(self) -> QSplitterHandle:
-        return _WorkspaceSplitterHandle(self.orientation(), self)
 
 
 def apply_theme(name: str) -> None:

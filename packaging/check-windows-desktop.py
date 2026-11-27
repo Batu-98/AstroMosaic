@@ -384,8 +384,13 @@ def check_commands(window: ProjectWindow, directory: Path) -> dict[str, object]:
     manifest = directory / "Mixed.astromosaic"
     window._set_project(load_project(manifest), manifest)
     panel = window.command_panel
+    if not panel.isVisible():
+        if window.command_toggle.isVisible():
+            window.command_toggle.click()
+        else:
+            window.command_panel_action.setChecked(True)
     assert panel.isVisible() and window.command_panel_action.isChecked()
-    assert str(directory) in panel.directory_label.text()
+    assert panel.directory_field.text() == str(directory)
 
     def start(command: str) -> None:
         panel.entry.setText(command)
@@ -410,7 +415,7 @@ def check_commands(window: ProjectWindow, directory: Path) -> dict[str, object]:
     start(slow)
     wait_for(window, lambda: panel.status.text().startswith("Rendering "))
     assert list(directory.glob("*.part")) and not cancelled.exists()
-    panel.cancel_button.click()
+    window.cancel_button.click()
     assert result()["status"] == "cancelled" and "130" in panel.status.text()
     assert not cancelled.exists() and not list(directory.glob("*.part"))
 

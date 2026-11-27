@@ -38,6 +38,7 @@ from astromosaic.display import (
 )
 from astromosaic.photometry.photo import PhotoTone
 from astromosaic.pipeline.mosaic import MAX_DETAIL_PIXELS, MAX_OVERVIEW_EDGE
+from astromosaic.ui.appearance import ResponsiveRow
 from astromosaic.ui.preview_crop import CropDrag, adjust_crop, output_point, screen_rect
 from astromosaic.ui.preview_gl import BACKGROUND_RGB, OpenGLPreview
 
@@ -138,10 +139,13 @@ class SkyViewport(QWidget):
         self._configure_canvas(self._raster)
         layout.addWidget(self._surface, 1)
 
+        navigation = QWidget()
+        navigation_row = QHBoxLayout(navigation)
+        navigation_row.setContentsMargins(0, 0, 0, 0)
         controls = QHBoxLayout()
         self.fit_button = QPushButton("Fit View")
         self.fit_button.clicked.connect(self.fit)
-        controls.addWidget(self.fit_button)
+        navigation_row.addWidget(self.fit_button)
         self.resolution_box = QComboBox()
         self.resolution_box.setAccessibleName("Preview resolution scale")
         self.resolution_box.setToolTip("Percentage of the normal viewport-based preview resolution")
@@ -150,8 +154,8 @@ class SkyViewport(QWidget):
         self.resolution_box.setCurrentIndex(self.resolution_box.findData(50))
         resolution_label = QLabel("Resolution Scale")
         resolution_label.setBuddy(self.resolution_box)
-        controls.addWidget(resolution_label)
-        controls.addWidget(self.resolution_box)
+        navigation_row.addWidget(resolution_label)
+        navigation_row.addWidget(self.resolution_box)
         self.midtones = QSlider(Qt.Orientation.Horizontal)
         self.midtones.setRange(MIN_MIDTONES, MAX_MIDTONES)
         self.midtones.setValue(DEFAULT_MIDTONES)
@@ -172,7 +176,7 @@ class SkyViewport(QWidget):
         controls.addStretch()
         self._backend = QLabel()
         controls.addWidget(self._backend)
-        layout.addLayout(controls)
+        layout.addWidget(ResponsiveRow(navigation, controls))
         self.set_frame(None)
 
     @property

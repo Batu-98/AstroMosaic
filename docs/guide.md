@@ -23,7 +23,7 @@ poetry sync --only main -E desktop
 poetry run python -m astromosaic.ui
 ```
 
-For a sky preview, choose **Add Panels → Plate Solve → Build Preview**. The preview area shows the next step while it is empty. **Auto Frame** starts on in a new desktop project. Use **Use Preview Grid** to adopt a fitted sky grid for export, or set a grid in **Mosaic Settings**. Use the layer selector for sky, foreground, or composition. The **Layers** menu contains foreground alignment and composition controls. [Sky workflow](phase-3c.md#desktop-workflow) · [Mixed-panel workflow](phase-3e.md#desktop-workflow)
+For a sky preview, use **Add Panels** and **Plate Solve** in **Panels**, then switch to **Preview** and choose **Build Preview**. The preview area shows the next step while it is empty. **Auto Frame** starts on in a new desktop project. Use **Use Preview Grid** to adopt a fitted sky grid for export, or set a grid in **Mosaic Settings**. Use the layer selector for sky, foreground, or composition. The **Layers** menu contains foreground alignment and composition controls. [Sky workflow](phase-3c.md#desktop-workflow) · [Mixed-panel workflow](phase-3e.md#desktop-workflow)
 
 Enter decimal values in desktop settings and panel cells using your system decimal separator, such as `1,5` in Turkish or `1.5` in English. Leave out digit grouping separators. The desktop crop field still uses commas between its four integer coordinates. CLI arguments and project files use a decimal point.
 
@@ -35,7 +35,9 @@ The panel control table opens in **Overview**. Choose **Optics**, **Files**, or 
 
 **Overview** places the WCS and solve result together before the optics columns. Body text starts at 12 pt and uses larger sizes reported by Qt. Section headings and the job percentage scale with the body text.
 
-The desktop opens maximized. On the 1920 × 1080 reference display, the panel table sits to the left of the preview. The table moves above the preview when the window is narrower than 1240 logical pixels or the controls need more room at your text size. Drag the three-mark divider to adjust either layout. Each layout keeps its own divider adjustment for the session.
+The desktop opens maximized on **Panels**. Use the left menu or its Up and Down keys to switch between **Panels** and **Preview**. Tab from the menu returns to the last available control in the selected view. Select **View → Preview Focus Mode** or press **Ctrl+Shift+F** from Preview to hide the Command Panel. Exit the mode from the same menu, the shortcut, or **Exit Focus Mode**.
+
+The status area follows the current job in either view. Use **Expand Command Panel** to read the transcript or enter a command. Collapse it to recover workspace height. **Tools → Command Panel** shows or hides the panel controls. **Cancel Job** is available in the shared status area during work, including when the transcript is hidden.
 
 Two lines mark the selected panel row. Dashed borders mark unavailable buttons and selectors.
 

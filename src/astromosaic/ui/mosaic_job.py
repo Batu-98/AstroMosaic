@@ -287,13 +287,15 @@ class PreviewJob(_ProjectJob[PreviewResult]):
     def perform(self, context: JobContext) -> PreviewResult:
         selection = self.request.selection
         crop_grid = self.request.crop_grid
+        adaptive = self.request.adaptive_from
         if selection.layer == "sky":
             with open_preview_sampler(self._surface) as sampler:
                 preview = preview_project(
-                    self.project, context, self._publish_proxy, band=selection.band,
+                    self.project, context, self._publish_proxy if adaptive is None else None,
+                    band=selection.band,
                     allow_visual=True,
                     adaptive_edge=self.adaptive_edge, resolution_scale=self.resolution_scale,
-                    grid=crop_grid,
+                    grid=adaptive.grid if adaptive is not None else crop_grid,
                     inspect_crop=crop_grid is not None, interpolate=sampler,
                 )
                 self.gpu_sampled = sampler is not None and sampler.used

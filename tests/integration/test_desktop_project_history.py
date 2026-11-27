@@ -127,7 +127,7 @@ def test_panel_history_save_relink_and_session_lifetime(
         assert window.redo_action.text() == "&Redo Remove Panel"
 
         terminal = window.command_panel
-        window.command_panel_action.setChecked(True)
+        window.command_toggle.click()
         terminal.entry.setFocus()
         QTest.keyClicks(terminal.entry, "draft")
         QTest.keyClick(terminal.entry, Qt.Key.Key_Z, Qt.KeyboardModifier.ControlModifier)
