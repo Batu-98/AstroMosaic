@@ -35,7 +35,9 @@ The panel control table opens in **Overview**. Choose **Optics**, **Files**, or 
 
 **Overview** places the WCS and solve result together before the optics columns. Body text starts at 12 pt and uses larger sizes reported by Qt. Section headings and the job percentage scale with the body text.
 
-The desktop opens maximized on **Panels**. Use the left menu or its Up and Down keys to switch between **Panels** and **Preview**. Tab from the menu returns to the last available control in the selected view. Select **View → Preview Focus Mode** or press **Ctrl+Shift+F** from Preview to hide the Command Panel. Exit the mode from the same menu, the shortcut, or **Exit Focus Mode**.
+The desktop opens on **Panels** and restores its last window bounds and Command Panel arrangement. The first launch opens maximized. Choose **View → Reset Workspace** for the default layout. Use the left menu or its Up and Down keys to switch between **Panels** and **Preview**. Tab from the menu returns to the last available control in the selected view. Select **View → Preview Focus Mode** or press **Ctrl+Shift+F** from Preview to hide the Command Panel. Exit the mode from the same menu, the shortcut, or **Exit Focus Mode**.
+
+An empty workspace offers **Open Project** and **Add Panels**. Open a recent project from the Panels list or **File → Recent Projects**. The File menu also lets you remove unavailable entries or clear the list. Drop one `.astromosaic` project to open it or drop a group of FITS, TIFF or XISF panels to add them as one undoable edit.
 
 The status area follows the current job in either view. Use **Expand Command Panel** to read the transcript or enter a command. Collapse it to recover workspace height. **Tools → Command Panel** shows or hides the panel controls. **Cancel Job** is available in the shared status area during work, including when the transcript is hidden.
 

@@ -25,15 +25,10 @@ def main() -> int:
     )
     app.setApplicationName("AstroMosaic")
     window = ProjectWindow(use_gpu=not cpu_preview)
-    if second_screen:
-        secondary = next(
-            (screen for screen in app.screens() if screen != app.primaryScreen()), None
-        )
-        if secondary is not None:
-            window.setScreen(secondary)
-            area = secondary.availableGeometry()
-            window.move(area.center() - window.rect().center())
-    window.showMaximized()
+    secondary = next(
+        (screen for screen in app.screens() if screen != app.primaryScreen()), None
+    ) if second_screen else None
+    window.show_workspace(secondary)
     return app.exec()
 
 

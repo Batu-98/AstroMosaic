@@ -7,9 +7,10 @@ from dataclasses import asdict, replace
 from importlib.metadata import version
 from pathlib import Path
 from time import monotonic
-from typing import Literal, cast
+from typing import cast
 
 from PySide6.QtCore import (
+    QRect,
     QSettings,
     QSignalBlocker,
     QSize,
@@ -19,7 +20,7 @@ from PySide6.QtCore import (
     Signal,
     Slot,
 )
-from PySide6.QtGui import QCloseEvent, QKeySequence
+from PySide6.QtGui import QCloseEvent, QDragEnterEvent, QDropEvent, QKeySequence, QScreen
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -31,6 +32,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QListWidget,
+    QListWidgetItem,
     QMainWindow,
     QMenu,
     QMessageBox,
@@ -72,6 +74,7 @@ from astromosaic.ui.mosaic_job import (
     MaskEditorJob,
     MosaicJob,
     PanelInspectionJob,
+    PanelIntakeJob,
     PlateSolveJob,
     PreviewDetailJob,
     PreviewJob,
@@ -88,6 +91,14 @@ from astromosaic.ui.project_settings import (
 )
 from astromosaic.ui.sky_viewport import SkyViewport
 from astromosaic.ui.terrain_editor import TerrainPointEditor
+from astromosaic.ui.workspace_settings import (
+    LAYOUT_KEY,
+    RECENT_KEY,
+    CommandDisplay,
+    WindowPlacement,
+    WorkspaceSettings,
+    recent_projects,
+)
 
 _PROJECT_FILTER = "AstroMosaic project (*.astromosaic)"
 _TIFF_FILTER = "TIFF mosaic (*.tiff *.tif)"
@@ -95,10 +106,11 @@ _FITS_FILTER = "FITS mosaic (*.fits *.fit *.fts)"
 _XISF_FILTER = "XISF mosaic (*.xisf)"
 _GPU_ACCELERATION_SETTING = "preview/gpuAcceleration"
 _PANELS, _PREVIEW = range(2)
-type _CommandDisplay = Literal["hidden", "collapsed", "expanded"]
+_PANEL_SUFFIXES = frozenset((".fits", ".fit", ".fts", ".tif", ".tiff", ".xisf"))
 _Button = QMessageBox.StandardButton
 _Job = (
     MosaicJob
+    | PanelIntakeJob
     | PreviewJob
     | ForegroundJob
     | MaskEditorJob
@@ -181,6 +193,10 @@ class ProjectWindow(QMainWindow):
         self._close_after_job = False
         self.resize(1140, 780)
         self.setMinimumWidth(630)
+        self.setAcceptDrops(True)
+        self._workspace_restored = False
+        self._recent_projects: tuple[Path, ...] = ()
+        self._dock_size: int | None = None
 
         file_menu = self.menuBar().addMenu("&File")
         self._file_actions = (
@@ -189,6 +205,8 @@ class ProjectWindow(QMainWindow):
             file_menu.addAction("&Save Project", "Ctrl+S", self._save),
             file_menu.addAction("Save Project &As…", "Ctrl+Shift+S", self._save_as),
         )
+        self.recent_menu = file_menu.addMenu("Recent Projects")
+        self.recent_menu.setToolTipsVisible(True)
         file_menu.addSeparator()
         self.scientific_export = file_menu.addAction(
             "Export Scientific Mosaic…", self._start_scientific
@@ -218,6 +236,7 @@ class ProjectWindow(QMainWindow):
         self.focus_mode_action.setShortcut(QKeySequence("Ctrl+Shift+F"))
         self.focus_mode_action.setEnabled(False)
         self.focus_mode_action.toggled.connect(self._set_preview_focus_mode)
+        view_menu.addAction("Reset Workspace", self._reset_workspace)
         panel_menu = self.menuBar().addMenu("&Panel")
         self.check_foreground = panel_menu.addAction("Check Foreground", self._check_foreground)
         self.propose_mask = panel_menu.addAction("Propose Sky Mask…", self._propose_mask)
@@ -243,7 +262,7 @@ class ProjectWindow(QMainWindow):
         self.command_panel = CommandPanel(self, self._session_command)
         self.command_panel.running_changed.connect(self._command_running_changed)
         self.command_panel.feedback_changed.connect(self._command_feedback)
-        self._command_display: _CommandDisplay = "collapsed"
+        self._command_display: CommandDisplay = "collapsed"
         self.command_dock = _CommandDock("Command Panel", self)
         self.command_dock.setWidget(self.command_panel)
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.command_dock)
@@ -288,6 +307,9 @@ class ProjectWindow(QMainWindow):
         self.panel_heading = QLabel("Panels")
         self.panel_heading.setProperty("sectionTitle", True)
         main_panel_row.addWidget(self.panel_heading)
+        self.open_button = QPushButton("Open Project…")
+        self.open_button.clicked.connect(self._open)
+        main_panel_row.addWidget(self.open_button)
         buttons.addStretch()
         self.table_view = QComboBox()
         self.table_view.addItems(list(VIEWS))
@@ -320,7 +342,13 @@ class ProjectWindow(QMainWindow):
         self.table_view.currentTextChanged.connect(self.panels.show_view)
         self.panels.properties.panelEdited.connect(self._update_panel)
         self.panels.selectionModel().currentRowChanged.connect(self._selection_changed)
-        controls.addWidget(self.panels, 1)
+        self.recent_list = QListWidget()
+        self.recent_list.setAccessibleName("Recent projects")
+        self.recent_list.itemActivated.connect(self._open_recent_item)
+        self.panel_content = QStackedWidget()
+        self.panel_content.addWidget(self.panels)
+        self.panel_content.addWidget(self.recent_list)
+        controls.addWidget(self.panel_content, 1)
         self.pages.addWidget(self._editor)
         preview = QWidget()
         preview_layout = QVBoxLayout(preview)
@@ -458,7 +486,83 @@ class ProjectWindow(QMainWindow):
         self._show_job_progress(False)
         layout.addWidget(ResponsiveRow(self.status, status_row))
         self.panels.properties.invalidEdit.connect(self._invalid_panel_edit)
+        self._refresh_recent()
         self._refresh()
+
+    def show_workspace(self, screen: QScreen | None = None) -> None:
+        self._workspace_restored = True
+        self._recent_projects = recent_projects(self._preferences.value(RECENT_KEY))
+        self._refresh_recent()
+        layout = WorkspaceSettings.read(self._preferences.value(LAYOUT_KEY))
+        if layout is None:
+            self._default_workspace(screen)
+            return
+        target = screen or self._screen_named(layout.window.screen) or self.screen()
+        self._place_window(layout.window, target)
+        area = Qt.DockWidgetArea(layout.area)
+        self.addDockWidget(area, self.command_dock)
+        self._dock_size = layout.dock_size
+        self._command_display = layout.display
+        if layout.maximized:
+            self.showMaximized()
+        else:
+            self.showNormal()
+            self._place_window(layout.window, target)
+        floating = layout.floating
+        if floating is not None and (dock_screen := self._screen_named(floating.screen)) is not None:
+            work = dock_screen.availableGeometry()
+            if work.intersects(floating.rect.translated(work.topLeft())):
+                self.command_dock.setFloating(True)
+                self.command_dock.setScreen(dock_screen)
+                self.command_dock.setGeometry(floating.absolute(work, self.command_dock.minimumSizeHint()))
+        self._sync_command_display()
+
+    @staticmethod
+    def _screen_named(name: str) -> QScreen | None:
+        return next((screen for screen in QApplication.screens() if screen.name() == name), None)
+
+    def _place_window(self, placement: WindowPlacement, target: QScreen) -> None:
+        self.setScreen(target)
+        handle = self.windowHandle()
+        work = target.availableGeometry()
+        minimum = self.minimumSizeHint().expandedTo(self.minimumSize())
+        rect = placement.absolute(work, minimum, handle.frameMargins()) if handle else placement.absolute(work, minimum)
+        self.setGeometry(rect)
+
+    def _default_workspace(self, target: QScreen | None = None) -> None:
+        self._command_display = "collapsed"
+        self.focus_mode_action.setChecked(False)
+        self.navigation.setCurrentRow(_PANELS)
+        self.command_dock.setFloating(False)
+        self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.command_dock)
+        self._sync_command_display()
+        self._dock_size = None
+        target = target or self.screen()
+        work = target.availableGeometry()
+        size = QSize(1140, 780).boundedTo(work.size())
+        bounds = QRect(0, 0, size.width(), size.height())
+        bounds.moveCenter(work.center() - work.topLeft())
+        self.setWindowState(Qt.WindowState.WindowNoState)
+        self._place_window(WindowPlacement(target.name(), bounds), target)
+        self.showMaximized()
+
+    @Slot()
+    def _reset_workspace(self) -> None:
+        self._preferences.remove(LAYOUT_KEY)
+        self._default_workspace()
+
+    def _save_workspace(self) -> None:
+        if not self._workspace_restored:
+            return
+        dock = self.command_dock
+        area = self.dockWidgetArea(dock)
+        floating = WindowPlacement.capture(dock.geometry(), dock.screen()) if dock.isFloating() else None
+        size = self._current_dock_size(area) if dock.isVisible() and floating is None else self._dock_size
+        rect = self.normalGeometry()
+        placement = WindowPlacement.capture(rect, QApplication.screenAt(rect.center()) or self.screen())
+        layout = WorkspaceSettings(placement, self.isMaximized(), self._command_display, area.value, size, floating)
+        self._preferences.setValue(LAYOUT_KEY, layout.settings())
+        self._preferences.sync()
 
     @property
     def project(self) -> MosaicProject:
@@ -521,6 +625,7 @@ class ProjectWindow(QMainWindow):
         ]
         self.panels.properties.refresh(rows)
         self.panel_heading.setText(f"Panels ({len(rows)})" if rows else "Panels")
+        self._refresh_project_start()
         linked = all(row.linked for row in rows)
         if rows:
             current = self.panels.currentIndex()
@@ -868,8 +973,11 @@ class ProjectWindow(QMainWindow):
         name, _ = QFileDialog.getOpenFileName(self, "Open Project", "", _PROJECT_FILTER)
         if not name:
             return
+        self._open_from_desktop(Path(name))
+
+    def _open_from_desktop(self, path: Path) -> None:
         try:
-            self._open_project(Path(name), confirm_discard=True)
+            self._open_project(path, confirm_discard=True)
         except (OSError, ValueError) as error:
             self._error("Open failed", error)
 
@@ -887,7 +995,54 @@ class ProjectWindow(QMainWindow):
                 # The discard prompt saved this file after we loaded it.
                 project = self._saved
         self._set_project(project, path)
+        self._remember_recent(path)
         self._report_operation(f"Opened {path.name}.")
+
+    def _refresh_project_start(self) -> None:
+        empty = self.project_path is None and not self.project.panels
+        self.open_button.setVisible(empty)
+        self.panel_content.setCurrentWidget(self.recent_list if empty and self._recent_projects else self.panels)
+
+    def _set_recent(self, projects: tuple[Path, ...]) -> None:
+        if not self._workspace_restored:
+            return
+        self._recent_projects = recent_projects([str(path) for path in projects])
+        self._preferences.setValue(RECENT_KEY, [str(path) for path in self._recent_projects])
+        self._refresh_recent()
+
+    def _remember_recent(self, path: Path) -> None:
+        self._set_recent((path.absolute(), *self._recent_projects))
+
+    def _refresh_recent(self) -> None:
+        self.recent_menu.clear()
+        self.recent_list.clear()
+        for path in self._recent_projects:
+            label = f"{path.name} — {path.parent}"
+            item = QListWidgetItem(label)
+            item.setToolTip(str(path))
+            item.setData(Qt.ItemDataRole.UserRole, str(path))
+            self.recent_list.addItem(item)
+            action = self.recent_menu.addAction(label.replace("&", "&&"))
+            action.setToolTip(str(path))
+            action.triggered.connect(lambda _checked=False, path=path: self._open_from_desktop(path))
+        if self._recent_projects:
+            self.recent_menu.addSeparator()
+            self.recent_menu.addAction("Remove Unavailable Projects", self._remove_unavailable_recents)
+            self.recent_menu.addAction("Clear Recent Projects", lambda: self._set_recent(()))
+        else:
+            self.recent_menu.addAction("No recent projects").setEnabled(False)
+        self._refresh_project_start()
+
+    @Slot(QListWidgetItem)
+    def _open_recent_item(self, item: QListWidgetItem) -> None:
+        self._open_from_desktop(Path(item.data(Qt.ItemDataRole.UserRole)))
+
+    @Slot()
+    def _remove_unavailable_recents(self) -> None:
+        available = tuple(path for path in self._recent_projects if path.is_file())
+        removed = len(self._recent_projects) - len(available)
+        self._set_recent(available)
+        self._report_operation(f"Removed {removed} unavailable recent project(s).")
 
     def _save(self) -> bool:
         if self.project_path is None:
@@ -933,6 +1088,7 @@ class ProjectWindow(QMainWindow):
     def _save_project(self, path: Path, *, replace_existing: bool) -> None:
         save_project(path, self.project, replace_existing=replace_existing)
         self.project_path, self._saved = path, self.project
+        self._remember_recent(path)
         self._refresh(self.panels.currentIndex().row())
         self._report_operation(f"Saved {path.name}.")
 
@@ -946,7 +1102,9 @@ class ProjectWindow(QMainWindow):
             self._error("Add failed", error)
 
     def _add_paths(self, paths: tuple[Path, ...]) -> None:
-        sources = tuple(FileReference.capture(path) for path in paths)
+        self._add_sources(tuple(FileReference.capture(path) for path in paths))
+
+    def _add_sources(self, sources: tuple[FileReference, ...]) -> None:
         known = {panel.source.path for panel in self.project.panels}
         additions = []
         for source in sources:
@@ -959,13 +1117,46 @@ class ProjectWindow(QMainWindow):
         )
         self._refresh(start)
         if added:
-            self._report_operation(f"Added {len(additions)} panel(s).")
+            count = len(sources) - len(additions)
+            skipped = f" Skipped {count} duplicate panel(s)." if count else ""
+            self._report_operation(f"Added {len(additions)} panel(s).{skipped}")
             indices = tuple(range(start, len(self.project.panels)))
             self._launch_job(
                 ForegroundJob(self.project, indices, self, after_add=True), "Checking foreground…"
             )
         else:
             self._report_operation("Panels already added.")
+
+    def dragEnterEvent(self, event: QDragEnterEvent) -> None:
+        if not event.mimeData().hasUrls() or not event.possibleActions() & Qt.DropAction.CopyAction:
+            event.ignore()
+            return
+        event.setDropAction(Qt.DropAction.CopyAction)
+        event.accept()
+
+    def dropEvent(self, event: QDropEvent) -> None:
+        urls = event.mimeData().urls()
+        if not urls or not event.possibleActions() & Qt.DropAction.CopyAction:
+            event.ignore()
+            return
+        event.setDropAction(Qt.DropAction.CopyAction)
+        event.accept()
+        if self._is_running() or self._close_after_job or self._preview_state.crop is not None:
+            self._report_operation("Finish or cancel the current operation before dropping files.")
+            return
+        if any(not url.isLocalFile() for url in urls):
+            self._report_operation("Drop local project or panel files.")
+            return
+        paths = tuple(Path(url.toLocalFile()) for url in urls)
+        suffixes = {path.suffix.casefold() for path in paths}
+        if suffixes == {".astromosaic"} and len(paths) == 1:
+            self._open_from_desktop(paths[0])
+        elif ".astromosaic" in suffixes:
+            self._report_operation("Drop one project by itself or a group of panel files.")
+        elif suffixes <= _PANEL_SUFFIXES:
+            self._launch_job(PanelIntakeJob(paths, self), "Checking dropped panel files…")
+        else:
+            self._report_operation("Drop an AstroMosaic project or FITS, TIFF or XISF panels.")
 
     def _relink(self) -> None:
         index = self.panels.currentIndex().row()
@@ -1886,18 +2077,31 @@ class ProjectWindow(QMainWindow):
         display = "hidden" if self.focus_mode_action.isChecked() else self._command_display
         expand = display == "expanded"
         was_hidden = self.command_dock.isHidden()
+        area = self.dockWidgetArea(self.command_dock)
+        if not expand and not was_hidden and not self.command_dock.isFloating():
+            self._dock_size = self._current_dock_size(area)
         self.command_dock.setVisible(expand)
-        if expand and was_hidden:
+        if expand and was_hidden and not self.command_dock.isFloating():
             output_height = self.command_panel.output.minimumSizeHint().height()
             transcript_height = 68 if self.height() < 720 else 100
             dock_height = self.command_dock.minimumSizeHint().height() + max(
                 0, transcript_height - output_height
             )
-            self.resizeDocks([self.command_dock], [dock_height], Qt.Orientation.Vertical)
+            self.resizeDocks([self.command_dock], [self._dock_size or dock_height], self._dock_orientation(area))
         self.command_toggle.setText("Collapse Command Panel" if expand else "Expand Command Panel")
         self.command_toggle.setVisible(display != "hidden")
         with QSignalBlocker(self.command_panel_action):
             self.command_panel_action.setChecked(display != "hidden")
+
+    @staticmethod
+    def _dock_orientation(area: Qt.DockWidgetArea) -> Qt.Orientation:
+        sides = (Qt.DockWidgetArea.LeftDockWidgetArea, Qt.DockWidgetArea.RightDockWidgetArea)
+        return Qt.Orientation.Horizontal if area in sides else Qt.Orientation.Vertical
+
+    def _current_dock_size(self, area: Qt.DockWidgetArea) -> int:
+        if self._dock_orientation(area) == Qt.Orientation.Horizontal:
+            return self.command_dock.width()
+        return self.command_dock.height()
 
     @Slot()
     def _command_running_changed(self) -> None:
@@ -1933,6 +2137,7 @@ class ProjectWindow(QMainWindow):
             )
         for action in self._file_actions:
             action.setEnabled(can_edit)
+        self.recent_menu.setEnabled(can_edit)
         self.plate_solve_settings_action.setEnabled(can_edit)
         self.gpu_settings_action.setEnabled(can_edit)
         self.viewport.resolution_box.setEnabled(can_edit)
@@ -1978,6 +2183,14 @@ class ProjectWindow(QMainWindow):
             self._refresh(self.panels.currentIndex().row())
         elif isinstance(job, PreviewJob):
             self._finish_preview(job)
+        elif isinstance(job, PanelIntakeJob):
+            if job.result is not None and not job.cancellation_requested:
+                self.navigation.setCurrentRow(_PANELS)
+                self._add_sources(job.result)
+            elif job.cancellation_requested:
+                self._report_operation("Panel intake cancelled.")
+            else:
+                self._report_operation("Could not add dropped panels.", detail=job.error or "Unknown error.")
         elif isinstance(job, ForegroundJob):
             self._finish_foreground_check(job)
         elif isinstance(job, MaskEditorJob):
@@ -2227,7 +2440,7 @@ class ProjectWindow(QMainWindow):
             self.command_panel.cancel()
 
     def _report_operation(self, summary: str, *, detail: str = "") -> None:
-        if self.job is None:
+        if not self._is_running():
             self._show_job_progress(False)
         message = f"{summary} {detail}" if detail else summary
         self.status.setText(message)
@@ -2271,6 +2484,7 @@ class ProjectWindow(QMainWindow):
                 self._detail_job.cancel()
             event.ignore()
         elif self._confirm_discard():
+            self._save_workspace()
             self.viewport.release_opengl()
             self._set_project(MosaicProject(auto_frame_preview=True), None)
             event.accept()

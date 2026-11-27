@@ -39,6 +39,7 @@ from astromosaic.pipeline.mosaic import (
     SkyCalibrationRequirement,
 )
 from astromosaic.storage.project import (
+    FileReference,
     Layer,
     MosaicProject,
     PanelInspection,
@@ -118,6 +119,36 @@ class PanelInspectionJob(_ProjectJob[tuple[PanelInspection, ...]]):
 
     def perform(self, context: JobContext) -> tuple[PanelInspection, ...]:
         return tuple(inspect_project_panel(panel, context) for panel in self.project.panels)
+
+
+class PanelIntakeJob(BackgroundJob[tuple[FileReference, ...]]):
+    """Check the complete drop before committing a project edit."""
+
+    label = "panel intake"
+    progress_label = "Checking dropped panels"
+    progress_units = "files"
+
+    def __init__(self, paths: tuple[Path, ...], parent: QObject) -> None:
+        super().__init__(parent)
+        self.paths = paths
+
+    def perform(self, context: JobContext) -> tuple[FileReference, ...]:
+        sources = []
+        for count, path in enumerate(self.paths, start=1):
+            context.check_cancelled()
+            try:
+                source = FileReference.capture(path)
+                with open_panel(source.path):
+                    pass
+                if source.status() != "Ready":
+                    raise ValueError("The input changed during the check.")
+            except (OSError, ValueError) as error:
+                raise ValueError(f"Cannot read {path.name}. {error}") from error
+            sources.append(source)
+            if context.on_progress is not None:
+                context.on_progress(count, len(self.paths))
+        context.check_cancelled()
+        return tuple(sources)
 
 
 class PlateSolveJob(_ProjectJob[None]):
