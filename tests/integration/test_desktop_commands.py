@@ -25,6 +25,70 @@ from astromosaic.storage.project import (
 )
 
 
+def test_command_panel_fits_a_short_window_with_large_text(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pytest.importorskip("PySide6")
+    from PySide6.QtCore import QSettings, QSize
+    from PySide6.QtGui import QFont, QFontDatabase
+    from PySide6.QtWidgets import QApplication
+
+    from astromosaic.ui.project_window import ProjectWindow
+
+    if "QT_QPA_PLATFORM" not in os.environ:
+        monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
+    app = QApplication.instance()
+    if not isinstance(app, QApplication):
+        app = QApplication([])
+    app.setQuitOnLastWindowClosed(False)
+
+    system_font = QFontDatabase.systemFont
+
+    def large_system_font(role: QFontDatabase.SystemFont) -> QFont:
+        font = system_font(role)
+        font.setPointSize(14)
+        return font
+
+    monkeypatch.setattr(QFontDatabase, "systemFont", staticmethod(large_system_font))
+    original_font = app.font()
+    app.setFont(large_system_font(QFontDatabase.SystemFont.GeneralFont))
+    preferences = QSettings(str(tmp_path / "settings.ini"), QSettings.Format.IniFormat)
+    window = ProjectWindow(use_gpu=False, preferences=preferences)
+    screens = app.screens()
+    if len(screens) > 1:
+        window.move(screens[1].availableGeometry().center() - window.rect().center())
+    window.show()
+
+    try:
+        panel = window.command_panel
+        panel.set_project_path(tmp_path / "A long working folder" / "Project.astromosaic")
+        assert panel.entry.font().pointSize() == 14
+        assert panel.directory_field.text() == str(tmp_path / "A long working folder")
+        assert panel.directory_field.isReadOnly()
+
+        window.resize(800, 650)
+        app.processEvents()
+        assert window.size() == QSize(800, 650)
+
+        window.status.setText("Building preview…")
+        window._show_job_progress(True, timed=True)
+        window.progress_elapsed.setText("Elapsed 0:59")
+        window.progress.setValue(67)
+        window.cancel_button.show()
+        app.processEvents()
+
+        assert window.size() == QSize(800, 650)
+        assert window.progress.isVisible() and window.cancel_button.isVisible()
+        assert window.progress_percent.text() == "67%"
+        assert window.viewport.canvas.height() >= 100
+        assert panel.entry.isVisible() and panel.directory_field.isVisible()
+        assert panel.output.height() >= panel.output.minimumSizeHint().height()
+        assert panel.output.viewport().height() >= 2 * panel.output.fontMetrics().lineSpacing()
+    finally:
+        window.close()
+        app.setFont(original_font)
+
+
 def test_command_panel_runs_saved_projects_and_cleans_cancelled_exports(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

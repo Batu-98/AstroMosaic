@@ -278,7 +278,8 @@ def test_photo_desktop_session_and_cli_share_the_fitted_grid_and_tone(
         assert window.viewport.image_rect().x() < before_pan.x()
         assert window.viewport.crop == edited and window.project == current
         assert window.crop_bounds.text() == (
-            f"Crop {edited.x}, {edited.y} · {edited.width} × {edited.height} px"
+            f"Crop {edited.x}, {edited.y} · {edited.width} × {edited.height} / "
+            f"{display.output_size[0]} × {display.output_size[1]} px"
         )
         QTest.keyClick(crop_focus, Qt.Key.Key_Tab, Qt.KeyboardModifier.ShiftModifier)
         assert app.focusWidget() is window.cancel_crop_button

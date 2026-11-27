@@ -124,7 +124,7 @@ class SkyViewport(QWidget):
         self._surface.setObjectName("mosaicPreviewSurface")
         self._surface.setAccessibleName("Mosaic preview")
         self._surface.setAccessibleDescription(_PREVIEW_KEYS)
-        self._surface.setMinimumHeight(190)
+        self._surface.setMinimumHeight(112)
         self._surface.installEventFilter(self)
         self._pages = QStackedLayout(self._surface)
         self._raster = _RasterPreview(self)

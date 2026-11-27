@@ -208,8 +208,8 @@ class ProjectWindow(QMainWindow):
         body = QWidget(self)
         self.setCentralWidget(body)
         layout = QVBoxLayout(body)
-        layout.setContentsMargins(20, 16, 20, 16)
-        layout.setSpacing(12)
+        layout.setContentsMargins(20, 6, 20, 6)
+        layout.setSpacing(6)
         splitter = QSplitter(Qt.Orientation.Vertical)
         splitter.setChildrenCollapsible(False)
         self.viewport = SkyViewport(use_gpu=self._use_gpu_preview)
@@ -354,6 +354,7 @@ class ProjectWindow(QMainWindow):
         self.progress.setValue(0)
         self.progress.setTextVisible(False)
         self.progress.setMinimumHeight(24)
+        self.progress.setMinimumWidth(90)
         self.progress_percent = QLabel("0%")
         self.progress_percent.setObjectName("jobPercentage")
         self.progress_percent.setAlignment(
@@ -368,24 +369,19 @@ class ProjectWindow(QMainWindow):
         self.status = QLabel("Add linear FITS, TIFF, or XISF panels to begin.")
         self.status.setTextFormat(Qt.TextFormat.PlainText)
         self.status.setWordWrap(True)
-        footer = QVBoxLayout()
-        footer.setSpacing(6)
         status_row = QHBoxLayout()
-        status_row.addWidget(self.status, 1)
+        status_row.addWidget(self.status, 3)
         status_row.addWidget(self.progress_elapsed)
+        status_row.addWidget(self.progress, 1)
+        status_row.addWidget(self.progress_percent)
         status_row.addWidget(self.cancel_button)
-        footer.addLayout(status_row)
-        progress_row = QHBoxLayout()
-        progress_row.addWidget(self.progress, 1)
-        progress_row.addWidget(self.progress_percent)
-        footer.addLayout(progress_row)
         self._show_job_progress(False)
-        layout.addLayout(footer)
+        layout.addLayout(status_row)
         self.panels.properties.invalidEdit.connect(self._invalid_panel_edit)
         self._refresh()
-        self.resizeDocks(
-            [command_dock], [command_dock.minimumSizeHint().height()], Qt.Orientation.Vertical
-        )
+        output_height = self.command_panel.output.minimumSizeHint().height()
+        dock_height = command_dock.minimumSizeHint().height() + max(0, 100 - output_height)
+        self.resizeDocks([command_dock], [dock_height], Qt.Orientation.Vertical)
 
     @property
     def project(self) -> MosaicProject:
@@ -610,6 +606,7 @@ class ProjectWindow(QMainWindow):
             idle and self._preview_state.sky_overview(selection) is not None
         )
         self.crop_controls.setVisible(cropping)
+        self.grid_summary.setVisible(not cropping)
         crop_ready = cropping and self.job is None
         self.apply_crop_button.setEnabled(crop_ready and self.viewport.crop is not None)
         self.auto_crop_button.setEnabled(
@@ -1444,7 +1441,12 @@ class ProjectWindow(QMainWindow):
 
     @Slot(object)
     def _show_crop_bounds(self, crop: Region) -> None:
-        self.crop_bounds.setText(f"Crop {crop.x}, {crop.y} · {crop.width} × {crop.height} px")
+        draft = self._preview_state.crop
+        if draft is not None:
+            width, height = draft.grid.size
+            self.crop_bounds.setText(
+                f"Crop {crop.x}, {crop.y} · {crop.width} × {crop.height} / {width} × {height} px"
+            )
 
     @Slot()
     def _reset_crop(self) -> None:

@@ -2,13 +2,14 @@
 
 from argparse import ArgumentParser, Namespace
 from collections.abc import Callable
+from math import ceil
 from multiprocessing import get_context
 from multiprocessing.connection import wait
 from pathlib import Path
 from shlex import shlex
 from typing import Never
 
-from PySide6.QtCore import Qt, Signal, Slot
+from PySide6.QtCore import QSize, Qt, Signal, Slot
 from PySide6.QtGui import QFontDatabase, QKeySequence, QShortcut, QTextCursor
 from PySide6.QtWidgets import (
     QHBoxLayout,
@@ -118,6 +119,13 @@ class CommandJob(BackgroundJob[int]):
                 child.close()
 
 
+class _CommandOutput(QPlainTextEdit):
+    def minimumSizeHint(self) -> QSize:
+        height = 2 * self.fontMetrics().lineSpacing() + ceil(2 * self.document().documentMargin())
+        height += 2 * self.frameWidth()
+        return QSize(super().minimumSizeHint().width(), height)
+
+
 class CommandPanel(QWidget):
     running_changed = Signal()
 
@@ -135,19 +143,13 @@ class CommandPanel(QWidget):
         self._draft = ""
 
         layout = QVBoxLayout(self)
-        self.directory_label = QLabel()
-        self.directory_label.setTextFormat(Qt.TextFormat.PlainText)
-        self.directory_label.setWordWrap(True)
-        self.directory_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        layout.addWidget(self.directory_label)
-        self.set_project_path(None)
-
-        self.output = QPlainTextEdit()
+        layout.setContentsMargins(9, 4, 9, 4)
+        layout.setSpacing(2)
+        self.output = _CommandOutput()
         self.output.setAccessibleName("Command output")
         self.output.setFont(QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont))
         self.output.setReadOnly(True)
         self.output.setMaximumBlockCount(2_000)
-        self.output.setMinimumHeight(100)
         layout.addWidget(self.output, 1)
 
         controls = QHBoxLayout()
@@ -171,8 +173,16 @@ class CommandPanel(QWidget):
         layout.addLayout(controls)
 
         feedback = QHBoxLayout()
+        feedback.addWidget(QLabel("Working folder"))
+        self.directory_field = QLineEdit()
+        self.directory_field.setAccessibleName("Working folder")
+        self.directory_field.setReadOnly(True)
+        self.directory_field.setFrame(False)
+        feedback.addWidget(self.directory_field, 2)
+        self.set_project_path(None)
         self.status = QLabel("Ready.")
         self.status.setTextFormat(Qt.TextFormat.PlainText)
+        self.status.setWordWrap(True)
         feedback.addWidget(self.status, 1)
         self.progress = QProgressBar()
         self.progress.setAccessibleName("Command progress")
@@ -188,7 +198,10 @@ class CommandPanel(QWidget):
 
     def set_project_path(self, path: Path | None) -> None:
         self._directory = path.absolute().parent if path is not None else self._startup_directory
-        self.directory_label.setText(f"Working folder: {self._directory}")
+        folder = str(self._directory)
+        self.directory_field.setText(folder)
+        self.directory_field.setCursorPosition(0)
+        self.directory_field.setToolTip(folder)
 
     def set_available(self, available: bool) -> None:
         self._available = available
