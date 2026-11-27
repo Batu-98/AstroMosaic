@@ -31,6 +31,8 @@ Use **Resolution Scale** in the preview toolbar to choose **25%**, **50%**, **75
 
 The panel control table opens in **Overview**. Choose **Optics**, **Files**, or **All properties** to compare additional columns. Use **Tab** and **Shift+Tab** to leave the table and the arrow keys to move between cells. Press **F2** or double-click to edit a weight, band, focal length, or pixel size. Press **Space** on the **Sky** checkbox to toggle inclusion in the sky layer. The desktop starts in dark mode. Choose **View → Theme** to switch between dark and light appearances. [Panel controls](phase-3b.md#panel-control-table)
 
+Two lines mark the selected panel row. Dashed borders mark unavailable buttons and selectors. Drag the three-mark handle between the panel table and preview to redistribute space.
+
 Choose **TAN** or **ZEA** under **Mosaic Settings → Sky projection**. Set a new composition placement after changing the projection. [Sky projection](phase-5b.md)
 
 Choose an available **Sky band** for a band-specific preview and export. Panels without a filter label or declared common filter use the `Unspecified` band. Assign a known label with **Panel Settings → Sky band override**. [Per-band workflow](phase-5c.md)

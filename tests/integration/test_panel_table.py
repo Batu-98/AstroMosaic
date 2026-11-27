@@ -8,6 +8,75 @@ from astropy.io import fits
 from astromosaic.storage.project import FileReference, MosaicProject, ProjectPanel, load_project
 
 
+def test_workspace_control_states_have_distinct_shapes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pytest.importorskip("PySide6")
+    from PySide6.QtCore import QSettings
+    from PySide6.QtGui import QAction, QImage, QPalette
+    from PySide6.QtWidgets import QApplication, QSplitter
+
+    from astromosaic.ui.panel_table import panel_row
+    from astromosaic.ui.project_window import ProjectWindow
+
+    if "QT_QPA_PLATFORM" not in os.environ:
+        monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
+    app = QApplication.instance()
+    if not isinstance(app, QApplication):
+        app = QApplication([])
+    app.setQuitOnLastWindowClosed(False)
+    preferences = QSettings(str(tmp_path / "appearance.ini"), QSettings.Format.IniFormat)
+    window = ProjectWindow(use_gpu=False, preferences=preferences)
+    secondary = next((screen for screen in app.screens() if screen != app.primaryScreen()), None)
+    if secondary is not None:
+        window.move(secondary.availableGeometry().center() - window.rect().center())
+    window.show()
+
+    def pixel(image: QImage, x: int, y: int) -> str:
+        scale = image.devicePixelRatio()
+        return image.pixelColor(int((x + 0.5) * scale), int((y + 0.5) * scale)).name()
+
+    try:
+        table = window.panels
+        rows = []
+        for index in range(2):
+            source = tmp_path / f"panel-{index}.fits"
+            fits.writeto(source, np.ones((8, 12), dtype=np.float32))
+            panel = ProjectPanel(FileReference.capture(source))
+            rows.append(panel_row(panel, None, None, None))
+        table.properties.refresh(rows)
+        table.selectRow(0)
+        assert window.add_button.isEnabled() and not window.preview_button.isEnabled()
+        splitter = window.findChild(QSplitter)
+        handle = splitter.handle(1)
+
+        themes = {a.text(): a for a in window.findChildren(QAction) if a.text() in {"Dark", "Light"}}
+        for theme in ("Dark", "Light"):
+            themes[theme].trigger()
+            app.processEvents()
+            palette = app.palette()
+            accent = palette.color(QPalette.ColorRole.Accent).name()
+            enabled = window.add_button.grab().toImage()
+            disabled = window.preview_button.grab().toImage()
+            assert len({pixel(enabled, x, 0) for x in range(10, 40)}) == 1
+            assert len({pixel(disabled, x, 0) for x in range(10, 40)}) > 1
+
+            cells = table.viewport().grab().toImage()
+            for column in ("Panel", "Weight"):
+                selected = table.visualRect(table.cell(0, column))
+                unselected = table.visualRect(table.cell(1, column))
+                assert pixel(cells, selected.center().x(), selected.top()) == accent
+                assert pixel(cells, selected.center().x(), selected.bottom()) == accent
+                assert pixel(cells, unselected.center().x(), unselected.top()) != accent
+
+            grip = handle.grab().toImage()
+            center = handle.rect().center()
+            assert all(pixel(grip, center.x() + x, center.y()) == accent for x in (-9, 0, 9))
+            assert all(pixel(grip, center.x() + x, center.y()) != accent for x in (-5, 5))
+    finally:
+        window.close()
+
+
 def test_panel_grid_edits_and_appearance(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     pytest.importorskip("PySide6")
     from PySide6.QtCore import QSettings, Qt

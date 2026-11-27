@@ -13,7 +13,16 @@ from PySide6.QtCore import (
     Qt,
     Signal,
 )
-from PySide6.QtWidgets import QAbstractItemView, QLineEdit, QStyledItemDelegate, QTableView, QWidget
+from PySide6.QtGui import QPainter, QPalette
+from PySide6.QtWidgets import (
+    QAbstractItemView,
+    QLineEdit,
+    QStyle,
+    QStyledItemDelegate,
+    QStyleOptionViewItem,
+    QTableView,
+    QWidget,
+)
 
 from astromosaic.astrometry.hints import PanelOptics
 from astromosaic.storage.project import PanelInspection, PanelSolveOutcome, ProjectPanel
@@ -330,6 +339,14 @@ class PanelTableModel(QAbstractTableModel):
 
 
 class _PanelDelegate(QStyledItemDelegate):
+    def paint(self, painter: QPainter, option: QStyleOptionViewItem, index: _Index) -> None:
+        super().paint(painter, option, index)
+        if option.state & QStyle.StateFlag.State_Selected:
+            cell = option.rect
+            outline = option.palette.color(QPalette.ColorRole.Accent)
+            painter.fillRect(cell.left(), cell.top(), cell.width(), 1, outline)
+            painter.fillRect(cell.left(), cell.bottom(), cell.width(), 1, outline)
+
     def setEditorData(self, editor: QWidget, index: _Index) -> None:
         # Background inspection can finish while the user is typing.
         if not isinstance(editor, QLineEdit) or not editor.isModified():

@@ -26,7 +26,6 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QProgressBar,
     QPushButton,
-    QSplitter,
     QToolButton,
     QVBoxLayout,
     QWidget,
@@ -47,7 +46,7 @@ from astromosaic.storage.project import (
     load_project,
     save_project,
 )
-from astromosaic.ui.appearance import add_theme_menu
+from astromosaic.ui.appearance import WorkspaceSplitter, add_theme_menu
 from astromosaic.ui.command_panel import CommandPanel
 from astromosaic.ui.edit_history import EditHistory
 from astromosaic.ui.foreground_details import ForegroundAlignmentDetails
@@ -210,7 +209,7 @@ class ProjectWindow(QMainWindow):
         layout = QVBoxLayout(body)
         layout.setContentsMargins(20, 6, 20, 6)
         layout.setSpacing(6)
-        splitter = QSplitter(Qt.Orientation.Vertical)
+        splitter = WorkspaceSplitter()
         splitter.setChildrenCollapsible(False)
         self.viewport = SkyViewport(use_gpu=self._use_gpu_preview)
         self.viewport.resolution_box.currentIndexChanged.connect(self._resolution_changed)
@@ -318,7 +317,6 @@ class ProjectWindow(QMainWindow):
         splitter.setStretchFactor(0, 2)
         splitter.setStretchFactor(1, 3)
         splitter.setSizes([235, 380])
-        splitter.setHandleWidth(3)
         layout.addWidget(splitter, 1)
 
         actions = QHBoxLayout()

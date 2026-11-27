@@ -1,8 +1,8 @@
 """Shared desktop palette and per-user appearance preference."""
 
 from PySide6.QtCore import QSettings, Qt
-from PySide6.QtGui import QActionGroup, QColor, QFontDatabase, QPalette
-from PySide6.QtWidgets import QApplication, QMenu
+from PySide6.QtGui import QActionGroup, QColor, QFontDatabase, QPainter, QPaintEvent, QPalette
+from PySide6.QtWidgets import QApplication, QMenu, QSplitter, QSplitterHandle
 
 _STYLE = """
     QLabel[sectionTitle="true"] { font-size: 16px; font-weight: 600; }
@@ -18,6 +18,9 @@ _STYLE = """
         border: 1px solid PRIMARY_FILL; padding: 5px 12px;
     }
     QPushButton[primary="true"]:focus { border-color: palette(text); }
+    QPushButton:disabled, QToolButton:disabled, QComboBox:disabled {
+        background: palette(window); color: DISABLED_TEXT; border: 1px dashed DISABLED_TEXT;
+    }
     QTableView { border: 1px solid palette(mid); gridline-color: palette(mid); }
     QTableView::item { padding: 0 5px; }
     QHeaderView::section { background: palette(button); color: palette(button-text);
@@ -32,6 +35,26 @@ _STYLE = """
     QProgressBar#workspaceProgress::chunk { background: PRIMARY_FILL; border-radius: 4px; }
     QLabel#jobPercentage { font-size: 19px; font-weight: 700; min-width: 54px; }
 """
+
+
+class _WorkspaceSplitterHandle(QSplitterHandle):
+    def paintEvent(self, event: QPaintEvent) -> None:
+        super().paintEvent(event)
+        painter = QPainter(self)
+        center = self.rect().center()
+        grip = self.palette().color(QPalette.ColorRole.Accent)
+        for offset in (-9, 0, 9):
+            painter.fillRect(center.x() + offset - 2, center.y() - 1, 5, 3, grip)
+        painter.end()
+
+
+class WorkspaceSplitter(QSplitter):
+    def __init__(self) -> None:
+        super().__init__(Qt.Orientation.Vertical)
+        self.setHandleWidth(5)
+
+    def createHandle(self) -> QSplitterHandle:
+        return _WorkspaceSplitterHandle(self.orientation(), self)
 
 
 def apply_theme(name: str) -> None:
@@ -74,13 +97,13 @@ def apply_theme(name: str) -> None:
         palette.setColor(key, QColor(night if dark else day))
     for key in (role.Text, role.WindowText, role.ButtonText):
         palette.setColor(
-            QPalette.ColorGroup.Disabled, key, QColor("#89939a" if dark else "#687279")
+            QPalette.ColorGroup.Disabled, key, QColor("#89939a" if dark else "#59636a")
         )
     app.setPalette(palette)
     app.setStyleSheet(
-        _STYLE.replace("PRIMARY_FILL", palette.color(role.Accent).name()).replace(
-            "PRIMARY_TEXT", "#102321" if dark else "#ffffff"
-        )
+        _STYLE.replace("PRIMARY_FILL", palette.color(role.Accent).name())
+        .replace("PRIMARY_TEXT", "#102321" if dark else "#ffffff")
+        .replace("DISABLED_TEXT", palette.color(QPalette.ColorGroup.Disabled, role.ButtonText).name())
     )
 
 
