@@ -24,6 +24,8 @@ _STYLE = """
         padding: 6px; border: 0; border-right: 1px solid palette(mid);
         border-bottom: 1px solid palette(mid); }
     QSplitter::handle { background: palette(mid); }
+    QFrame#mosaicPreviewSurface { border: 2px solid palette(mid); }
+    QFrame#mosaicPreviewSurface:focus { border-color: palette(link); }
     QProgressBar#workspaceProgress {
         background: palette(base); border: 1px solid palette(mid); border-radius: 5px;
     }

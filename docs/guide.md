@@ -29,7 +29,7 @@ For a sky preview, choose **Add Panels → Plate Solve → Build Preview**. **Au
 
 Use **Resolution Scale** in the preview toolbar to choose **25%**, **50%**, **75%**, or **100%** of the normal overview resolution. The default is **50%**. [Preview geometry](phase-3c.md#geometry-and-display)
 
-The panel control table opens in **Overview**. Choose **Optics**, **Files**, or **All properties** to compare additional columns. Double-click a weight, band, focal length, or pixel size to edit it. Use the **Sky** checkbox to include a panel in the sky layer. The desktop starts in dark mode. Choose **View → Theme** to switch between dark and light appearances. [Panel controls](phase-3b.md#panel-control-table)
+The panel control table opens in **Overview**. Choose **Optics**, **Files**, or **All properties** to compare additional columns. Use **Tab** and **Shift+Tab** to leave the table and the arrow keys to move between cells. Press **F2** or double-click to edit a weight, band, focal length, or pixel size. Press **Space** on the **Sky** checkbox to toggle inclusion in the sky layer. The desktop starts in dark mode. Choose **View → Theme** to switch between dark and light appearances. [Panel controls](phase-3b.md#panel-control-table)
 
 Choose **TAN** or **ZEA** under **Mosaic Settings → Sky projection**. Set a new composition placement after changing the projection. [Sky projection](phase-5b.md)
 
@@ -50,6 +50,8 @@ Use **Edit → Undo** with **Ctrl+Z** and **Redo** with **Ctrl+Y** or **Ctrl+Shi
 Build a visual sky preview from RGB UInt16 TIFFs with supported profiles to enable **Export Photo Mosaic**. Use the **Photo** tab in **Mosaic Settings** for profile, exposure and brightness choices, and **Panel Settings → Photo** for per-panel profile or EV overrides. Choose **Preserve Tone** or **Use Preview Tone** to write a tagged 16-bit TIFF at the full preview grid resolution. [Photo workflow and CLI](phase-8.md#8c-photo-color-and-exposure-workflow)
 
 With **Live Sky Preview** enabled, an opened sky preview refreshes as its inputs change. Zoom for **1:1** detail and use **Edit Crop** to adjust the automatic bounds on the full grid. **Apply Crop** saves the selected pixel rectangle in the project grid for the next export. [Framing locks and crop controls](phase-3c.md#adaptive-framing-and-interactive-crop)
+
+Press **Tab** to focus a loaded mosaic preview, or click its image area. Use the arrow keys to pan, **+** or **=** to zoom in, **−** to zoom out, and **Home** to fit the view. **Tab** moves from the preview to **Fit View**. For exact crop coordinates with the keyboard, use **Mosaic Settings → Crop (x, y, width, height)**.
 
 On import or project reopen, **Panel Settings** automatically fills the available focal length and X and Y pixel sizes and shows the camera model. The readers use FITS keywords, TIFF EXIF/XMP and FITS-style metadata, and XISF instrument properties and FITS keywords. Per-panel edits override the corresponding file values. [Supported optics and units](phase-3b.md#panel-wcs-and-plate-solve-hints)
 

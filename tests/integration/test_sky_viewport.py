@@ -71,6 +71,7 @@ def test_sky_viewport_pixels_pan_zoom_and_stretch(
         if secondary is not None:
             viewport.move(secondary.availableGeometry().center() - viewport.rect().center())
         viewport.show()
+        viewport.activateWindow()
         viewport.set_frame(frame)
         viewport.midtones.setValue(50)
         check_samples()
@@ -81,6 +82,28 @@ def test_sky_viewport_pixels_pan_zoom_and_stretch(
             round(canvas.height() * canvas.devicePixelRatioF()),
         )
         original = viewport.image_rect()
+        viewport.fit_button.setFocus()
+        QTest.keyClick(viewport.fit_button, Qt.Key.Key_Tab, Qt.KeyboardModifier.ShiftModifier)
+        navigation = app.focusWidget()
+        assert navigation is not None and navigation.accessibleName() == "Mosaic preview"
+        QTest.keyClick(navigation, Qt.Key.Key_Right)
+        QTest.keyClick(navigation, Qt.Key.Key_Down)
+        panned = viewport.image_rect()
+        assert panned.x() < original.x() and panned.y() < original.y()
+        assert panned.size() == original.size()
+        QTest.keyClick(navigation, Qt.Key.Key_Equal)
+        keyboard_zoom = viewport.image_rect()
+        assert keyboard_zoom.width() == pytest.approx(1.2 * panned.width())
+        assert keyboard_zoom.center().x() == pytest.approx(
+            original.center().x() + 1.2 * (panned.center().x() - original.center().x())
+        )
+        QTest.keyClick(navigation, Qt.Key.Key_Minus)
+        assert viewport.image_rect().width() == pytest.approx(panned.width())
+        QTest.keyClick(navigation, Qt.Key.Key_Home)
+        assert viewport.image_rect() == original
+        QTest.keyClick(navigation, Qt.Key.Key_Tab)
+        assert app.focusWidget() is viewport.fit_button
+
         anchor = original.center() + QPointF(30, -20)
         zoom = QWheelEvent(
             anchor,
@@ -145,10 +168,16 @@ def test_sky_viewport_pixels_pan_zoom_and_stretch(
                 raise RuntimeError("Test preview texture upload failure.")
 
             monkeypatch.setattr(OpenGLPreview, "_upload", fail_upload)
+            navigation.setFocus()
             viewport.set_frame(replace(frame))
             screenshot()
             app.processEvents()
             assert viewport.backend == "CPU"
+            assert app.focusWidget() is navigation
+            before = viewport.image_rect()
+            QTest.keyClick(navigation, Qt.Key.Key_Plus, Qt.KeyboardModifier.ShiftModifier)
+            assert viewport.image_rect().width() == pytest.approx(1.2 * before.width())
+            QTest.keyClick(navigation, Qt.Key.Key_Home)
             check_samples(preserve_tone=True)
     finally:
         viewport.close()

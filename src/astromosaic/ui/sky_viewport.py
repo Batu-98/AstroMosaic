@@ -6,6 +6,7 @@ from PySide6.QtCore import QEvent, QObject, QPointF, QRectF, Qt, QTimer, Signal,
 from PySide6.QtGui import (
     QColor,
     QImage,
+    QKeyEvent,
     QMouseEvent,
     QPainter,
     QPainterPath,
@@ -39,6 +40,14 @@ from astromosaic.photometry.photo import PhotoTone
 from astromosaic.pipeline.mosaic import MAX_DETAIL_PIXELS, MAX_OVERVIEW_EDGE
 from astromosaic.ui.preview_crop import CropDrag, output_point, screen_rect
 from astromosaic.ui.preview_gl import BACKGROUND_RGB, OpenGLPreview
+
+_PREVIEW_KEYS = "Arrow keys pan. Plus or minus zoom. Home fits the view."
+_PAN_DIRECTIONS: dict[int, tuple[int, int]] = {
+    Qt.Key.Key_Left: (1, 0),
+    Qt.Key.Key_Right: (-1, 0),
+    Qt.Key.Key_Up: (0, 1),
+    Qt.Key.Key_Down: (0, -1),
+}
 
 
 class _RasterPreview(QWidget):
@@ -108,13 +117,17 @@ class SkyViewport(QWidget):
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        surface = QFrame()
-        surface.setFrameShape(QFrame.Shape.StyledPanel)
-        surface.setMinimumHeight(190)
-        self._pages = QStackedLayout(surface)
+        self._surface = QFrame()
+        self._surface.setFrameShape(QFrame.Shape.StyledPanel)
+        self._surface.setObjectName("mosaicPreviewSurface")
+        self._surface.setAccessibleName("Mosaic preview")
+        self._surface.setAccessibleDescription(_PREVIEW_KEYS)
+        self._surface.setMinimumHeight(190)
+        self._surface.installEventFilter(self)
+        self._pages = QStackedLayout(self._surface)
         self._raster = _RasterPreview(self)
         self._configure_canvas(self._raster)
-        layout.addWidget(surface, 1)
+        layout.addWidget(self._surface, 1)
 
         controls = QHBoxLayout()
         self.fit_button = QPushButton("Fit View")
@@ -243,7 +256,6 @@ class SkyViewport(QWidget):
         )
 
     def _configure_canvas(self, canvas: QWidget) -> None:
-        canvas.setAccessibleName("Mosaic preview")
         self._pages.addWidget(canvas)
         canvas.installEventFilter(self)
 
@@ -254,6 +266,10 @@ class SkyViewport(QWidget):
         if frame is None or previous is None or frame.output_size != previous.output_size:
             self.clear_detail()
             self.fit()
+        self._surface.setFocusPolicy(
+            Qt.FocusPolicy.StrongFocus if frame is not None else Qt.FocusPolicy.NoFocus
+        )
+        self._surface.setToolTip(_PREVIEW_KEYS if frame is not None else "")
         self.fit_button.setEnabled(frame is not None)
         self.tone_box.setVisible(frame is not None and frame.photo_levels is not None)
         self._select_canvas()
@@ -346,31 +362,65 @@ class SkyViewport(QWidget):
         )
 
     def eventFilter(self, watched: QObject, event: QEvent) -> bool:
-        if watched is self._gl and event.type() == QEvent.Type.Show:
+        kind = event.type()
+        if watched is self._gl and kind == QEvent.Type.Show:
             QTimer.singleShot(0, self._check_context)
-        if self._frame is not None and watched is self._pages.currentWidget():
-            kind = event.type()
+        if self._frame is None:
+            return super().eventFilter(watched, event)
+        if (
+            watched is self._surface and kind == QEvent.Type.KeyPress
+            and isinstance(event, QKeyEvent)
+        ):
+            return self._key_event(event)
+        if watched is self._pages.currentWidget():
             if kind in (QEvent.Type.Resize, QEvent.Type.DevicePixelRatioChange):
                 self.view_changed.emit()
             if isinstance(event, QWheelEvent):
                 delta = event.angleDelta().y() or event.pixelDelta().y()
-                steps = min(12.0, max(-12.0, delta / 120))
-                width, height = self._frame.output_size
-                fit = min(self.canvas.width() / width, self.canvas.height() / height)
-                physical = max(fit * self.canvas.devicePixelRatioF(), 1e-12)
-                limit = max(128.0, 4.0 / physical)
-                zoom = min(limit, max(0.5, self._zoom * 1.2**steps))
-                toward = event.position() - QPointF(
-                    self.canvas.width() / 2, self.canvas.height() / 2
-                )
-                self._pan = toward + (self._pan - toward) * (zoom / self._zoom)
-                self._zoom = zoom
-                self.canvas.update()
-                self.view_changed.emit()
+                self._zoom_at(min(12.0, max(-12.0, delta / 120)), event.position())
                 return True
             if isinstance(event, QMouseEvent):
+                if (
+                    kind == QEvent.Type.MouseButtonPress
+                    and event.button() == Qt.MouseButton.LeftButton
+                ):
+                    self._surface.setFocus(Qt.FocusReason.MouseFocusReason)
                 return self._mouse_event(kind, event)
         return super().eventFilter(watched, event)
+
+    def _key_event(self, event: QKeyEvent) -> bool:
+        if event.modifiers() & (
+            Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.AltModifier
+            | Qt.KeyboardModifier.MetaModifier
+        ):
+            return False
+        key = event.key()
+        if direction := _PAN_DIRECTIONS.get(key):
+            self._pan += QPointF(*direction) * 32
+            self.canvas.update()
+            self.view_changed.emit()
+        elif key in (Qt.Key.Key_Plus, Qt.Key.Key_Equal, Qt.Key.Key_Minus):
+            steps = -1 if key == Qt.Key.Key_Minus else 1
+            self._zoom_at(steps, QRectF(self.canvas.rect()).center())
+        elif key == Qt.Key.Key_Home:
+            self.fit()
+        else:
+            return False
+        return True
+
+    def _zoom_at(self, steps: float, anchor: QPointF) -> None:
+        assert self._frame is not None
+        canvas = self.canvas
+        width, height = self._frame.output_size
+        fit = min(canvas.width() / width, canvas.height() / height)
+        physical = max(fit * canvas.devicePixelRatioF(), 1e-12)
+        limit = max(128.0, 4.0 / physical)
+        zoom = min(limit, max(0.5, self._zoom * 1.2**steps))
+        toward = anchor - QRectF(canvas.rect()).center()
+        self._pan = toward + (self._pan - toward) * (zoom / self._zoom)
+        self._zoom = zoom
+        canvas.update()
+        self.view_changed.emit()
 
     def _mouse_event(self, kind: QEvent.Type, event: QMouseEvent) -> bool:
         if self._editing_crop and self._crop is not None and self._edit_crop(kind, event):
