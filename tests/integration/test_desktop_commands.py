@@ -167,7 +167,7 @@ def test_command_panel_runs_saved_projects_and_cleans_cancelled_exports(
         new.trigger()
         window._set_project(project, manifest)
         window.command_panel_action.trigger()
-        assert panel.isVisible() and str(directory) in panel.directory_label.text()
+        assert panel.isVisible() and panel.directory_field.text() == str(directory)
         assert panel.output.toPlainText().splitlines() == ["New project."]
         window.activateWindow()
         panel.entry.setFocus()
