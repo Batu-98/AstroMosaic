@@ -55,6 +55,7 @@ def test_preview_resolution_selector(tmp_path: Path, monkeypatch: pytest.MonkeyP
             window.move(secondary.availableGeometry().center() - window.rect().center())
         window.resize(630, 760)
         window.show()
+        window.navigation.setCurrentRow(1)
         assert combo.currentText() == "50%" and combo.isVisible()
         assert [combo.itemText(index) for index in range(combo.count())] == [
             "25%", "50%", "75%", "100%"

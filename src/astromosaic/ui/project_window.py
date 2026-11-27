@@ -386,7 +386,7 @@ class ProjectWindow(QMainWindow):
         preview_layout.addWidget(self.crop_controls)
         preview_layout.addWidget(self.viewport, 1)
         self.pages.addWidget(preview)
-        self.navigation.currentRowChanged.connect(self._switch_workspace)
+        self.navigation.itemSelectionChanged.connect(self._switch_workspace)
         self._workspace_focus: dict[int, QWidget] = {}
         app = QApplication.instance()
         assert isinstance(app, QApplication)
@@ -1826,8 +1826,15 @@ class ProjectWindow(QMainWindow):
             return True
         return super().focusNextPrevChild(next)
 
-    @Slot(int)
-    def _switch_workspace(self, index: int) -> None:
+    @Slot()
+    def _switch_workspace(self) -> None:
+        selected = self.navigation.selectedIndexes()
+        if not selected:
+            return
+        index = selected[0].row()
+        if index == self.pages.currentIndex():
+            return
+        self.navigation.setCurrentRow(index)
         remembered = self._workspace_focus.get(index)
         self.pages.setCurrentIndex(index)
         if remembered is not None and isValid(remembered):

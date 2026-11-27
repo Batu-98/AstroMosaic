@@ -12,7 +12,7 @@ def test_workspace_reflows_across_full_hd_display_scales(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     pytest.importorskip("PySide6")
-    from PySide6.QtCore import QSettings, Qt
+    from PySide6.QtCore import QItemSelectionModel, QSettings, Qt
     from PySide6.QtTest import QTest
     from PySide6.QtWidgets import QApplication
 
@@ -35,6 +35,11 @@ def test_workspace_reflows_across_full_hd_display_scales(
         assert window.panels.isVisible() and not window.viewport.isVisible()
         assert window.command_toggle.isVisible() and not window.command_panel.isVisible()
         assert navigation.selectedItems()[0].text() == "Panels"
+        navigation.selectionModel().select(
+            navigation.model().index(1, 0), QItemSelectionModel.SelectionFlag.ClearAndSelect
+        )
+        assert navigation.currentRow() == 1 and window.viewport.isVisible()
+        navigation.setCurrentRow(0)
         for width, height in ((630, 650), (800, 650), (1280, 648), (1536, 800), (1920, 1008)):
             window.resize(width, height)
             navigation.setFocus()
