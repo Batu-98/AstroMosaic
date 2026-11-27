@@ -37,10 +37,28 @@ def test_panel_grid_edits_and_appearance(tmp_path: Path, monkeypatch: pytest.Mon
     window._set_project(project, manifest)
 
     try:
+        secondary = next((screen for screen in app.screens() if screen != app.primaryScreen()), None)
+        if secondary is not None:
+            window.move(secondary.availableGeometry().center() - window.rect().center())
         window.show()
+        window.activateWindow()
         assert window._inspection_job is not None and window._inspection_job.wait(5000)
         app.processEvents()
         table = window.panels
+        table.setCurrentIndex(table.cell(0, "Solve result"))
+        table.setFocus()
+        QTest.keyClick(table, Qt.Key.Key_Tab)
+        assert app.focusWidget() is window.auto_frame_check
+        QTest.keyClick(window.auto_frame_check, Qt.Key.Key_Tab, Qt.KeyboardModifier.ShiftModifier)
+        assert app.focusWidget() is table
+        table.setCurrentIndex(table.cell(0, "Panel"))
+        QTest.keyClick(table, Qt.Key.Key_Tab, Qt.KeyboardModifier.ShiftModifier)
+        previous = app.focusWidget()
+        assert previous is not None and previous.accessibleName() == "More panel actions"
+        QTest.keyClick(previous, Qt.Key.Key_Tab)
+        assert app.focusWidget() is table
+        QTest.keyClick(table, Qt.Key.Key_Right)
+        assert table.currentIndex() == table.cell(0, "Sky")
         assert table.cell(0, "WCS").data() == "Missing"
         assert table.cell(0, "Camera").data() == "Test camera"
         assert table.cell(0, "Size (px)").data() == "12 × 8"
@@ -49,7 +67,7 @@ def test_panel_grid_edits_and_appearance(tmp_path: Path, monkeypatch: pytest.Mon
         assert focal.data() == "380" and not table.isColumnHidden(focal.column())
         assert table.isColumnHidden(table.cell(0, "Weight").column())
         table.setCurrentIndex(focal)
-        table.edit(focal)
+        QTest.keyClick(table, Qt.Key.Key_F2)
         edit = table.findChild(QLineEdit)
         assert edit is not None
         edit.selectAll()

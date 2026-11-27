@@ -345,6 +345,7 @@ class PanelTable(QTableView):
         self.setAccessibleName("Panel control table")
         self.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.setTabKeyNavigation(False)
         self.setHorizontalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
         self.setAlternatingRowColors(True)
         self.setWordWrap(False)
