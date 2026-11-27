@@ -114,7 +114,21 @@ def test_panel_grid_edits_and_appearance(tmp_path: Path, monkeypatch: pytest.Mon
         assert window._inspection_job is not None and window._inspection_job.wait(5000)
         app.processEvents()
         table = window.panels
-        table.setCurrentIndex(table.cell(0, "Solve result"))
+        window.resize(800, 650)
+        app.processEvents()
+        assert table.font().pointSizeF() == app.font().pointSizeF()
+        assert table.font().pointSizeF() >= 12 or table.font().pixelSize() >= 16
+        assert table.viewport().height() >= table.rowHeight(0)
+        critical_columns = ("Panel", "Sky", "WCS", "Solve result", "Weight", "Band")
+        assert COLUMNS[: len(critical_columns)] == critical_columns
+        header = table.horizontalHeader()
+        for name in critical_columns:
+            column = table.cell(0, name).column()
+            assert not table.isColumnHidden(column)
+            assert table.columnWidth(column) >= header.sectionSizeHint(column)
+        window.resize(1140, 780)
+        app.processEvents()
+        table.setCurrentIndex(table.cell(0, "Size (px)"))
         table.setFocus()
         QTest.keyClick(table, Qt.Key.Key_Tab)
         assert app.focusWidget() is window.auto_frame_check

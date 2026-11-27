@@ -5,7 +5,8 @@ from PySide6.QtGui import QActionGroup, QColor, QFontDatabase, QPainter, QPaintE
 from PySide6.QtWidgets import QApplication, QMenu, QSplitter, QSplitterHandle
 
 _STYLE = """
-    QLabel[sectionTitle="true"] { font-size: 16px; font-weight: 600; }
+    QWidget { font-size: BODY_SIZE; }
+    QLabel[sectionTitle="true"] { font-size: HEADING_SIZE; font-weight: 600; }
     QPushButton, QToolButton, QComboBox { padding: 4px 10px; border: 1px solid palette(mid);
         border-radius: 4px; background: palette(button); color: palette(button-text); }
     QComboBox { padding-right: 18px; }
@@ -24,7 +25,7 @@ _STYLE = """
     QTableView { border: 1px solid palette(mid); gridline-color: palette(mid); }
     QTableView::item { padding: 0 5px; }
     QHeaderView::section { background: palette(button); color: palette(button-text);
-        padding: 6px; border: 0; border-right: 1px solid palette(mid);
+        padding: 2px 6px; border: 0; border-right: 1px solid palette(mid);
         border-bottom: 1px solid palette(mid); }
     QSplitter::handle { background: palette(mid); }
     QFrame#mosaicPreviewSurface { border: 2px solid palette(mid); }
@@ -33,7 +34,7 @@ _STYLE = """
         background: palette(base); border: 1px solid palette(mid); border-radius: 5px;
     }
     QProgressBar#workspaceProgress::chunk { background: PRIMARY_FILL; border-radius: 4px; }
-    QLabel#jobPercentage { font-size: 19px; font-weight: 700; min-width: 54px; }
+    QLabel#jobPercentage { font-size: HEADING_SIZE; font-weight: 700; min-width: 54px; }
 """
 
 
@@ -67,8 +68,14 @@ def apply_theme(name: str) -> None:
         app.setStyle("Fusion")
     app.styleHints().setColorScheme(Qt.ColorScheme.Dark if dark else Qt.ColorScheme.Light)
     font = QFontDatabase.systemFont(QFontDatabase.SystemFont.GeneralFont)
-    if 0 < font.pointSizeF() < 10:
-        font.setPointSizeF(10)
+    if font.pointSizeF() > 0:
+        font.setPointSizeF(max(12.0, font.pointSizeF()))
+        body_size = f"{font.pointSizeF():g}pt"
+        heading_size = f"{font.pointSizeF() * 1.125:g}pt"
+    else:
+        font.setPixelSize(max(16, font.pixelSize()))
+        body_size = f"{font.pixelSize()}px"
+        heading_size = f"{round(font.pixelSize() * 1.125)}px"
     app.setFont(font)
     palette = QPalette()
     role = QPalette.ColorRole
@@ -104,6 +111,8 @@ def apply_theme(name: str) -> None:
         _STYLE.replace("PRIMARY_FILL", palette.color(role.Accent).name())
         .replace("PRIMARY_TEXT", "#102321" if dark else "#ffffff")
         .replace("DISABLED_TEXT", palette.color(QPalette.ColorGroup.Disabled, role.ButtonText).name())
+        .replace("BODY_SIZE", body_size)
+        .replace("HEADING_SIZE", heading_size)
     )
 
 

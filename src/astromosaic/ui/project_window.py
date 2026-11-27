@@ -9,10 +9,11 @@ from pathlib import Path
 from time import monotonic
 from typing import cast
 
-from PySide6.QtCore import QSettings, QSignalBlocker, QStandardPaths, Qt, QTimer, Slot
+from PySide6.QtCore import QEvent, QSettings, QSignalBlocker, QStandardPaths, Qt, QTimer, Slot
 from PySide6.QtGui import QCloseEvent, QKeySequence
 from PySide6.QtWidgets import (
     QApplication,
+    QBoxLayout,
     QCheckBox,
     QComboBox,
     QDialog,
@@ -98,6 +99,35 @@ _CALIBRATION_GUIDANCE: dict[SkyCalibrationRequirement, str] = {
     "brightness": "Use linear panels with compatible brightness units. For linear panels on a "
     "shared scale, select Declare a common surface-brightness scale in Mosaic Settings.",
 }
+
+
+class _PanelToolbar(QWidget):
+    def __init__(self, heading: QLabel, actions: QHBoxLayout) -> None:
+        super().__init__()
+        self._heading = heading
+        self._actions = actions
+        self._layout = QBoxLayout(QBoxLayout.Direction.LeftToRight, self)
+        self._layout.setContentsMargins(0, 0, 0, 0)
+        self._layout.setSpacing(4)
+        self._layout.addWidget(heading)
+        self._layout.addLayout(actions, 1)
+
+    def event(self, event: QEvent) -> bool:
+        if event.type() in (QEvent.Type.Resize, QEvent.Type.LayoutRequest):
+            row_width = (
+                self._heading.minimumSizeHint().width()
+                + self._actions.minimumSize().width()
+                + self._layout.spacing()
+            )
+            direction = (
+                QBoxLayout.Direction.TopToBottom
+                if self.width() < row_width
+                else QBoxLayout.Direction.LeftToRight
+            )
+            if direction != self._layout.direction():
+                self._layout.setDirection(direction)
+                self.updateGeometry()
+        return super().event(event)
 
 
 class ProjectWindow(QMainWindow):
@@ -207,8 +237,8 @@ class ProjectWindow(QMainWindow):
         body = QWidget(self)
         self.setCentralWidget(body)
         layout = QVBoxLayout(body)
-        layout.setContentsMargins(20, 6, 20, 6)
-        layout.setSpacing(6)
+        layout.setContentsMargins(20, 3, 20, 3)
+        layout.setSpacing(4)
         splitter = WorkspaceSplitter()
         splitter.setChildrenCollapsible(False)
         self.viewport = SkyViewport(use_gpu=self._use_gpu_preview)
@@ -218,11 +248,11 @@ class ProjectWindow(QMainWindow):
         self.viewport.crop_cancelled.connect(self._restore_crop_preview)
         self._editor = QWidget(body)
         controls = QVBoxLayout(self._editor)
-        controls.setContentsMargins(0, 0, 0, 6)
+        controls.setContentsMargins(0, 0, 0, 2)
         buttons = QHBoxLayout()
+        buttons.setSpacing(4)
         self.panel_heading = QLabel("Panels")
         self.panel_heading.setProperty("sectionTitle", True)
-        buttons.addWidget(self.panel_heading)
         buttons.addStretch()
         self.table_view = QComboBox()
         self.table_view.addItems(list(VIEWS))
@@ -250,7 +280,7 @@ class ProjectWindow(QMainWindow):
         self.remove_action = more_menu.addAction("Remove Panel", self._remove)
         more.setMenu(more_menu)
         buttons.addWidget(more)
-        controls.addLayout(buttons)
+        controls.addWidget(_PanelToolbar(self.panel_heading, buttons))
         self.panels = PanelTable()
         self.table_view.currentTextChanged.connect(self.panels.show_view)
         self.panels.properties.panelEdited.connect(self._update_panel)
@@ -259,7 +289,7 @@ class ProjectWindow(QMainWindow):
         splitter.addWidget(self._editor)
         preview = QWidget()
         preview_layout = QVBoxLayout(preview)
-        preview_layout.setContentsMargins(0, 6, 0, 0)
+        preview_layout.setContentsMargins(0, 2, 0, 0)
         preview_header = QHBoxLayout()
         self.preview_title = QLabel("Preview")
         self.preview_title.setProperty("sectionTitle", True)

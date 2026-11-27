@@ -63,6 +63,10 @@ def test_command_panel_fits_a_short_window_with_large_text(
         panel = window.command_panel
         panel.set_project_path(tmp_path / "A long working folder" / "Project.astromosaic")
         assert panel.entry.font().pointSize() == 14
+        assert panel.output.font().pointSizeF() == 14
+        assert window.panels.font().pointSizeF() == 14
+        assert window.panel_heading.font().pointSizeF() == pytest.approx(15.75)
+        assert window.preview_title.font().pointSizeF() == pytest.approx(15.75)
         assert panel.directory_field.text() == str(tmp_path / "A long working folder")
         assert panel.directory_field.isReadOnly()
 

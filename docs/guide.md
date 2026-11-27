@@ -31,6 +31,8 @@ Use **Resolution Scale** in the preview toolbar to choose **25%**, **50%**, **75
 
 The panel control table opens in **Overview**. Choose **Optics**, **Files**, or **All properties** to compare additional columns. Use **Tab** and **Shift+Tab** to leave the table and the arrow keys to move between cells. Press **F2** or double-click to edit a weight, band, focal length, or pixel size. Press **Space** on the **Sky** checkbox to toggle inclusion in the sky layer. The desktop starts in dark mode. Choose **View → Theme** to switch between dark and light appearances. [Panel controls](phase-3b.md#panel-control-table)
 
+**Overview** places the WCS and solve result together before the optics columns. Body text starts at 12 pt and uses larger sizes reported by Qt. Section headings and the job percentage scale with the body text.
+
 Two lines mark the selected panel row. Dashed borders mark unavailable buttons and selectors. Drag the three-mark handle between the panel table and preview to redistribute space.
 
 Choose **TAN** or **ZEA** under **Mosaic Settings → Sky projection**. Set a new composition placement after changing the projection. [Sky projection](phase-5b.md)

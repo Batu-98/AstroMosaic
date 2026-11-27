@@ -7,13 +7,16 @@ from typing import Any
 from PySide6.QtCore import (
     QAbstractTableModel,
     QDateTime,
+    QEvent,
     QModelIndex,
     QObject,
     QPersistentModelIndex,
+    QSize,
     Qt,
+    QTimer,
     Signal,
 )
-from PySide6.QtGui import QPainter, QPalette
+from PySide6.QtGui import QFont, QPainter, QPalette
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QLineEdit,
@@ -28,18 +31,18 @@ from astromosaic.astrometry.hints import PanelOptics
 from astromosaic.storage.project import PanelInspection, PanelSolveOutcome, ProjectPanel
 
 _WIDTHS = {
-    "Panel": 180,
+    "Panel": 160,
     "Sky": 46,
     "WCS": 94,
-    "Weight": 68,
-    "Band": 75,
+    "Solve result": 130,
+    "Weight": 64,
+    "Band": 65,
     "Focal length (mm)": 133,
     "Camera": 146,
     "Size (px)": 112,
     "Foreground": 125,
     "Sky mask": 110,
     "Link": 115,
-    "Solve result": 143,
     "Telescope": 150,
     "Pixel X (µm)": 105,
     "Pixel Y (µm)": 105,
@@ -72,12 +75,12 @@ VIEWS = {
         "Panel",
         "Sky",
         "WCS",
+        "Solve result",
         "Weight",
         "Band",
         "Focal length (mm)",
         "Camera",
         "Size (px)",
-        "Solve result",
     ),
     "Optics": (
         "Panel",
@@ -358,6 +361,7 @@ class PanelTable(QTableView):
         super().__init__()
         self.properties = PanelTableModel(self)
         self.setModel(self.properties)
+        self.properties.modelReset.connect(self.updateGeometry)
         self.setItemDelegate(_PanelDelegate(self))
         self.setAccessibleName("Panel control table")
         self.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
@@ -367,16 +371,47 @@ class PanelTable(QTableView):
         self.setAlternatingRowColors(True)
         self.setWordWrap(False)
         self.setShowGrid(True)
+        self._column_font: QFont | None = None
         self.verticalHeader().hide()
-        self.verticalHeader().setDefaultSectionSize(32)
         self.horizontalHeader().setHighlightSections(False)
         self.horizontalHeader().setStretchLastSection(True)
         self.horizontalHeader().setDefaultAlignment(
             Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
         )
-        for i, width in enumerate(_WIDTHS.values()):
-            self.setColumnWidth(i, width)
+        self._resize_for_font()
         self.show_view("Overview")
+
+    def minimumSizeHint(self) -> QSize:
+        size = super().minimumSizeHint()
+        if self.properties.rowCount():
+            row = self.verticalHeader().defaultSectionSize()
+            header = self.horizontalHeader().sizeHint().height()
+            scrollbar = self.horizontalScrollBar().sizeHint().height()
+            size.setHeight(max(size.height(), row + header + scrollbar + 2 * self.frameWidth()))
+        return size
+
+    def changeEvent(self, event: QEvent) -> None:
+        super().changeEvent(event)
+        if event.type() == QEvent.Type.FontChange:
+            QTimer.singleShot(0, self, self._resize_for_font)
+
+    def _resize_for_font(self) -> None:
+        font = self.font()
+        if font == self._column_font:
+            return
+        self._column_font = font
+        metrics = self.fontMetrics()
+        self.verticalHeader().setDefaultSectionSize(max(32, metrics.height() + 8))
+        header = self.horizontalHeader()
+        status_labels = {
+            "WCS": ("Unavailable", "Checking…"),
+            "Solve result": tuple(_STAGES.values()),
+        }
+        for column, (name, width) in enumerate(_WIDTHS.items()):
+            header_width = header.sectionSizeFromContents(column).width()
+            value_width = max(map(metrics.horizontalAdvance, status_labels.get(name, ())), default=0)
+            self.setColumnWidth(column, max(width, header_width, value_width + 12))
+        self.updateGeometry()
 
     def show_view(self, name: str) -> None:
         for column, key in enumerate(COLUMNS):
