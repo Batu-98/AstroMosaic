@@ -1,6 +1,6 @@
 """Shared desktop palette and per-user appearance preference."""
 
-from PySide6.QtCore import QSettings, Qt
+from PySide6.QtCore import QEvent, QSettings, Qt
 from PySide6.QtGui import QActionGroup, QColor, QFontDatabase, QPainter, QPaintEvent, QPalette
 from PySide6.QtWidgets import QApplication, QMenu, QSplitter, QSplitterHandle
 
@@ -45,7 +45,10 @@ class _WorkspaceSplitterHandle(QSplitterHandle):
         center = self.rect().center()
         grip = self.palette().color(QPalette.ColorRole.Accent)
         for offset in (-9, 0, 9):
-            painter.fillRect(center.x() + offset - 2, center.y() - 1, 5, 3, grip)
+            if self.orientation() == Qt.Orientation.Horizontal:
+                painter.fillRect(center.x() - 1, center.y() + offset - 2, 3, 5, grip)
+            else:
+                painter.fillRect(center.x() + offset - 2, center.y() - 1, 5, 3, grip)
         painter.end()
 
 
@@ -53,6 +56,26 @@ class WorkspaceSplitter(QSplitter):
     def __init__(self) -> None:
         super().__init__(Qt.Orientation.Vertical)
         self.setHandleWidth(5)
+        self._pane_sizes = {
+            Qt.Orientation.Vertical: [235, 380],
+            Qt.Orientation.Horizontal: [990, 890],
+        }
+        self.splitterMoved.connect(self._remember_sizes)
+
+    def _remember_sizes(self, position: int, index: int) -> None:
+        self._pane_sizes[self.orientation()] = self.sizes()
+
+    def event(self, event: QEvent) -> bool:
+        if event.type() in (QEvent.Type.Resize, QEvent.Type.LayoutRequest) and self.count() == 2:
+            panels, preview = self.widget(0), self.widget(1)
+            assert panels is not None and preview is not None
+            required = panels.minimumSizeHint().width() + preview.minimumSizeHint().width()
+            wide = self.width() >= max(1200, required + self.handleWidth())
+            orientation = Qt.Orientation.Horizontal if wide else Qt.Orientation.Vertical
+            if orientation != self.orientation():
+                self.setOrientation(orientation)
+                self.setSizes(self._pane_sizes[orientation])
+        return super().event(event)
 
     def createHandle(self) -> QSplitterHandle:
         return _WorkspaceSplitterHandle(self.orientation(), self)

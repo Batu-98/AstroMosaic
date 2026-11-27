@@ -9,7 +9,16 @@ from pathlib import Path
 from time import monotonic
 from typing import cast
 
-from PySide6.QtCore import QEvent, QSettings, QSignalBlocker, QStandardPaths, Qt, QTimer, Slot
+from PySide6.QtCore import (
+    QEvent,
+    QSettings,
+    QSignalBlocker,
+    QSize,
+    QStandardPaths,
+    Qt,
+    QTimer,
+    Slot,
+)
 from PySide6.QtGui import QCloseEvent, QKeySequence
 from PySide6.QtWidgets import (
     QApplication,
@@ -111,6 +120,13 @@ class _PanelToolbar(QWidget):
         self._layout.setSpacing(4)
         self._layout.addWidget(heading)
         self._layout.addLayout(actions, 1)
+
+    def minimumSizeHint(self) -> QSize:
+        size = super().minimumSizeHint()
+        # The heading can wrap onto its own row when the parent allocates less width.
+        size.setWidth(max(self._heading.minimumSizeHint().width(),
+                          self._actions.minimumSize().width()))
+        return size
 
     def event(self, event: QEvent) -> bool:
         if event.type() in (QEvent.Type.Resize, QEvent.Type.LayoutRequest):

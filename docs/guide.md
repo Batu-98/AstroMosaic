@@ -35,7 +35,9 @@ The panel control table opens in **Overview**. Choose **Optics**, **Files**, or 
 
 **Overview** places the WCS and solve result together before the optics columns. Body text starts at 12 pt and uses larger sizes reported by Qt. Section headings and the job percentage scale with the body text.
 
-Two lines mark the selected panel row. Dashed borders mark unavailable buttons and selectors. Drag the three-mark handle between the panel table and preview to redistribute space.
+The desktop opens maximized. On the 1920 × 1080 reference display, the panel table sits to the left of the preview. The table moves above the preview when the window is narrower than 1240 logical pixels or the controls need more room at your text size. Drag the three-mark divider to adjust either layout. Each layout keeps its own divider adjustment for the session.
+
+Two lines mark the selected panel row. Dashed borders mark unavailable buttons and selectors.
 
 Choose **TAN** or **ZEA** under **Mosaic Settings → Sky projection**. Set a new composition placement after changing the projection. [Sky projection](phase-5b.md)
 

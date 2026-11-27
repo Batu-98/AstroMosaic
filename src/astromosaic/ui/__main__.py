@@ -30,9 +30,10 @@ def main() -> int:
             (screen for screen in app.screens() if screen != app.primaryScreen()), None
         )
         if secondary is not None:
+            window.setScreen(secondary)
             area = secondary.availableGeometry()
             window.move(area.center() - window.rect().center())
-    window.show()
+    window.showMaximized()
     return app.exec()
 
 

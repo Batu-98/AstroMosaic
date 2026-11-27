@@ -8,6 +8,69 @@ from astropy.io import fits
 from astromosaic.storage.project import FileReference, MosaicProject, ProjectPanel, load_project
 
 
+def test_workspace_reflows_across_full_hd_display_scales(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pytest.importorskip("PySide6")
+    from PySide6.QtCore import QPoint, QSettings, Qt
+    from PySide6.QtTest import QTest
+    from PySide6.QtWidgets import QApplication, QSplitter
+
+    from astromosaic.ui.panel_table import COLUMNS
+    from astromosaic.ui.project_window import ProjectWindow
+
+    if "QT_QPA_PLATFORM" not in os.environ:
+        monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
+    app = QApplication.instance() or QApplication([])
+    assert isinstance(app, QApplication)
+    settings = QSettings(str(tmp_path / "workspace.ini"), QSettings.Format.IniFormat)
+    window = ProjectWindow(use_gpu=False, preferences=settings)
+    if len(app.screens()) > 1:
+        window.setScreen(app.screens()[1])
+        window.move(app.screens()[1].availableGeometry().topLeft())
+    window.show()
+    try:
+        splitter = window.findChild(QSplitter)
+        assert splitter is not None
+        # Logical client sizes allow for the Windows taskbar and window frame.
+        for width, height in ((1280, 648), (1536, 800), (1920, 1008)):
+            window.resize(width, height)
+            app.processEvents()
+            if splitter.orientation() == Qt.Orientation.Horizontal:
+                assert window.viewport.canvas.height() >= height // 3
+                assert window.viewport.canvas.width() >= width * 0.4
+            else:
+                required = sum(splitter.widget(i).minimumSizeHint().width() for i in (0, 1))
+                assert required + splitter.handleWidth() > splitter.width()
+            assert window.command_panel.entry.isVisibleTo(window)
+            if width == 1920:
+                assert splitter.orientation() == Qt.Orientation.Horizontal
+                table = window.panels
+                band = COLUMNS.index("Band")
+                assert table.columnViewportPosition(band) + table.columnWidth(band) <= (
+                    table.viewport().width()
+                )
+
+        handle = splitter.handle(1)
+        center = handle.rect().center()
+        previous = splitter.sizes()
+        QTest.mousePress(handle, Qt.MouseButton.LeftButton, pos=center)
+        QTest.mouseMove(handle, center + QPoint(36, 0))
+        QTest.mouseRelease(handle, Qt.MouseButton.LeftButton, pos=handle.rect().center())
+        adjusted = splitter.sizes()
+        assert adjusted[0] > previous[0]
+
+        window.resize(800, 650)
+        app.processEvents()
+        assert splitter.orientation() == Qt.Orientation.Vertical
+        assert window.width() == 800 and window.viewport.canvas.height() >= 100
+        window.resize(1920, 1008)
+        app.processEvents()
+        assert abs(splitter.sizes()[0] - adjusted[0]) <= 1
+    finally:
+        window.close()
+
+
 def test_workspace_control_states_have_distinct_shapes(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
