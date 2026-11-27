@@ -103,9 +103,12 @@ class _PhotoProfileFields:
             self.mode.addItem(label, choice)
         self.mode.setCurrentIndex(self.mode.findData(profile.mode if profile else "inherit"))
         form.addRow("Input profile", self.mode)
+        label = "ICC file"
         self.path = QLineEdit(str(profile.path) if profile is not None and profile.path else "")
         self.path.setReadOnly(True)
+        self.path.setAccessibleName(label)
         browse = QPushButton("Browse…")
+        browse.setAccessibleName(f"Browse for {label}")
 
         def choose() -> None:
             name, _ = QFileDialog.getOpenFileName(
@@ -119,7 +122,7 @@ class _PhotoProfileFields:
         file = QHBoxLayout()
         file.addWidget(self.path, 1)
         file.addWidget(browse)
-        form.addRow("ICC file", file)
+        form.addRow(label, file)
 
         def toggle() -> None:
             enabled = self.mode.currentData() == "icc"
@@ -402,8 +405,11 @@ class PanelSettings(_SettingsDialog):
     def _attachment(self, label: str, reference: FileReference | None, names: str) -> QLineEdit:
         path = QLineEdit(str(reference.path) if reference else "")
         path.setReadOnly(True)
+        path.setAccessibleName(label)
         browse = QPushButton("Browse…")
+        browse.setAccessibleName(f"Browse for {label}")
         clear = QPushButton("Clear")
+        clear.setAccessibleName(f"Clear {label}")
 
         def choose() -> None:
             name, _ = QFileDialog.getOpenFileName(self, label, path.text(), names)

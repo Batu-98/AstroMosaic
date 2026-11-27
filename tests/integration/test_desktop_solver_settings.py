@@ -16,7 +16,8 @@ def test_desktop_saves_solver_paths_and_reopens_them(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     pytest.importorskip("PySide6")
-    from PySide6.QtCore import QEventLoop, QSettings, QTimer
+    from PySide6.QtCore import QEventLoop, QSettings, Qt, QTimer
+    from PySide6.QtTest import QTest
     from PySide6.QtWidgets import QApplication, QFileDialog, QPushButton
 
     from astromosaic.ui import plate_solve_settings
@@ -74,6 +75,9 @@ def test_desktop_saves_solver_paths_and_reopens_them(
 
     monkeypatch.setattr(plate_solve_settings, "check_solver_paths", check_paths)
     window = ProjectWindow(use_gpu=False)
+    secondary = next((screen for screen in app.screens() if screen != app.primaryScreen()), None)
+    if secondary is not None:
+        window.move(secondary.availableGeometry().center() - window.rect().center())
 
     def until(condition: Callable[[], bool]) -> None:
         loop = QEventLoop()
@@ -90,10 +94,22 @@ def test_desktop_saves_solver_paths_and_reopens_them(
 
     def drive_dialog(dialog: PlateSolveSettings) -> int:
         dialog.show()
+        dialog.activateWindow()
+        app.processEvents()
         try:
             browse = {
                 button.accessibleName(): button for button in dialog.findChildren(QPushButton)
             }
+            for before, after in (
+                (dialog.astap_database, dialog.gaia_catalog),
+                (dialog.gaia_catalog, browse["Browse for star catalog"]),
+                (browse["Browse for blind index (optional)"], dialog.total_seconds),
+            ):
+                before.setFocus()
+                QTest.keyClick(before, Qt.Key.Key_Tab)
+                assert app.focusWidget() is after
+                QTest.keyClick(after, Qt.Key.Key_Tab, Qt.KeyboardModifier.ShiftModifier)
+                assert app.focusWidget() is before
             for label in (*choices, "Catalog folder"):
                 browse[f"Browse for {label.lower()}"].click()
             assert dialog.astap_database.currentText() == "Automatic"

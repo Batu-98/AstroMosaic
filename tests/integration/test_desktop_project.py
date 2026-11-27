@@ -41,6 +41,66 @@ from astromosaic.storage.project import (
 )
 
 
+def test_settings_attachment_accessible_names(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import os
+
+    pytest.importorskip("PySide6")
+    from PySide6.QtGui import QAccessible
+    from PySide6.QtWidgets import QApplication, QPushButton, QWidget
+
+    from astromosaic.ui.project_settings import PanelSettings, ProjectSettings
+
+    if "QT_QPA_PLATFORM" not in os.environ:
+        monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
+    app = QApplication.instance()
+    if not isinstance(app, QApplication):
+        app = QApplication([])
+    secondary = next((screen for screen in app.screens() if screen != app.primaryScreen()), None)
+    parent = QWidget()
+    source = tmp_path / "panel.fits"
+    write_smoke_panel(source)
+    panel = ProjectPanel(FileReference.capture(source))
+    panel_dialog = PanelSettings(panel, parent)
+    mosaic_dialog = ProjectSettings(MosaicProject((panel,)), parent)
+
+    def accessible_name(widget: QWidget) -> str:
+        interface = QAccessible.queryAccessibleInterface(widget)
+        assert interface is not None and interface.isValid()
+        return interface.text(QAccessible.Text.Name)
+
+    for dialog in (panel_dialog, mosaic_dialog):
+        if secondary is not None:
+            dialog.move(secondary.availableGeometry().center() - dialog.rect().center())
+        dialog.show()
+        try:
+            if dialog is panel_dialog:
+                assert accessible_name(panel_dialog.wcs) == "WCS sidecar"
+                assert accessible_name(panel_dialog.sky_mask) == "FITS sky mask"
+                actions = [
+                    accessible_name(button) for button in dialog.findChildren(QPushButton)
+                    if button.isVisible() and button.text() in {"Browse…", "Clear"}
+                ]
+                assert sorted(actions) == sorted([
+                    "Browse for WCS sidecar", "Clear WCS sidecar",
+                    "Browse for FITS sky mask", "Clear FITS sky mask",
+                ])
+
+            assert dialog.tabs is not None
+            assert dialog.tabs.tabText(1) == "Photo"
+            dialog.tabs.setCurrentIndex(1)
+            profile = dialog.photo_profile
+            profile.mode.setCurrentIndex(profile.mode.findData("icc"))
+            assert profile.path.isEnabled() and profile.path.isReadOnly()
+            assert accessible_name(profile.path) == "ICC file"
+            browse = next(
+                button for button in dialog.findChildren(QPushButton)
+                if button.isVisible() and button.text() == "Browse…"
+            )
+            assert browse.isEnabled() and accessible_name(browse) == "Browse for ICC file"
+        finally:
+            dialog.close()
+
+
 def test_photo_desktop_session_and_cli_share_the_fitted_grid_and_tone(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
 ) -> None:

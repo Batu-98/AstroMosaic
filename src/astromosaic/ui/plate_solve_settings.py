@@ -110,6 +110,18 @@ class PlateSolveSettings(QDialog):
         fields.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self._fields)
 
+        astap = QGroupBox("ASTAP")
+        fields.addWidget(astap)
+        astap_form = QFormLayout(astap)
+        self.astap = self._path_row(astap_form, "CLI executable", options.astap, "Programs (*.exe)")
+        self.astap_catalog = self._path_row(astap_form, "Catalog folder", options.astap_catalog)
+        self.astap_database = QComboBox()
+        self.astap_database.addItems(
+            ["Automatic", *(name.upper() for name in ASTAP_DATABASE_CHOICES[1:])]
+        )
+        self.astap_database.setCurrentIndex(ASTAP_DATABASE_CHOICES.index(options.astap_database))
+        astap_form.addRow("Database", self.astap_database)
+
         gaia = QGroupBox("Gaia DR3")
         fields.addWidget(gaia)
         gaia_form = QFormLayout(gaia)
@@ -122,18 +134,6 @@ class PlateSolveSettings(QDialog):
         self.gaia_index.setToolTip(
             "Choose the matching index for panels without pointing and plate scale hints."
         )
-
-        astap = QGroupBox("ASTAP")
-        fields.insertWidget(0, astap)
-        astap_form = QFormLayout(astap)
-        self.astap = self._path_row(astap_form, "CLI executable", options.astap, "Programs (*.exe)")
-        self.astap_catalog = self._path_row(astap_form, "Catalog folder", options.astap_catalog)
-        self.astap_database = QComboBox()
-        self.astap_database.addItems(
-            ["Automatic", *(name.upper() for name in ASTAP_DATABASE_CHOICES[1:])]
-        )
-        self.astap_database.setCurrentIndex(ASTAP_DATABASE_CHOICES.index(options.astap_database))
-        astap_form.addRow("Database", self.astap_database)
 
         solve_limits = QGroupBox("Solve Limits")
         fields.addWidget(solve_limits)
