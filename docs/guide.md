@@ -23,7 +23,9 @@ poetry sync --only main -E desktop
 poetry run python -m astromosaic.ui
 ```
 
-For a sky preview, choose **Add Panels → Plate Solve → Build Preview**. **Auto Frame** starts on in a new desktop project. Use **Use Preview Grid** to adopt a fitted sky grid for export, or set a grid in **Mosaic Settings**. Use the layer selector for sky, foreground, or composition. The **Layers** menu contains foreground alignment and composition controls. [Sky workflow](phase-3c.md#desktop-workflow) · [Mixed-panel workflow](phase-3e.md#desktop-workflow)
+For a sky preview, choose **Add Panels → Plate Solve → Build Preview**. The preview area shows the next step while it is empty. **Auto Frame** starts on in a new desktop project. Use **Use Preview Grid** to adopt a fitted sky grid for export, or set a grid in **Mosaic Settings**. Use the layer selector for sky, foreground, or composition. The **Layers** menu contains foreground alignment and composition controls. [Sky workflow](phase-3c.md#desktop-workflow) · [Mixed-panel workflow](phase-3e.md#desktop-workflow)
+
+Enter decimal values in desktop settings and panel cells using your system decimal separator, such as `1,5` in Turkish or `1.5` in English. Leave out digit grouping separators. The desktop crop field still uses commas between its four integer coordinates. CLI arguments and project files use a decimal point.
 
 **Settings → GPU Acceleration** lets you switch preview acceleration on or off. It starts on and remembers your choice. AstroMosaic uses CPU sampling automatically when hardware OpenGL compute is unavailable. [Preview settings](phase-3c.md#desktop-workflow)
 

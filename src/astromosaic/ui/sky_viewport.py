@@ -56,6 +56,15 @@ class _RasterPreview(QWidget):
         super().__init__()
         self._view = view
         self._image = QImage()
+        self.hint = QLabel("Choose Build Preview to see the mosaic.")
+        self.hint.setTextFormat(Qt.TextFormat.PlainText)
+        self.hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.hint.setWordWrap(True)
+        self.hint.setStyleSheet("color: #b9c4d2")
+        self.hint.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(12, 4, 12, 4)
+        layout.addWidget(self.hint)
 
     def set_display(
         self, frame: DisplayFrame | None, midtones: float, *, preserve_tone: bool = False
@@ -63,16 +72,14 @@ class _RasterPreview(QWidget):
         self._image = QImage()
         if frame is not None:
             self._image = _display_image(frame, midtones, preserve_tone)
+        self.hint.setVisible(frame is None)
         self.update()
 
     def paintEvent(self, event: QPaintEvent) -> None:
         painter = QPainter(self)
         try:
             painter.fillRect(self.rect(), QColor(*BACKGROUND_RGB))
-            if self._image.isNull():
-                painter.setPen(QColor("#b9c4d2"))
-                painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, "Build a sky preview.")
-            else:
+            if not self._image.isNull():
                 rect = self._view.image_rect()
                 painter.setRenderHint(
                     QPainter.RenderHint.SmoothPixmapTransform,
@@ -269,6 +276,9 @@ class SkyViewport(QWidget):
     def _configure_canvas(self, canvas: QWidget) -> None:
         self._pages.addWidget(canvas)
         canvas.installEventFilter(self)
+
+    def set_empty_hint(self, message: str) -> None:
+        self._raster.hint.setText(message)
 
     def set_frame(self, frame: DisplayFrame | None, *, highlight_common: bool = False) -> None:
         previous = self._frame

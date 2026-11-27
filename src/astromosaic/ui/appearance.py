@@ -16,7 +16,7 @@ _STYLE = """
     QPushButton:pressed, QToolButton:pressed { background: palette(mid); }
     QPushButton[primary="true"]:enabled {
         background: PRIMARY_FILL; color: PRIMARY_TEXT;
-        border: 1px solid PRIMARY_FILL; padding: 5px 12px;
+        border: 1px solid PRIMARY_FILL;
     }
     QPushButton[primary="true"]:focus { border-color: palette(text); }
     QPushButton:disabled, QToolButton:disabled, QComboBox:disabled {

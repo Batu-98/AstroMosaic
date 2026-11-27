@@ -1,7 +1,6 @@
 """Project panel properties and edits for the desktop table."""
 
 from dataclasses import dataclass, replace
-from math import isfinite
 from typing import Any
 
 from PySide6.QtCore import (
@@ -9,7 +8,6 @@ from PySide6.QtCore import (
     QDateTime,
     QEvent,
     QModelIndex,
-    QObject,
     QPersistentModelIndex,
     QSize,
     Qt,
@@ -29,6 +27,7 @@ from PySide6.QtWidgets import (
 
 from astromosaic.astrometry.hints import PanelOptics
 from astromosaic.storage.project import PanelInspection, PanelSolveOutcome, ProjectPanel
+from astromosaic.ui.decimal_input import format_decimal, parse_decimal
 
 _WIDTHS = {
     "Panel": 160,
@@ -237,8 +236,9 @@ class PanelTableModel(QAbstractTableModel):
     panelEdited = Signal(int, object)
     invalidEdit = Signal(str)
 
-    def __init__(self, parent: QObject) -> None:
+    def __init__(self, parent: QWidget) -> None:
         super().__init__(parent)
+        self._view = parent
         self.rows: list[PanelRow] = []
 
     def refresh(self, rows: list[PanelRow]) -> None:
@@ -283,12 +283,14 @@ class PanelTableModel(QAbstractTableModel):
         if role == _Role.CheckStateRole and key == "Sky":
             return Qt.CheckState.Checked if row.panel.include_sky else Qt.CheckState.Unchecked
         if role == _Role.EditRole:
+            if isinstance(value, float):
+                return format_decimal(value, self._view.locale())
             return "" if value is None else str(value)
         if role == _Role.DisplayRole:
             if key == "Sky":
                 return None
             if isinstance(value, float):
-                return format(value, ".9g")
+                return format_decimal(value, self._view.locale(), 9)
             return "—" if value is None else str(value)
         if role == _Role.ToolTipRole:
             if key in ("Panel", "WCS", "Link", "Solve result"):
@@ -322,13 +324,14 @@ class PanelTableModel(QAbstractTableModel):
                 if key == "Band":
                     updated = replace(panel, band_override=entered or None)
                 elif key == "Weight":
-                    number = float(entered)
-                    if not isfinite(number) or number <= 0:
+                    number = parse_decimal(entered, self._view.locale())
+                    if number <= 0:
                         raise ValueError("Enter a positive finite blend weight.")
                     updated = replace(panel, weight=number)
                 else:
                     optics = replace(
-                        panel.optics, **{_OPTICS[key]: float(entered) if entered else None}
+                        panel.optics,
+                        **{_OPTICS[key]: parse_decimal(entered, self._view.locale()) if entered else None},
                     )
                     updated = replace(panel, optics=optics)
             else:

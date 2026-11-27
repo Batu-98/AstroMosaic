@@ -355,8 +355,8 @@ class ProjectWindow(QMainWindow):
         self.preview_button = QPushButton("Build Preview")
         self.preview_button.clicked.connect(self._preview)
         self.start_button = QPushButton("Export Mosaic…")
-        self.start_button.setProperty("primary", True)
         self.start_button.clicked.connect(self._start)
+        self._primary_action: QPushButton | None = None
         self.cancel_button = QPushButton("Cancel Job")
         self.cancel_button.hide()
         self.cancel_button.clicked.connect(self._cancel)
@@ -686,13 +686,53 @@ class ProjectWindow(QMainWindow):
                 summary = f"Composition  ·  {canvas.width} × {canvas.height} px  ·  Seam width {seam:.2f} px"
                 ready = True
         self.grid_summary.setText(summary)
-        ready = ready and self._references_ready(layer, self._sky_band())
+        references_ready = self._references_ready(layer, self._sky_band())
+        ready = ready and references_ready
         photo = self._photo_preview_ready()
         self.start_button.setText("Export Photo Mosaic…" if photo else "Export Mosaic…")
         self.start_button.setEnabled(idle and ready)
         self.scientific_export.setEnabled(idle and ready and layer == "sky")
         self.preview_button.setEnabled(idle and ready)
         self.plate_solve_button.setEnabled(idle and sky)
+        action = None
+        if idle:
+            if not self.project.panels:
+                action = self.add_button
+            elif ready:
+                action = self.start_button if frame is not None else self.preview_button
+        self._set_primary_action(action)
+
+        if not self.project.panels:
+            hint = "Choose Add Panels… to add linear FITS, TIFF, or XISF files."
+        elif isinstance(self.job, PreviewJob):
+            hint = "Preparing the preview…"
+        elif not idle:
+            hint = "Wait for the current operation to finish."
+        elif layer == "sky" and not sky:
+            hint = "Enable Sky for a panel in the table to build a sky preview."
+        elif layer == "sky" and self._inspected_panels is not self.project.panels:
+            hint = "Checking panel metadata…"
+        elif show_band and self._sky_band() is None:
+            hint = "Select a sky band to build a preview."
+        elif not references_ready:
+            hint = "Check the panel file and WCS links before building a preview."
+        elif ready:
+            hint = "Choose Build Preview to see the mosaic."
+        else:
+            hint = summary
+        self.viewport.set_empty_hint(hint)
+
+    def _set_primary_action(self, button: QPushButton | None) -> None:
+        previous = self._primary_action
+        if previous is button:
+            return
+        self._primary_action = button
+        for action in (previous, button):
+            if action is not None:
+                action.setProperty("primary", action is button)
+                action.style().unpolish(action)
+                action.style().polish(action)
+                action.update()
 
     @Slot()
     def _band_changed(self) -> None:

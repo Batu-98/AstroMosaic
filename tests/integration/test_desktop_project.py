@@ -101,6 +101,142 @@ def test_settings_attachment_accessible_names(tmp_path: Path, monkeypatch: pytes
             dialog.close()
 
 
+@pytest.mark.parametrize("language, separator", [("en_US", "."), ("tr_TR", ",")])
+def test_desktop_decimal_input_uses_its_locale(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, language: str, separator: str,
+) -> None:
+    import os
+
+    pytest.importorskip("PySide6")
+    from PySide6.QtCore import QLocale, Qt
+    from PySide6.QtWidgets import QApplication, QPushButton, QWidget
+
+    from astromosaic.ui.panel_table import PanelTable, panel_row
+    from astromosaic.ui.project_settings import PanelSettings, ProjectSettings
+
+    if "QT_QPA_PLATFORM" not in os.environ:
+        monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
+    app = QApplication.instance()
+    if not isinstance(app, QApplication):
+        app = QApplication([])
+    parent = QWidget()
+    parent.setLocale(QLocale(language))
+    source = tmp_path / "source.fits"
+    write_smoke_panel(source)
+    panel = ProjectPanel(FileReference.capture(source), weight=1.25)
+    project = MosaicProject((panel,), RenderSpec((12.345678912345, -2.5), (64, 64), 2.5))
+    mosaic = ProjectSettings(project, parent, suggested_rotation=2.25)
+    panel_settings = PanelSettings(panel, parent)
+    table = PanelTable()
+    table.setLocale(parent.locale())
+
+    try:
+        assert mosaic.scale.text() == f"2{separator}5"
+        assert mosaic.settings() == project
+        assert panel_settings.weight.text() == f"1{separator}25"
+        suggested = next(
+            button for button in mosaic.findChildren(QPushButton)
+            if button.text().startswith("Use suggested rotation")
+        )
+        suggested.click()
+        mosaic.scale.setText(f"1{separator}5")
+        mosaic.background.setCurrentText("Auto")
+        mosaic.match.setText(f"2{separator}75")
+        updated = mosaic.settings()
+        assert updated.render.scale_arcsec == 1.5 and updated.render.rotation_deg == 2.25
+        assert updated.refinement is not None and updated.refinement.max_shift_px == 2.75
+        manifest = tmp_path / "localized.astromosaic"
+        save_project(manifest, updated)
+        assert load_project(manifest) == updated
+        assert json.loads(manifest.read_text(encoding="utf-8"))["render"]["scale_arcsec"] == 1.5
+
+        grouping = parent.locale().groupSeparator()
+        mosaic.scale.setText(f"1{grouping}234")
+        with pytest.raises(ValueError, match="Pixel scale.*without grouping separators"):
+            mosaic.settings()
+        mosaic.scale.setText("nan")
+        with pytest.raises(ValueError, match="Pixel scale.*finite"):
+            mosaic.settings()
+
+        panel_settings.show_embedded_optics(PanelOptics(350, 3.75, 3.75))
+        assert panel_settings.pixel_size_x.text() == f"3{separator}75"
+        assert panel_settings.settings() == panel
+        panel_settings.pixel_size_x.setText(f"4{separator}25")
+        assert panel_settings.settings().optics.pixel_size_x_um == 4.25
+
+        table.properties.refresh([panel_row(panel, None, None, None)])
+        weight = table.cell(0, "Weight")
+        assert weight.data(Qt.ItemDataRole.EditRole) == f"1{separator}25"
+        edited: list[ProjectPanel] = []
+        table.properties.panelEdited.connect(lambda _row, value: edited.append(value))
+        assert table.properties.setData(weight, f"2{separator}5")
+        assert edited[-1].weight == 2.5
+        assert not table.properties.setData(weight, f"1{grouping}234")
+        assert len(edited) == 1
+    finally:
+        table.close()
+        panel_settings.close()
+        mosaic.close()
+        parent.close()
+
+
+def test_empty_workspace_guides_the_next_available_action(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import os
+
+    pytest.importorskip("PySide6")
+    from PySide6.QtCore import QSettings
+    from PySide6.QtWidgets import QApplication, QLabel
+
+    from astromosaic.ui.project_window import ProjectWindow
+
+    if "QT_QPA_PLATFORM" not in os.environ:
+        monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
+    app = QApplication.instance()
+    if not isinstance(app, QApplication):
+        app = QApplication([])
+    preferences = QSettings(str(tmp_path / "workspace.ini"), QSettings.Format.IniFormat)
+    preferences.setValue("view/liveSkyPreview", False)
+    window = ProjectWindow(use_gpu=False, preferences=preferences)
+    secondary = next((screen for screen in app.screens() if screen != app.primaryScreen()), None)
+    if secondary is not None:
+        window.move(secondary.availableGeometry().center() - window.rect().center())
+    window.show()
+    hint = window.viewport.canvas.findChild(QLabel)
+    assert hint is not None
+
+    def idle() -> None:
+        deadline = monotonic() + 20
+        while window.job is not None or window._inspection_job is not None:
+            assert monotonic() < deadline, window.status.text()
+            app.processEvents()
+            sleep(0.005)
+        app.processEvents()
+
+    try:
+        assert hint.isVisible() and "Add Panels" in hint.text()
+        assert window.add_button.property("primary") and not window.preview_button.isEnabled()
+        source = tmp_path / "smoke.fits"
+        write_smoke_panel(source)
+        panel = ProjectPanel(FileReference.capture(source))
+        window._set_project(MosaicProject((panel,), auto_frame_preview=True), None)
+        assert "Checking panel metadata" in hint.text()
+        idle()
+        assert hint.isVisible() and "Build Preview" in hint.text()
+        assert window.preview_button.property("primary") and not window.add_button.property("primary")
+        window.preview_button.click()
+        assert "Preparing the preview" in hint.text()
+        idle()
+        assert window.viewport.frame is not None and hint.isHidden()
+        assert window.start_button.property("primary") and not window.preview_button.property("primary")
+        window._new_project()
+        assert hint.isVisible() and "Add Panels" in hint.text()
+    finally:
+        window.close()
+
+
+
 def test_photo_desktop_session_and_cli_share_the_fitted_grid_and_tone(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
 ) -> None:

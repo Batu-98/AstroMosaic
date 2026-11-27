@@ -1,7 +1,6 @@
 """Dialogs for project geometry, render settings, and panel attachments."""
 
 from dataclasses import replace
-from math import isfinite
 from pathlib import Path
 from typing import cast
 
@@ -49,6 +48,7 @@ from astromosaic.storage.project import (
     default_composition,
     validate_composition,
 )
+from astromosaic.ui.decimal_input import format_decimal, parse_decimal
 
 PANEL_FILES = "Linear panels (*.fits *.fit *.fts *.tif *.tiff *.xisf);;All files (*)"
 _OVERRIDES: tuple[ForegroundTag | None, ...] = (None, "mixed", "sky-only")
@@ -57,6 +57,7 @@ _OVERRIDES: tuple[ForegroundTag | None, ...] = (None, "mixed", "sky-only")
 class _SettingsDialog(QDialog):
     def __init__(self, title: str, parent: QWidget, *, tab: str | None = None) -> None:
         super().__init__(parent)
+        self.setLocale(parent.locale())
         self.setWindowTitle(title)
         self.tabs = None
         self.outer = None
@@ -75,9 +76,18 @@ class _SettingsDialog(QDialog):
         return QFormLayout(page)
 
     def field(self, label: str, value: object) -> QLineEdit:
-        edit = QLineEdit(str(value))
+        edit = QLineEdit(self.form.parentWidget())
+        edit.setAccessibleName(label)
+        edit.setText(format_decimal(value, edit.locale()) if isinstance(value, float) else str(value))
         self.form.addRow(label, edit)
         return edit
+
+    @staticmethod
+    def decimal(edit: QLineEdit) -> float:
+        try:
+            return parse_decimal(edit.text(), edit.locale())
+        except ValueError as error:
+            raise ValueError(f"{edit.accessibleName()}. {error}") from error
 
     def buttons(self) -> None:
         buttons = QDialogButtonBox(
@@ -171,9 +181,12 @@ class ProjectSettings(_SettingsDialog):
         self.scale = self.field("Pixel scale (arcsec/px)", spec.scale_arcsec)
         self.rotation = self.field("Rotation (°)", spec.rotation_deg)
         if suggested_rotation is not None:
-            suggestion = QPushButton(f"Use suggested rotation ({suggested_rotation:.1f}°)")
+            angle = self.locale().toString(suggested_rotation, "f", 1)
+            suggestion = QPushButton(f"Use suggested rotation ({angle}°)")
             suggestion.setToolTip("Use a rotation that reduces the fitted footprint's rectangle.")
-            suggestion.clicked.connect(lambda: self.rotation.setText(f"{suggested_rotation:g}"))
+            suggestion.clicked.connect(lambda: self.rotation.setText(
+                format_decimal(suggested_rotation, self.rotation.locale())
+            ))
             self.form.addRow(suggestion)
         crop = spec.crop
         self.crop = self.field(
@@ -259,10 +272,10 @@ class ProjectSettings(_SettingsDialog):
         projection = cast(SkyProjection, self.projection.currentData())
         entered = replace(
             previous,
-            center=(float(self.ra.text()), float(self.dec.text())),
+            center=(self.decimal(self.ra), self.decimal(self.dec)),
             size=(int(self.output_width.text()), int(self.output_height.text())),
-            scale_arcsec=float(self.scale.text()),
-            rotation_deg=float(self.rotation.text()),
+            scale_arcsec=self.decimal(self.scale),
+            rotation_deg=self.decimal(self.rotation),
             crop=crop,
             projection=projection,
         )
@@ -297,7 +310,7 @@ class ProjectSettings(_SettingsDialog):
             None
             if background == "disabled"
             else RefinementSpec(
-                None if radius.lower() in ("", "auto") else float(radius),
+                None if radius.lower() in ("", "auto") else self.decimal(self.match),
                 cast(BackgroundMode, background),
             )
         )
@@ -388,7 +401,7 @@ class PanelSettings(_SettingsDialog):
             (self.pixel_size_x, optics.pixel_size_x_um),
             (self.pixel_size_y, optics.pixel_size_y_um),
         ):
-            text = format(value, ".9g") if value is not None else ""
+            text = format_decimal(value, field.locale()) if value is not None else ""
             hint = f"{text} (embedded)" if text else "No usable embedded value"
             field.setPlaceholderText(hint)
             field.setToolTip(f"{hint}. Edit to override. Clear to use the file value.")
@@ -400,7 +413,7 @@ class PanelSettings(_SettingsDialog):
         entered = field.text().strip()
         if not entered or (entered == self._autofilled.get(field) and not field.isModified()):
             return None
-        return float(entered)
+        return self.decimal(field)
 
     def _attachment(self, label: str, reference: FileReference | None, names: str) -> QLineEdit:
         path = QLineEdit(str(reference.path) if reference else "")
@@ -427,8 +440,8 @@ class PanelSettings(_SettingsDialog):
         return path
 
     def settings(self) -> ProjectPanel:
-        weight = float(self.weight.text())
-        if not isfinite(weight) or weight <= 0:
+        weight = self.decimal(self.weight)
+        if weight <= 0:
             raise ValueError("Enter a positive finite blend weight.")
 
         def attachment(edit: QLineEdit, previous: FileReference | None) -> FileReference | None:
@@ -477,16 +490,16 @@ class CompositionSettings(_SettingsDialog):
 
     def settings(self) -> CompositionSpec:
         placement = LayerPlacement(
-            (float(self.x_offset.text()), float(self.y_offset.text())),
-            float(self.rotation.text()),
-            float(self.scale.text()),
+            (self.decimal(self.x_offset), self.decimal(self.y_offset)),
+            self.decimal(self.rotation),
+            self.decimal(self.scale),
         )
-        seam = float(self.seam_y.text())
+        seam = self.decimal(self.seam_y)
         spec = replace(
             self.initial,
             placement=placement,
             seam_y=seam,
-            overlap_percent=float(self.overlap.text()),
+            overlap_percent=self.decimal(self.overlap),
             sky_crop_bottom=int(self.crop.text()),
         )
         if placement != self.initial.placement or seam != self.initial.seam_y:
