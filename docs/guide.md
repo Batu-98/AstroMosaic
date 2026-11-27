@@ -53,6 +53,8 @@ With **Live Sky Preview** enabled, an opened sky preview refreshes as its inputs
 
 Press **Tab** to focus a loaded mosaic preview, or click its image area. Use the arrow keys to pan, **+** or **=** to zoom in, **−** to zoom out, and **Home** to fit the view. **Tab** moves from the preview to **Fit View**. For exact crop coordinates with the keyboard, use **Mosaic Settings → Crop (x, y, width, height)**.
 
+**Edit Crop** focuses the preview as soon as the full grid is ready. In this mode, the arrow keys move the rectangle one output pixel at a time, **Shift+arrows** adjust its right or bottom edge, and **Ctrl+arrows** pan the view. **Shift+Tab** reaches **Cancel**, **Apply Crop**, and **Use Auto Crop** in that order. Press **Space** to activate the focused button or **Esc** with the preview focused to discard the draft.
+
 On import or project reopen, **Panel Settings** automatically fills the available focal length and X and Y pixel sizes and shows the camera model. The readers use FITS keywords, TIFF EXIF/XMP and FITS-style metadata, and XISF instrument properties and FITS keywords. Per-panel edits override the corresponding file values. [Supported optics and units](phase-3b.md#panel-wcs-and-plate-solve-hints)
 
 ### Run the Headless CLI

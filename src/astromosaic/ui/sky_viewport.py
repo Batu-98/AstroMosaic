@@ -38,15 +38,16 @@ from astromosaic.display import (
 )
 from astromosaic.photometry.photo import PhotoTone
 from astromosaic.pipeline.mosaic import MAX_DETAIL_PIXELS, MAX_OVERVIEW_EDGE
-from astromosaic.ui.preview_crop import CropDrag, output_point, screen_rect
+from astromosaic.ui.preview_crop import CropDrag, adjust_crop, output_point, screen_rect
 from astromosaic.ui.preview_gl import BACKGROUND_RGB, OpenGLPreview
 
 _PREVIEW_KEYS = "Arrow keys pan. Plus or minus zoom. Home fits the view."
-_PAN_DIRECTIONS: dict[int, tuple[int, int]] = {
-    Qt.Key.Key_Left: (1, 0),
-    Qt.Key.Key_Right: (-1, 0),
-    Qt.Key.Key_Up: (0, 1),
-    Qt.Key.Key_Down: (0, -1),
+_CROP_KEYS = "Arrow keys move the crop. Shift+arrows resize it. Ctrl+arrows pan. Esc cancels."
+_ARROW_DIRECTIONS: dict[int, tuple[int, int]] = {
+    Qt.Key.Key_Left: (-1, 0),
+    Qt.Key.Key_Right: (1, 0),
+    Qt.Key.Key_Up: (0, -1),
+    Qt.Key.Key_Down: (0, 1),
 }
 
 
@@ -99,6 +100,7 @@ def _display_image(
 class SkyViewport(QWidget):
     view_changed = Signal()
     crop_changed = Signal(object)
+    crop_cancelled = Signal()
 
     def __init__(self, *, use_gpu: bool = True) -> None:
         super().__init__()
@@ -198,8 +200,17 @@ class SkyViewport(QWidget):
     def set_crop(self, crop: Region | None, *, editing: bool = False) -> None:
         self._crop, self._editing_crop = crop, editing
         self._crop_drag = None
+        self._update_keyboard_help()
         self.canvas.unsetCursor()
         self.canvas.update()
+
+    def focus_crop(self) -> None:
+        self._surface.setFocus(Qt.FocusReason.OtherFocusReason)
+
+    def _update_keyboard_help(self) -> None:
+        help_text = _CROP_KEYS if self._editing_crop else _PREVIEW_KEYS
+        self._surface.setAccessibleDescription(help_text)
+        self._surface.setToolTip(help_text if self._frame is not None else "")
 
     def set_detail(self, region: Region, frame: DisplayFrame) -> None:
         self._detail = region, frame
@@ -269,7 +280,7 @@ class SkyViewport(QWidget):
         self._surface.setFocusPolicy(
             Qt.FocusPolicy.StrongFocus if frame is not None else Qt.FocusPolicy.NoFocus
         )
-        self._surface.setToolTip(_PREVIEW_KEYS if frame is not None else "")
+        self._update_keyboard_help()
         self.fit_button.setEnabled(frame is not None)
         self.tone_box.setVisible(frame is not None and frame.photo_levels is not None)
         self._select_canvas()
@@ -389,14 +400,28 @@ class SkyViewport(QWidget):
         return super().eventFilter(watched, event)
 
     def _key_event(self, event: QKeyEvent) -> bool:
-        if event.modifiers() & (
+        key = event.key()
+        modifiers = event.modifiers() & ~Qt.KeyboardModifier.KeypadModifier
+        direction = _ARROW_DIRECTIONS.get(key)
+        if self._editing_crop:
+            if key == Qt.Key.Key_Escape and modifiers == Qt.KeyboardModifier.NoModifier:
+                self.crop_cancelled.emit()
+                return True
+            if direction is not None and modifiers != Qt.KeyboardModifier.ControlModifier:
+                if modifiers in (Qt.KeyboardModifier.NoModifier, Qt.KeyboardModifier.ShiftModifier):
+                    self._nudge_crop(*direction, resize=modifiers == Qt.KeyboardModifier.ShiftModifier)
+                    return True
+                return False
+        crop_pan = self._editing_crop and direction is not None and (
+            modifiers == Qt.KeyboardModifier.ControlModifier
+        )
+        if not crop_pan and modifiers & (
             Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.AltModifier
             | Qt.KeyboardModifier.MetaModifier
         ):
             return False
-        key = event.key()
-        if direction := _PAN_DIRECTIONS.get(key):
-            self._pan += QPointF(*direction) * 32
+        if direction is not None:
+            self._pan -= QPointF(*direction) * 32
             self.canvas.update()
             self.view_changed.emit()
         elif key in (Qt.Key.Key_Plus, Qt.Key.Key_Equal, Qt.Key.Key_Minus):
@@ -407,6 +432,20 @@ class SkyViewport(QWidget):
         else:
             return False
         return True
+
+    def _nudge_crop(self, dx: int, dy: int, *, resize: bool) -> None:
+        assert self._frame is not None and self._crop is not None
+        edge = int(resize)
+        self._crop_drag = None
+        self._change_crop(adjust_crop(
+            self._crop, dx, dy, self._frame.output_size, horizontal=edge, vertical=edge,
+        ))
+
+    def _change_crop(self, crop: Region) -> None:
+        if crop != self._crop:
+            self._crop = crop
+            self.crop_changed.emit(crop)
+            self.canvas.update()
 
     def _zoom_at(self, steps: float, anchor: QPointF) -> None:
         assert self._frame is not None
@@ -452,10 +491,7 @@ class SkyViewport(QWidget):
         point = event.position()
         if kind == QEvent.Type.MouseMove and self._crop_drag is not None:
             area = self._crop_drag.update(output_point(point, image, frame.output_size), frame.output_size)
-            if area != crop:
-                self._crop = area
-                self.crop_changed.emit(area)
-                self.canvas.update()
+            self._change_crop(area)
             return True
         if kind == QEvent.Type.MouseMove and self._drag is None:
             handle = CropDrag.begin(crop, point, image, frame.output_size)

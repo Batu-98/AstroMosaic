@@ -216,6 +216,7 @@ class ProjectWindow(QMainWindow):
         self.viewport.resolution_box.currentIndexChanged.connect(self._resolution_changed)
         self.viewport.view_changed.connect(self._view_changed)
         self.viewport.crop_changed.connect(self._show_crop_bounds)
+        self.viewport.crop_cancelled.connect(self._restore_crop_preview)
         self._editor = QWidget(body)
         controls = QVBoxLayout(self._editor)
         controls.setContentsMargins(0, 0, 0, 6)
@@ -1483,6 +1484,8 @@ class ProjectWindow(QMainWindow):
             self.preview_title.setText("Visual Preview" if overview.visual_only else "Preview")
             self._update_preview_view()
         self._set_running()
+        if self.edit_crop_button.isEnabled():
+            self.edit_crop_button.setFocus()
         self._report_operation("Crop changes discarded.")
 
     @Slot(object, bool)
@@ -1783,7 +1786,10 @@ class ProjectWindow(QMainWindow):
             self.preview_title.setText("Crop Preview")
             self._update_preview_view()
             self._set_running()
-            self._report_operation("Drag the crop edges or handles, then apply the selection.")
+            self.viewport.focus_crop()
+            self._report_operation(
+                "Arrows move the crop. Shift+arrows resize. Ctrl+arrows pan. Esc cancels."
+            )
             return
 
         self.preview_title.setText("Visual Preview" if overview.visual_only else "Preview")

@@ -101,6 +101,18 @@ def test_sky_viewport_pixels_pan_zoom_and_stretch(
         assert viewport.image_rect().width() == pytest.approx(panned.width())
         QTest.keyClick(navigation, Qt.Key.Key_Home)
         assert viewport.image_rect() == original
+        viewport.set_crop(Region(0, 0, 3, 2), editing=True)
+        QTest.keyClick(navigation, Qt.Key.Key_Right)
+        assert viewport.crop == Region(0, 0, 3, 2)
+        for _ in range(3):
+            QTest.keyClick(navigation, Qt.Key.Key_Left, Qt.KeyboardModifier.ShiftModifier)
+        assert viewport.crop == Region(0, 0, 1, 2)
+        for _ in range(3):
+            QTest.keyClick(navigation, Qt.Key.Key_Right)
+        assert viewport.crop == Region(2, 0, 1, 2)
+        QTest.keyClick(navigation, Qt.Key.Key_Right, Qt.KeyboardModifier.ShiftModifier)
+        assert viewport.crop == Region(2, 0, 1, 2)
+        viewport.set_crop(None)
         QTest.keyClick(navigation, Qt.Key.Key_Tab)
         assert app.focusWidget() is viewport.fit_button
 

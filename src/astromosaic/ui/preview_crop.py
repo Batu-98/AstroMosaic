@@ -24,6 +24,30 @@ def output_point(point: QPointF, image: QRectF, size: tuple[int, int]) -> QPoint
     )
 
 
+def adjust_crop(
+    crop: Region, dx: int, dy: int, size: tuple[int, int], *,
+    horizontal: int = 0, vertical: int = 0,
+) -> Region:
+    width, height = size
+    left, top = crop.x, crop.y
+    right, bottom = left + crop.width, top + crop.height
+    if not horizontal and not vertical:
+        return Region(
+            max(0, min(width - crop.width, left + dx)),
+            max(0, min(height - crop.height, top + dy)),
+            crop.width, crop.height,
+        )
+    if horizontal < 0:
+        left = max(0, min(right - 1, left + dx))
+    elif horizontal > 0:
+        right = min(width, max(left + 1, right + dx))
+    if vertical < 0:
+        top = max(0, min(bottom - 1, top + dy))
+    elif vertical > 0:
+        bottom = min(height, max(top + 1, bottom + dy))
+    return Region(left, top, right - left, bottom - top)
+
+
 @dataclass(frozen=True, slots=True)
 class CropDrag:
     crop: Region
@@ -45,24 +69,8 @@ class CropDrag:
         return cls(crop, output_point(point, image, size), horizontal, vertical)
 
     def update(self, point: QPointF, size: tuple[int, int]) -> Region:
-        width, height = size
         dx = round(point.x() - self.start.x())
         dy = round(point.y() - self.start.y())
-        left, top = self.crop.x, self.crop.y
-        right, bottom = left + self.crop.width, top + self.crop.height
-        if not self.horizontal and not self.vertical:
-            return Region(
-                max(0, min(width - self.crop.width, left + dx)),
-                max(0, min(height - self.crop.height, top + dy)),
-                self.crop.width,
-                self.crop.height,
-            )
-        if self.horizontal < 0:
-            left = max(0, min(right - 1, left + dx))
-        elif self.horizontal > 0:
-            right = min(width, max(left + 1, right + dx))
-        if self.vertical < 0:
-            top = max(0, min(bottom - 1, top + dy))
-        elif self.vertical > 0:
-            bottom = min(height, max(top + 1, bottom + dy))
-        return Region(left, top, right - left, bottom - top)
+        return adjust_crop(
+            self.crop, dx, dy, size, horizontal=self.horizontal, vertical=self.vertical,
+        )

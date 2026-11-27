@@ -236,9 +236,15 @@ def test_photo_desktop_session_and_cli_share_the_fitted_grid_and_tone(
         wait_idle()
         assert window.viewport.crop is not None and window.crop_controls.isVisible()
         assert not window.check_foreground.isEnabled() and not window.revalidate_solve_action.isEnabled()
-        window.cancel_crop_button.click()
+        crop_focus = app.focusWidget()
+        assert crop_focus is not None and crop_focus.accessibleName() == "Mosaic preview"
+        original_crop = window.viewport.crop
+        QTest.keyClick(crop_focus, Qt.Key.Key_Left, Qt.KeyboardModifier.ShiftModifier)
+        assert window.viewport.crop == replace(original_crop, width=original_crop.width - 1)
+        QTest.keyClick(crop_focus, Qt.Key.Key_Escape)
         assert window.project == current and not window.crop_controls.isVisible()
         assert window.viewport.frame is frame_before_crop
+        assert app.focusWidget() is window.edit_crop_button
         assert window.start_button.text() == "Export Photo Mosaic…"
         window.edit_crop_button.click()
         wait_idle()
@@ -259,7 +265,26 @@ def test_photo_desktop_session_and_cli_share_the_fitted_grid_and_tone(
         QTest.mouseRelease(canvas, Qt.MouseButton.LeftButton, pos=end.toPoint())
         edited = window.viewport.crop
         assert edited is not None and edited.width < crop.width and edited.height < crop.height
-        window.apply_crop_button.click()
+        crop_focus = app.focusWidget()
+        assert crop_focus is not None and crop_focus.accessibleName() == "Mosaic preview"
+        QTest.keyClick(crop_focus, Qt.Key.Key_Right)
+        moved = replace(edited, x=edited.x + 1)
+        assert window.viewport.crop == moved
+        QTest.keyClick(crop_focus, Qt.Key.Key_Up, Qt.KeyboardModifier.ShiftModifier)
+        edited = replace(moved, height=moved.height - 1)
+        assert window.viewport.crop == edited
+        before_pan = window.viewport.image_rect()
+        QTest.keyClick(crop_focus, Qt.Key.Key_Right, Qt.KeyboardModifier.ControlModifier)
+        assert window.viewport.image_rect().x() < before_pan.x()
+        assert window.viewport.crop == edited and window.project == current
+        assert window.crop_bounds.text() == (
+            f"Crop {edited.x}, {edited.y} · {edited.width} × {edited.height} px"
+        )
+        QTest.keyClick(crop_focus, Qt.Key.Key_Tab, Qt.KeyboardModifier.ShiftModifier)
+        assert app.focusWidget() is window.cancel_crop_button
+        QTest.keyClick(window.cancel_crop_button, Qt.Key.Key_Tab, Qt.KeyboardModifier.ShiftModifier)
+        assert app.focusWidget() is window.apply_crop_button
+        QTest.keyClick(window.apply_crop_button, Qt.Key.Key_Space)
         wait_idle()
         assert window.project.render.crop == edited and "crop" in window.project.frame_locks
         frame = window.viewport.frame
