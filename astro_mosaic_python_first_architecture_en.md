@@ -372,6 +372,7 @@ Record selected backend, fallback reason, dtype conversions, failed coordinate c
 | 7: Terrain panorama registration | Ground control points, an anchored robust fit, and a verified camera model for real wide-angle captures | Pass the [Phase 7A–7F gates](#105-phase-7-delivery-stages). Demonstrate improvement on previously unsupported real terrain and retain the legacy, negative and sky regression checks. |
 | 8: Photo export and corrections | Full-resolution photo export, color profiles, exposure and brightness | See the [Phase 8 disposition](#106-phase-8-delivery-stages) for delivered and deferred criteria. |
 | 9: Desktop undo and redo | Reversible project edits, local mask and terrain editing, and safe restoration of worker results | Pass the [Phase 9A–9D gates](#107-phase-9-delivery-stages) for history, save state, resource bounds and Windows workflows. |
+| 10: Desktop workspace and preview workflow | Left navigation with dedicated Panels and Preview views, restored workspaces, project intake, solve review, linked sky outlines, and export review | Pass the [Phase 10A–10H gates](#108-phase-10-delivery-stages) at the Full HD reference and compact sizes, including native Windows source and portable workflows. |
 
 Memory and portability contracts begin in Phase 0; Phase 4 scales and verifies them. Do not postpone their architectural design until after the GUI or blend engine is complete.
 
@@ -504,6 +505,12 @@ Phase 8 starts with full-resolution photo export from the current sRGB sky previ
 ### 10.7 Phase 9 Delivery Stages
 
 Plan session-scoped undo and redo for the desktop. Begin with panel edits and the saved-project checkpoint in 9A. Extend coverage to accepted dialogs and editor gestures in 9B, then handle worker results, sidecar references and bounded retention in 9C. In 9D, compare exports before and after history navigation and verify the packaged Windows workflow. [Detailed scope and acceptance criteria](docs/phase-9.md)
+
+### 10.8 Phase 10 Delivery Stages
+
+Use `0.1.0b28` and the 1920 × 1080 desktop as the reference. Measure the preview area and check accessibility in 10A. In 10B, add a left vertical menu to switch between dedicated Panels and Preview views, with a shared Command Panel and preview focus mode. Restore workspace settings and improve project intake in 10C. Add panel filtering and solve review in 10D, then preview scale and crop feedback in 10E. Link selection between the table and sky panel outlines in 10F. Review effective output settings before export in 10G and verify the whole workflow in 10H. [Detailed delivery and acceptance plan](docs/phase-10.md)
+
+Use the existing project history, render geometry and export contracts. Verify that desktop view settings and actions preserve saved-project compatibility and that representative exports agree with the Qt-free CLI. Check Full HD at 100%, 125% and 150% scaling, the compact layout, and CPU and OpenGL on Windows. [Project impact](docs/phase-10.md#project-impact) · [Windows acceptance](docs/phase-10.md#10h-windows-acceptance-and-handoff)
 
 ## 11. Validation and Acceptance Criteria
 

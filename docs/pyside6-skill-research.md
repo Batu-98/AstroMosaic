@@ -1,0 +1,44 @@
+# Codex skills for AstroMosaic desktop design
+
+Reviewed on November 27, 2026. AstroMosaic uses Python 3.13 and PySide6 Essentials on Windows 11 x64. Its Python-authored Qt Widgets workspace has a shared Fusion palette and stylesheet, a panel table and a dedicated CPU/OpenGL mosaic viewport. These are the boundaries for evaluating a frontend design skill. [Architecture plan](../astro_mosaic_python_first_architecture_en.md#5-architecture-and-module-boundaries) · [Project dependencies](../pyproject.toml) · [Main workspace source](../src/astromosaic/ui/project_window.py)
+
+## Recommendation
+
+**`pyside6-fluent-ui` is the closest fit.** It is a Codex skill for auditing and incrementally modernizing native PySide6 Qt Widgets applications. It covers visual hierarchy, typography, spacing, semantic light and dark colors, focus and disabled states, dialogs, tables and toolbars. It also documents keyboard interaction, Windows scaling and high-contrast behavior. Start with its audit mode for AstroMosaic's light and dark themes, panel table, preview controls and settings dialogs. Keep the existing window frame and use the workbench template only if a future shell redesign calls for it. [Pinned skill instructions](https://github.com/ejacques11/pyside6-fluent-ui/blob/4538e312ee9abde4b77d041d59a5392aa7d43188/.agents/skills/pyside6-fluent-ui/SKILL.md) · [Current theme](../src/astromosaic/ui/appearance.py)
+
+The upstream release is `0.7.0-rc.1`. The complete skill includes design references, token data, QSS and palette templates, a gallery and validation scripts. Its MIT notices cover Microsoft Fluent theme tokens and two adapted chevron icons as well as the skill itself. The gallery instructions use Python 3.11 and the full PySide6 wheel. Upstream reports Windows 11 native-title contract validation and calls for manual checks of Snap Layout, accessibility and per-monitor scaling. Template compatibility with AstroMosaic's Python 3.13, Essentials wheel and portable build remains unverified. [Pinned README and release status](https://github.com/ejacques11/pyside6-fluent-ui/blob/4538e312ee9abde4b77d041d59a5392aa7d43188/README.md) · [Gallery requirements](https://github.com/ejacques11/pyside6-fluent-ui/blob/4538e312ee9abde4b77d041d59a5392aa7d43188/.agents/skills/pyside6-fluent-ui/examples/requirements.txt) · [Skill license](https://github.com/ejacques11/pyside6-fluent-ui/blob/4538e312ee9abde4b77d041d59a5392aa7d43188/.agents/skills/pyside6-fluent-ui/LICENSE) · [Third-party notices](https://github.com/ejacques11/pyside6-fluent-ui/blob/4538e312ee9abde4b77d041d59a5392aa7d43188/.agents/skills/pyside6-fluent-ui/NOTICE.md)
+
+## Other candidates
+
+| Skill | Best use in AstroMosaic | License and limits |
+| --- | --- | --- |
+| Joey-1123 `py-side6-gui-design` | A design-system-neutral alternative for layout, typography, focus, accessibility, interaction and QSS. Includes references, assets and scripts. | MIT. Treat the illustrative timing targets and acceleration guidance as discussion points. Project preview requirements and measured results take priority. [Skill](https://github.com/Joey-1123/opencode-v2-skills/blob/caeaa541a35153b06c1503419baa234fda2fc6a2/skills/py-side6-gui-design/SKILL.md) · [License](https://github.com/Joey-1123/opencode-v2-skills/blob/caeaa541a35153b06c1503419baa234fda2fc6a2/LICENSE) |
+| Vosslab `pyside6-engineer` and `ui-ux-engineer` | Use the PySide6 skill for widget architecture, signals, item models, worker boundaries and GUI testing. Use its framework-agnostic UX companion for hierarchy, navigation, forms and state coverage. | MIT. The PySide6 skill is mainly engineering guidance. Its test recipes include pytest-qt, while AstroMosaic already has pytest and native Windows Qt checks. [PySide6 skill](https://github.com/vosslab/vosslab-skills/blob/5df6a226878361024fb123fdfd7d1325597793b7/skills/experts/pyside6-engineer/SKILL.md) · [UX skill](https://github.com/vosslab/vosslab-skills/blob/5df6a226878361024fb123fdfd7d1325597793b7/skills/experts/ui-ux-engineer/SKILL.md) · [License](https://github.com/vosslab/vosslab-skills/blob/5df6a226878361024fb123fdfd7d1325597793b7/LICENSE.MIT) |
+| CodeAtCode `pyqt-styling` and `pyqt-widgets` | Focused implementation references for QSS selectors and states, widgets, layouts and keyboard/event handling. Both explicitly cover PySide6. | Repository declares GPLv3. The skills focus on implementation mechanics. Retain the applicable license if redistributing material. [Styling skill](https://github.com/CodeAtCode/oss-ai-skills/blob/31df1698ca07798349fa9dfb744b80ed418a4b1c/frameworks/pyqt/styling/SKILL.md) · [Widgets skill](https://github.com/CodeAtCode/oss-ai-skills/blob/31df1698ca07798349fa9dfb744b80ed418a4b1c/frameworks/pyqt/widgets/SKILL.md) · [License](https://github.com/CodeAtCode/oss-ai-skills/blob/31df1698ca07798349fa9dfb744b80ed418a4b1c/LICENSE) |
+| The Qt Company `qt-ui-design` | Official conceptual guidance for visual hierarchy, interaction, accessibility and UI audits. | BSD-3-Clause or Qt commercial. Several implementation defaults assume Qt Quick Controls. Apply the portable design guidance and consult Qt for Python for the equivalent Widgets APIs. [Official skill guide](https://doc.qt.io/agentictools/skills/qt-ui-design/) · [Pinned skill](https://github.com/TheQtCompanyRnD/agent-skills/blob/dce029506599e3a01bd628d106b005b37c17f525/skills/qt-ui-design/SKILL.md) · [License](https://github.com/TheQtCompanyRnD/agent-skills/blob/dce029506599e3a01bd628d106b005b37c17f525/LICENSE) |
+| SegFlow `pyside6-ui-development-rules` | Secondary reference for signals and slots, QSS, thread pools, layout and high DPI. | SegFlow's root license is GPL-3.0-or-later. The skill is embedded in a separate application and mainly provides generic Qt engineering guidance. [Skill](https://github.com/PhraseRS/SegFlow/blob/baab587e04b722d0d77bd1fa04ac3b1becaa4ae3/.agents/skills/pyside6-ui-development-rules/SKILL.md) · [License](https://github.com/PhraseRS/SegFlow/blob/baab587e04b722d0d77bd1fa04ac3b1becaa4ae3/LICENSE) |
+
+## Installation paths
+
+For a future repository-local installation, copy the full skill directory from the reviewed upstream revision to `.agents/skills/<skill-name>/` under the repository root, keeping `SKILL.md` directly inside it. The user-wide location is `%USERPROFILE%\.agents\skills\<skill-name>\`. Preserve the upstream notices and verify discovery using the `$skill-name` selector. The paths below are the upstream source directories. [OpenAI Codex skill locations](https://learn.chatgpt.com/docs/build-skills#where-codex-loads-local-skills)
+
+| Skill name | Upstream directory to copy |
+| --- | --- |
+| `pyside6-fluent-ui` | `.agents/skills/pyside6-fluent-ui` |
+| `py-side6-gui-design` | `skills/py-side6-gui-design` |
+| `pyside6-engineer` | `skills/experts/pyside6-engineer` |
+| `ui-ux-engineer` | `skills/experts/ui-ux-engineer` |
+| `pyqt-styling` | `frameworks/pyqt/styling` |
+| `pyqt-widgets` | `frameworks/pyqt/widgets` |
+| `qt-ui-design` | `skills/qt-ui-design` |
+| `pyside6-ui-development-rules` | `.agents/skills/pyside6-ui-development-rules` |
+
+The copy method keeps the choice to a single skill and its supporting files. Vosslab's installer has its own multi-skill linking workflow, and The Qt Company documents installing its full collection via `npx skills`. Those are optional routes for broader use. [Vosslab installation guide](https://github.com/vosslab/vosslab-skills/blob/5df6a226878361024fb123fdfd7d1325597793b7/docs/INSTALL.md) · [Qt installation guide](https://doc.qt.io/agentictools/getting-started/#1-install)
+
+## First audit prompt
+
+> Use `$pyside6-fluent-ui` in Audit mode. Review the existing AstroMosaic Qt Widgets main window, panel table and settings dialogs on Windows 11. Prioritize contrast, focus visibility, dense-table readability, action hierarchy and behavior at compact widths and high DPI. Keep the dedicated mosaic viewport and its CPU/OpenGL interaction contract. Identify the relevant source locations, propose one bounded first change and describe how to verify it in both themes. Report your findings without editing application files.
+
+Check individual styling and high-DPI decisions against Qt's documentation. A later implementation should confirm keyboard navigation, both themes, compact-width behavior and Windows scaling, along with the existing CPU/OpenGL preview interactions. [Qt for Python stylesheet reference](https://doc.qt.io/qtforpython-6/overviews/qtwidgets-stylesheet-reference.html) · [Qt for Python high DPI](https://doc.qt.io/qtforpython-6/overviews/qtdoc-highdpi.html) · [Mosaic viewport](../src/astromosaic/ui/sky_viewport.py)
+
+This was a source and documentation review. Installation, Codex invocation, galleries, vendor scripts and AstroMosaic runtime compatibility were outside its verification scope.

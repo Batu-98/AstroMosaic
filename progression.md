@@ -4,12 +4,12 @@ Use this file for concise development history and handoff state. Detailed techni
 
 ## Current State
 
-- **Last updated:** 2026-11-26
+- **Last updated:** 2026-11-28
 - **Active baseline:** Python-first architecture revision 3.12 adds [Phase 7 delivery stages](astro_mosaic_python_first_architecture_en.md#105-phase-7-delivery-stages). [ADR-0023](docs/adr/0023-terrain-control-point-registration.md) records the translation and similarity decision. [ADR-0017](docs/adr/0017-astap-first-validated-solving.md) records the solver policy. See [ADR-0003](docs/adr/0003-windows-first-platform-scope.md) for Windows scope, [ADR-0006](docs/adr/0006-dual-fits-and-tiff-workflow.md) for formats, and [ADR-0007](docs/adr/0007-sky-and-foreground-mosaics.md) for mixed panels.
-- **Current stage** Phase 9 completed with verified desktop project and draft history, worker replay and real export parity in local beta 20. Phase 8 closed with the locally verified beta 15 photo workflow and Standard stellar gain safeguard. [Phase 9 acceptance](docs/phase-9.md#9d-windows-acceptance-results) · [Phase 8 closure](docs/phase-8.md#phase-8-closure)
-- **Available artifacts** The verified local beta 20 desktop and console are in `dist/AstroMosaic-0.1.0b20-windows-x64/` and `dist/astromosaic-cli-0.1.0b20-windows-x64/` with their build records. Earlier betas remain in their versioned folders. The [application test guide](docs/application-tests.md) and [extended cases](docs/application-tests-extension.md) describe the ignored real-observation fixtures. [Release guide](docs/windows-release.md#verification-status)
+- **Current stage** Phase 10 completed for the local Windows beta 31 handoff. The desktop verified dedicated views, workspace restore, panel selection, solve feedback, actual-size preview, detector outlines and export review. Phase 9 completed with history and worker replay in beta 20. Phase 8 closed with the locally verified photo workflow in beta 15. [Phase 10 verification](docs/phase-10.md#10h-local-windows-results) · [Phase 9 acceptance](docs/phase-9.md#9d-windows-acceptance-results) · [Phase 8 closure](docs/phase-8.md#phase-8-closure)
+- **Available artifacts** The verified local desktop and console beta 33 are in `dist/AstroMosaic-0.1.0b33-windows-x64/` and `dist/astromosaic-cli-0.1.0b33-windows-x64/`. Each folder includes its runtime and build record. [Release guide](docs/windows-release.md#verification-status)
 - **8C implementation and verification** Manifest version 10 saves photo profile, exposure and brightness choices. The copied desktop CPU and OpenGL paths and console matched on the mixed ICC control. The full original photo and nine scientific products matched their references. The source suite passed 248 checks with two offscreen OpenGL skips. Native preview, export, Ruff, scoped mypy and Poetry lock validation passed. [8C results](docs/phase-8.md#8c-local-windows-package-results)
-- **Version control** The current development version is `0.1.0b20`. The local Phase 9 build identifies commit `f7035a89ef478a8f9be7a2d5018cfaa419cd34bc`. Annotated tag `v0.1.0b16` identifies the latest published source and its Windows builds. [Beta 16 pre-release](https://github.com/Batu-98/AstroMosaic/releases/tag/v0.1.0b16)
+- **Version control** The current development version is `0.1.0b33`. Its local build identifies commit `ec1bac7f97b30db82ca2205cc0287316884dc884`. Annotated tag `v0.1.0b16` identifies the latest tagged GitHub pre-release. [Beta 16 pre-release](https://github.com/Batu-98/AstroMosaic/releases/tag/v0.1.0b16)
 - **8D checkpoint** Beta 15 verified the Standard stellar gain check. Six wide-dither NIRCam F200W exposures matched the archive's detector science, masks and two variance planes exactly. One flat application reduced the final aperture P95 on all four overlaps with a fitted exposure scale. Each had three to seven final apertures. The F150W reference still replays byte for byte. [8D Standard results](docs/phase-8d.md#standard-local-windows-results) · [F200W results](docs/phase-8d.md#nircam-f200w-large-dither-flat-reference)
 - **8D Advanced evidence** The linked-offset bound ruled out the plane margin at unity gain on 125 of the 216 SDSS M2 sky-only RGB cycles. The Bath M51 intake passed 13 of 24 strict catalog solves. The three accepted red exposures missed the 0.5 px native geometry gate at 1.036–1.243 px P95. The positive full-scene RGB case remains open. [Linked offset results](docs/phase-8d.md#linked-additive-correction-limits) · [M51 geometry intake](docs/phase-8d.md#bath-m51-geometry-intake)
 - **Public test data** Five sources provide 389 independent exposures, 22 calibration files and seven integrated masters. The library includes native 20 mm and 35 mm linear TIFFs and the multi-session MOANA Lagoon mosaic. Original hashes, credits, reproducible preparation and local intake results are recorded. [Public observation library](docs/public-test-data.md)
@@ -92,6 +92,7 @@ The table is a status summary, not a replacement for the full exit gates in Sect
 | 8D - Advanced brightness and measured optics | Closed with deferred criteria | Standard gain safeguard verified locally. Advanced and optical qualification and integration deferred. [8D evidence](docs/phase-8d.md) |
 | 8E and 8F - Additional models and acceptance | Deferred work | Additional optical and seam methods, bracket and HDR research and clean-machine acceptance are recorded in the [closure summary](docs/phase-8.md#phase-8-closure). |
 | 9 - Desktop undo and redo | Complete | Verified project and draft history, worker revision and retention, real export parity, and the local beta 20 Windows desktop and CLI. [Stage gates](docs/phase-9.md#delivery-stages) |
+| 10 - Desktop workspace and preview workflow | Complete locally | Beta 31 passed source and portable acceptance. Public distribution retains the clean-machine and redistribution checks. [10H evidence](docs/phase-10.md#10h-local-windows-results) |
 
 ## Journal Rules
 
@@ -1937,8 +1938,217 @@ Copy this format into a new entry immediately above this template, preserving ch
 - **Verified** The copied desktop replay matched all three source workflows with CPU and OpenGL. The copied CLI matched the saved scientific, photo and mixed edits. Source verification passed 275 offscreen tests, 11 native tests and five isolated OpenCV checks. [Acceptance results](docs/phase-9.md#9d-windows-acceptance-results)
 - **Handoff** The guide includes the shortcuts, session lifetime and retention limits. Public portable distribution stays tracked in Q-005. [Desktop guide](docs/guide.md#run-the-desktop-app) · [Distribution tracking](questions_open_topics.md#q-005---application-licensing-and-distribution-model)
 
+### 2026-11-26 - Desktop architecture - Reviewed UI layout and appearance
+
+- **Reviewed** The desktop defines Qt Widgets layouts in Python. [Appearance](src/astromosaic/ui/appearance.py) owns the shared palettes and stylesheet. [ProjectWindow](src/astromosaic/ui/project_window.py) assembles the workspace and coordinates project state and jobs.
+- **Checked** Four Windows offscreen tests passed for the panel table, theme persistence, GPU preference and preview resolution. The current application source files match the beta 20 build revision.
+- **Handoff** The [desktop guide](docs/guide.md#run-the-desktop-app) documents the current controls and menu paths.
+
+### 2026-11-26 - Desktop documentation - Added the UI architecture report
+
+- **Documented** Added the [desktop UI report](docs/desktop-ui-report.md) with source locations for the theme, workspace, dialogs and jobs, plus the beta 20 verification evidence.
+- **Checked** Reviewed the report against the current source and verified all 26 relative links and their heading anchors.
+
+### 2026-11-27 - Desktop design - Compared Codex skills for PySide6
+
+- **Researched** Compared installable design and engineering skills against the existing Qt Widgets desktop. [PySide6 skill research](docs/pyside6-skill-research.md)
+- **Checked** Verified the leading candidate's published source, license, notices and skill directory at the reviewed revision. Installation and runtime checks were outside this research task.
+- **Next** If a desktop design review is requested, begin with a read-only audit of the current workspace and theme.
+
+### 2026-11-27 - Desktop design - Started the Qt Widgets audit
+
+- **Installed** Added The Qt Company's `qt-ui-design` version 1.1 at user scope. The files match the pinned upstream revision and Codex reports the skill enabled.
+- **Audited** Native Windows checks on the public M17 project identified a Tab loop in the panel table, pointer-only preview navigation, incomplete settings names and a compact-height limit with the Command Panel open. Both preview backends and both themes were exercised, and eight focused source tests passed. [Desktop UI audit](docs/desktop-ui-audit.md)
+- **Next** Restore normal Tab traversal from the panel table with cell keyboard editing intact. [Q-036](questions_open_topics.md#q-036---desktop-keyboard-access-and-compact-layout)
+
+### 2026-11-27 - Desktop keyboard - Fixed panel table traversal
+
+- **Changed** Tab and Shift+Tab now leave the panel table through the normal workspace focus order.
+- **Checked** The new traversal assertion failed before the change. Native and offscreen checks passed after it, including arrow navigation, Space on the Sky checkbox and F2 cell editing. The desktop history regressions also passed.
+- **Next** Add keyboard pan, zoom and fit to the shared preview surface. [Q-036](questions_open_topics.md#q-036---desktop-keyboard-access-and-compact-layout)
+
+### 2026-11-27 - Desktop keyboard - Added preview navigation
+
+- **Changed** The loaded preview accepts Tab focus and shows a focus outline. Arrow keys pan, plus or equals and minus zoom, and Home fits the view. The keyboard and mouse share zoom limits and view-change events. [Desktop shortcuts](docs/guide.md#run-the-desktop-app)
+- **Checked** The focus regression failed before the change. Seven scoped offscreen checks passed with two expected OpenGL skips. All ten focused native checks passed, including both preview backends and focus retention after OpenGL fallback. Ruff, scoped mypy and Poetry lock validation passed.
+- **Next** Exercise the changed workflow in the beta 21 Windows bundle. [Windows build procedure](docs/windows-release.md#build-portable-windows-packages)
+
+### 2026-11-27 - Windows handoff - Verified beta 21 keyboard navigation
+
+- **Built** The desktop and console came from clean commit `98dec2e48d1ec9b2a41af9387b6c0b2c29d88479` using `poetry.lock`. The production desktop title and console version reported `0.1.0b21`. Both versioned folders include their matching runtime and launcher checksum. [Windows verification status](docs/windows-release.md#verification-status)
+- **Verified** The copied desktop runtimes matched the source on the M17 keyboard workflow with CPU and OpenGL. They verified table traversal and editing, pan, zoom, fit, 1:1 detail, and visible preview focus in both themes. The source CPU run also passed at simulated 150% scale. The copied CLI validated M17. Input and manifest hashes matched before and after the desktop checks.
+- **Source checks** The offscreen suite passed 275 tests. All five OpenGL skips passed in the separate native run. Four optional OpenCV tests were skipped in this environment.
+- **Next** Address the settings control names, solver dialog focus order, interactive crop keyboard workflow and compact layout. [Q-036](questions_open_topics.md#q-036---desktop-keyboard-access-and-compact-layout)
+
+### 2026-11-27 - Desktop accessibility - Fixed settings names and tab order
+
+- **Changed** Gave the ICC, WCS and FITS mask file fields and their buttons distinct accessible names. Plate Solve Settings now constructs the ASTAP, Gaia DR3 and Solve Limits groups in visual order.
+- **Checked** Both regressions failed before the fixes and passed with the offscreen and native Windows Qt platforms. The solver settings test also saved, reopened and cancelled a path check. Ruff, scoped mypy and Poetry lock validation passed.
+- **Next** Verify the beta 22 desktop package and its Windows accessibility names. [Q-036](questions_open_topics.md#q-036---desktop-keyboard-access-and-compact-layout)
+
+### 2026-11-27 - Windows handoff - Verified beta 22 settings accessibility
+
+- **Built** The local desktop and console came from clean commit `b29530b339dd09d1f722a48685d1da8e49bbc00c` using `poetry.lock`. The production desktop title and console reported `0.1.0b22`. The two launchers match their recorded SHA-256 checksums. [Windows verification](docs/windows-release.md#verification-status)
+- **Source checks** The focused offscreen suite passed 31 tests. Both accessibility regressions also passed in native Windows Qt. Ruff, scoped mypy and Poetry lock checks passed.
+- **Verified** Windows UI Automation reported the named ICC, WCS and mask controls on the production launcher. The copied desktop runtime matched all 81 application modules and verified the control names, Tab and Shift+Tab transitions, and Escape dismissal on the M17 project. The bundled CLI validated M17 and the input hashes matched. Narrator speech remains unchecked.
+- **Next** Add a keyboard workflow for the live crop. [Q-036](questions_open_topics.md#q-036---desktop-keyboard-access-and-compact-layout)
+
+### 2026-11-27 - Desktop accessibility - Added keyboard crop editing
+
+- **Changed** Edit Crop focuses the loaded canvas. The arrow keys move the draft, Shift+arrows resize it, and Ctrl+arrows pan. Esc restores the preceding preview. Keyboard and pointer edits share output-pixel boundaries. [Desktop guide](docs/guide.md#run-the-desktop-app)
+- **Checked** Thirteen focused offscreen checks passed with two OpenGL skips. Six native tests passed, including both preview backends. The project regression exercised keyboard cancel, mouse and keyboard edits, apply, and undo and redo. Ruff, scoped mypy and the Poetry lock check passed.
+- **Next** Verify the keyboard crop in the beta 23 Windows bundle. [Windows build procedure](docs/windows-release.md#build-portable-windows-packages)
+
+### 2026-11-27 - Windows handoff - Verified beta 23 keyboard crop
+
+- **Built** Both local launchers came from clean commit `5cd663c2ebd55b2ce7d4039e76388b4953a2793b` using `poetry.lock`. The desktop title and CLI report `0.1.0b23`. Both versioned folders contain their matching runtime and verified SHA-256 records. [Windows verification](docs/windows-release.md#verification-status)
+- **Verified** Source and copied Windows runtimes selected the same M17 crop at x 20, y 18 with a size of 986 × 1287 output pixels on CPU and OpenGL. They exercised keyboard focus, reset, movement, resize, pan, cancel, apply, undo and redo. The input hashes matched and the copied CLI validated the project.
+- **Next** Review the compact workspace height. [Q-036](questions_open_topics.md#q-036---desktop-keyboard-access-and-compact-layout)
+
+### 2026-11-27 - Desktop accessibility - Fit the Command Panel on short displays
+
+- **Changed** Let the command transcript shrink to two font-relative lines, put the selectable working folder beside command status, and aligned workspace progress and cancellation in one row. The preview keeps a visible canvas, and crop bounds share a row with the full grid size. [Desktop guide](docs/guide.md#run-the-desktop-app)
+- **Checked** The new layout regression passed on offscreen and native Windows Qt. At 14 pt and 150% simulated Qt scale, the previous source required 842 logical px when idle and 884 while building M17. The updated source held the requested 800 × 650 through preview building and crop editing. Ruff, mypy, and the Poetry lock check passed.
+- **Next** Verify the same workflow in the local beta 24 Windows bundle. [Windows build procedure](docs/windows-release.md#build-portable-windows-packages)
+
+### 2026-11-27 - Windows handoff - Verified beta 24 compact workspace
+
+- **Built** Both local launchers came from clean commit `4e8245f8f83502aa9284fd620ab92db09ac5398f` using `poetry.lock`. The desktop title and CLI version report `0.1.0b24`, and both launcher SHA-256 checksums match their build records. The subsequent source commits update desktop tests and the Plate Solve guide. [Windows verification](docs/windows-release.md#verification-status)
+- **Source checks** The full offscreen suite passed 277 tests with nine skips. The compact layout regression also passed on native Windows Qt at 150% simulated scaling.
+- **Verified** Source and copied desktop runtimes held 800 × 650 logical px at 14 pt and 150% simulated Qt scale in both themes with CPU and OpenGL. M17 preview building, two transcript lines, job controls, keyboard crop editing and `session status` passed. The original input hashes matched and the copied CLI validated the same project.
+- **Next** Improve the visual distinction between enabled, disabled and selected controls. The Windows Narrator walkthrough remains open. [Q-036](questions_open_topics.md#q-036---desktop-keyboard-access-and-compact-layout)
+
+### 2026-11-27 - Desktop accessibility - Distinguished control states by shape
+
+- **Changed** Gave disabled buttons and selectors dashed borders, added selection lines above and below panel cells, and marked the table and preview divider with a three-part grip. [Desktop guide](docs/guide.md#run-the-desktop-app)
+- **Checked** Native Qt captures on M17 confirmed that the lines follow keyboard selection and that the divider still resizes the two panes. The disabled Build Preview label measured 4.98:1 in dark and 5.57:1 in light. The selection lines and grip stayed above 3:1 in both themes after simulated deuteranopia. [Control-state results](docs/desktop-ui-audit.md#some-control-states-are-difficult-to-distinguish)
+- **Next** Verify the local beta 25 Windows bundle. [Windows build procedure](docs/windows-release.md#build-portable-windows-packages)
+
+### 2026-11-27 - Windows handoff - Verified beta 25 workspace appearance
+
+- **Built** Both launchers came from clean commit `692eca3b4a2c80e9bb510bb4058c25a2c29060e6` using `poetry.lock`. The desktop title and CLI version report `0.1.0b25`. Both launchers match their recorded SHA-256 checksums. [Windows verification](docs/windows-release.md#verification-status)
+- **Source checks** The desktop offscreen suite passed 55 tests with five skips. Ten native Windows tests passed, including CPU and OpenGL viewport checks and the compact window regression. Ruff, mypy and the Poetry lock check passed.
+- **Verified** All 81 packaged application modules matched the workspace probe. Both themes at 100% and 150% simulated scale reproduced the source samples on M17. The original hashes matched and the copied CLI validated the project. [Audit measurements](docs/desktop-ui-audit.md#some-control-states-are-difficult-to-distinguish)
+- **Next** Review text scaling and access to key panel columns in narrow layouts. The Windows Narrator walkthrough remains open. [Q-036](questions_open_topics.md#q-036---desktop-keyboard-access-and-compact-layout)
+
+### 2026-11-27 - Desktop accessibility - Scaled text and prioritized panel status
+
+- **Changed** Set a 12 pt body text floor and scaled section headings and the job percentage from the body font. Moved Solve result next to WCS, sized columns and rows for the font, and kept one complete panel row in a populated table. The panel heading moves above the controls when the row is too narrow. [Desktop guide](docs/guide.md#run-the-desktop-app)
+- **Checked** On M17 the first six Overview columns fit at 630 × 650 logical px with 12 pt text and at 800 × 650 with 14 pt text and 150% simulated Qt scaling. The Command Panel, preview and crop controls remained available. The wide view displayed all nine columns. [Typography measurements](docs/desktop-ui-audit.md#desktop-readability-falls-below-the-skills-body-text-guideline)
+- **Next** Verify the local beta 26 Windows bundle. [Windows build procedure](docs/windows-release.md#build-portable-windows-packages)
+
+### 2026-11-27 - Windows handoff - Verified beta 26 desktop typography
+
+- **Built** Both launchers came from clean commit `c3dac70246c36f3e1ca9f8e39cde9621c3779fd2` using `poetry.lock`. The desktop title and CLI report `0.1.0b26`. Both launchers match their recorded SHA-256 checksums. [Windows verification](docs/windows-release.md#verification-status)
+- **Source checks** The desktop offscreen suite passed 55 tests with five skips. Three focused native tests passed at 150% simulated scaling. Ruff, mypy and the Poetry lock check passed.
+- **Verified** The copied desktop matched the source on the M17 project in both themes and with CPU and OpenGL at the larger text size. Six key columns and a full row fit in both compact layouts. Arrow navigation, preview building and crop editing passed. All nine Overview columns fit in the wide layout. Input hashes matched and the copied CLI validated M17. [Audit measurements](docs/desktop-ui-audit.md#desktop-readability-falls-below-the-skills-body-text-guideline)
+- **Next** Review locale-aware decimal input. The Windows Narrator walkthrough remains open. [Q-036](questions_open_topics.md#q-036---desktop-keyboard-access-and-compact-layout)
+
+### 2026-11-27 - Desktop accessibility - Localized decimals and clarified empty previews
+
+- **Changed** Desktop decimal fields and numeric table edits use the Qt locale for entry and display. The preview explains what to do when there is no image and emphasizes Add Panels, Build Preview or Export as the workflow advances. [Desktop guide](docs/guide.md#run-the-desktop-app)
+- **Checked** English and Turkish settings and panel edits round-tripped exact values. Grouping separators and nonfinite inputs were rejected with a field-specific example. The desktop suite passed 58 tests with five skips.
+- **Next** Record the Windows bundle results and complete the Narrator walkthrough. [Q-036](questions_open_topics.md#q-036---desktop-keyboard-access-and-compact-layout)
+
+### 2026-11-27 - Windows handoff - Verified beta 27 desktop audit workflows
+
+- **Built** Both launchers came from clean commit `5b49ea6cde2ff8f0a6ff38ebff761811f2feb193` using `poetry.lock`. The desktop title and CLI report `0.1.0b27`, and both launchers match their SHA-256 records. Ruff, mypy and the Poetry lock check passed. [Windows verification](docs/windows-release.md#verification-status)
+- **Verified** All 82 packaged application modules matched the source probe. M17 verified Turkish and English entry, exact numeric JSON on save, and the Add Panels, Build Preview and Export progression in both themes and with CPU and OpenGL. Input hashes matched, and the bundled CLI validated M17.
+- **Closed** Windows Narrator on the beta 27 launcher spoke Add Panels, the M17 table selection, Auto Frame, Mosaic preview, the WCS and FITS attachments, both ICC rows and Pixel scale. It spoke the focused controls in both directions through Plate Solve Settings. The three settings dialogs closed with Escape. Q-036 is resolved. [Narrator walkthrough](docs/desktop-ui-audit.md#windows-narrator-walkthrough)
+
+### 2026-11-27 - Desktop workspace - Adopted a 1920 × 1080 reference display
+
+- **Changed** The desktop opens maximized. The panel table and preview share a horizontal splitter when both fit, and stack in smaller windows. Each orientation retains its own divider adjustment during the session. [Desktop guide](docs/guide.md#run-the-desktop-app)
+- **Checked** Native Windows source runs opened M17, built its preview and entered crop editing in a 1920 × 1032 outer window. At simulated 100%, 125% and 150% scale, the preview measured 880 × 594, 875 × 485 and 868 × 366 physical pixels. The Command Panel stayed accessible. Restoring a compact window stacked the table above the preview.
+- **Packaged** The beta 28 production launcher reproduced the source preview dimensions at all three scales on the available 2560 × 1440 monitor. CPU and OpenGL passed the wide-to-compact transition. The offscreen suite passed 282 tests with nine skips. Ruff, scoped mypy, lock validation, both launcher checksums, M17 input checksums and bundled CLI project validation passed. [Windows verification](docs/windows-release.md#verification-status)
+
+### 2026-11-27 - Phase 10 - Planned the desktop workspace and preview workflow
+
+- **Added** Defined stages 10A–10H for the Full HD baseline, Command Panel and preview focus, workspace restore and project intake, table and solve review, preview and crop, sky panel outlines, export review, and Windows acceptance. [Phase plan](docs/phase-10.md)
+- **Checked** Reviewed the eight acceptance gates against the existing workspace, history, preview and export contracts. Verified the local Markdown links and anchors.
+- **Next** Record the beta 28 layout, keyboard and responsiveness baseline in 10A. Measure sky panel outline accuracy and resource limits before 10F. [Q-037](questions_open_topics.md#q-037---sky-panel-outline-accuracy-and-resource-bounds)
+
+### 2026-11-27 - Phase 10 - Planned left navigation and dedicated views
+
+- **Changed** Defined a vertical left menu for Panels and Preview with shared job controls. Updated workspace restore and linked panel selection for the two-view layout. [Workspace layout](docs/phase-10.md#workspace-layout)
+- **Checked** Reviewed the layout and acceptance gates for compact windows, keyboard switching, selection and crop continuity, and active jobs. Verified the Markdown links.
+- **Next** Measure beta 28 in 10A, then deliver the two views and shared controls in 10B. [Navigation acceptance](docs/phase-10.md#10b-left-navigation-and-dedicated-views)
+
+### 2026-11-27 - Plate solve - Diagnosed missing-mask reporting
+
+- **Checked** Beta 28 CLI and the offscreen desktop reproduced the same mask prerequisite on two real terrain panels. The main status showed two failures and the per-panel outcomes carried the reason with zero solver attempts.
+- **Checked** A temporary copy with conservative sky masks reached Gaia on both panels. Both blind searches reached the 30-second attempt cap with the current local settings. The project and source image hashes matched after testing.
+- **Next** Track the missing actionable message in [Q-038](questions_open_topics.md#q-038---plate-solve-summary-omits-the-missing-sky-mask).
+
+### 2026-11-27 - Phase 10A - Measured the desktop reference layouts
+
+- **Recorded** Captured the beta 28 empty, busy, M17, crop and scrolled PA4 states on native Windows. Checked Full HD at 100% and simulated 125% and 150%, plus the two compact sizes. On M17, hiding the command dock recovered 195 logical px of preview height at 100%.
+- **Checked** CPU and OpenGL input feedback, bidirectional Tab order, keyboard cancellation, adaptive preview job counts and `Ctrl+Shift+F` in the table, crop and command entry. Froze response and outline gates using M17, the real PA4 SIP pair and the controlled SKY-07 case. The beta 28 portable CPU replay passed at simulated 125%. Seven focused tests, Ruff and local documentation links passed. [10A evidence and rerun commands](docs/phase-10a-baseline.md)
+- **Next** Implement the dedicated views and shared workspace controls in [10B](docs/phase-10.md#10b-left-navigation-and-dedicated-views).
+
+### 2026-11-27 - Phase 10B - Implemented the desktop workspace in source
+
+- **Changed** Mounted dedicated Panels and Preview views with shared project and job state. Added the collapsible Command Panel, shared cancellation for desktop and command workers, and `Ctrl+Shift+F` preview focus mode. Adaptive size refreshes reuse the resolved grid and keep the current preview visible.
+- **Prepared** Updated regression cases for view navigation, compact layouts, crop and preview continuity, and shared command cancellation. Updated the desktop guide and portable checker for the new controls.
+- **Next** Run the source tests and native 10B acceptance and response measurements, then build and verify the next Windows beta. The owner requested verification after implementation. [10B acceptance](docs/phase-10.md#10b-left-navigation-and-dedicated-views)
+
+### 2026-11-27 - Phase 10B - Verified the workspace and beta 29
+
+- **Checked** Native M17 and PA4 passed view and crop continuity, row and scroll restoration, cancellation, compact layout, and response targets. Full HD recovered 195 logical px and focus mode used 93.49% of the workspace width. Five rapid resizes coalesced into one preview job.
+- **Verified** The source suite passed 283 tests with nine skips. Nine focused tests passed on the final beta 29 source, with Ruff, scoped mypy and lock checks. Built from clean commit `25d8d85711d4c6176722a6c2ef8de0f916f0d766`. Both versioned launchers match their build records. The copied desktop verified Windows accessibility selection, M17 crop continuity and focus mode. The copied console validated M17. [Phase results](docs/phase-10.md#10b-native-source-measurements) · [Build verification](docs/windows-release.md#verification-status)
+- **Next** Implement workspace restore, recent projects and file drop in [10C](docs/phase-10.md#10c-workspace-restore-and-project-start).
+
+### 2026-11-28 - Phase 10C - Verified workspace restore and beta 30
+
+- **Changed** Added screen-relative workspace preferences, Reset Workspace, recent projects and cancellable panel drop preflight. Image batches use the existing Add Panels history action. Project drops use the existing unsaved-project choice.
+- **Checked** Native Windows source verified floating dock recovery, reset, cancelled close and recent-project edge cases. Native Qt drop events exercised M17 and a single Undo restored the empty session. The M17 source hashes matched. The full suite passed 285 tests with nine skips. Ruff, scoped mypy and the Poetry lock check passed.
+- **Verified** Both beta 30 launchers were built from clean commit `e9185349e882c566243c5f14c252301248baa81f` and match their SHA-256 records. The copied desktop restored its bounds and dock, opened M17 from Recent Projects and opened schema v1. The copied CLI validated M17. [10C evidence](docs/phase-10.md#10c-local-windows-results) · [Windows build](docs/windows-release.md#verification-status)
+- **Next** Implement panel filtering and actionable plate solve feedback in [10D](docs/phase-10.md#10d-panel-table-and-plate-solve-summary).
+
+### 2026-11-28 - Phase 10D–10G - Implemented panel, preview and export controls
+
+- **10D** Added combined filename, sky-band and WCS filters, stable source selection, a pinned first column and a Plate Solve summary with actionable mask feedback.
+- **10E** Added device-pixel zoom, a centered 1:1 action and feedback for visible native samples while retaining crop editing and the existing detail limits.
+- **10F** Projected detector edges from the prepared WCS, fitted shift and output crop. The viewport draws and selects the same outlines on CPU and OpenGL.
+- **10G** Added a cancellable export preflight and a review of the effective grid, dimensions, intent, format, coverage and photo settings before the save dialog.
+- **Next** Run the Windows matrix and verify the copied beta through [10H](docs/phase-10.md#10h-windows-acceptance-and-handoff).
+
+### 2026-11-28 - Phase 10H - Verified local Windows beta 31
+
+- **Checked** The source suite passed 291 tests with nine skips. Fourteen native viewport, GPU and workspace cases passed, including simulated OpenGL fallback. The Full HD and compact replays passed on the second display at the recorded scales. The owner removed Narrator speech verification from this phase. Keyboard and Windows UI Automation checks remained in scope.
+- **Checked** The unmasked Test1 observation panels reported the sky-mask requirement. Real M13 ASTAP D05 solved and both early and partial cancellation behaved as reported. M17, SKY-07 and PA4 met the outline accuracy and resource targets. The M17, PA4 and Paranal desktop exports matched independently reopened source and portable CLI outputs. The source hashes matched.
+- **Verified** Both copied beta 31 launchers match the SHA-256 values and clean source commit `6eca1d4a1bcf0ff11158c88f9a1ed313ee1bd08b` in their build records. The desktop passed the M17 workflow across both themes and three scales. The console version and M17 validation passed. [Phase 10 evidence](docs/phase-10.md#10h-local-windows-results) · [Build verification](docs/windows-release.md#verification-status)
+- **Next** Retain the clean-machine and redistribution gates for public distribution. [Distribution tracking](questions_open_topics.md#q-005---application-licensing-and-distribution-model)
+
+### 2026-11-28 - Confirmed Windows Narrator scope
+
+- **Checked** The desktop source and packaging contain no Narrator startup, integration or toggle. Narrator was not running in the Windows session. The project plan records its exclusion from feature and acceptance scope and retains Qt keyboard access and UI labels. No application rebuild was needed. [Phase 10H scope](docs/phase-10.md#10h-windows-acceptance-and-handoff)
+
+### 2026-11-28 - Measured desktop density at 100% Windows scaling
+
+- **Checked** The beta 31 portable runtime and source both reported 96 DPI and matching control heights. On the secondary monitor, the 12 pt body style measured 21 px line height versus 16 px for the Windows 9 pt font. Restoring the system font in an isolated source probe reduced the Plate Solve button from 31 to 26 px. Altering only vertical button padding reduced it to 27 px. The table's separate 32 px row minimum remained in both experiments.
+- **Next** Record the density decision under [Q-039](questions_open_topics.md#q-039---desktop-density-at-100-windows-scaling). The investigation left the installed package and source behavior unchanged.
+
+### 2026-11-28 - Restored system text and compact desktop controls
+
+- **Changed** Removed the 12 pt application font floor, reduced button and left navigation padding, and lowered the panel row minimum to 26 px with font-aware growth. Updated the existing Panel table regression to cover 9 pt and 14 pt system fonts. [Density issue](questions_open_topics.md#q-039---desktop-density-at-100-windows-scaling)
+- **Checked** On the secondary monitor at 100%, the source used 9 pt and measured 24 px for Plate Solve and 26 px for panel rows. Rows grew to 34 px with a simulated 14 pt system font. The compact M17 and PA4 workflows passed at 630 × 650 standard and 800 × 650 with enlarged text at simulated 150%. There were 23 passing offscreen checks and 14 passing native checks at each of 100% and simulated 150%. Ruff, scoped mypy and `poetry check --lock` passed.
+- **Verified** The copied desktop measured 24 px for Plate Solve, the filename filter and the Panels menu row at 100%. M17 preview, outline navigation, actual size and export review cancellation passed on the copied desktop. Both beta 32 launchers match their build records and source commit. [Windows verification](docs/windows-release.md#verification-status)
+
 ### 2026-11-28 - Desktop launch - Corrected the shortcut to the panel table
 
 - **Diagnosed** The Windows desktop shortcut opened the unversioned build output. Its older executable exposed **Project panels** as a list. The versioned beta 32 executable opened the M17 project and exposed **Panel control table** as a table with two rows.
 - **Verified** Retargeted the shortcut and its working directory to the versioned beta 32 package. Launching the saved shortcut opened the expected executable and showed `0.1.0b32 (Beta)` in its title. The launcher checksum matched the build record. All ten focused source tests passed. [Shortcut finding](questions_open_topics.md#q-040---desktop-shortcut-opens-the-legacy-panel-list)
 - **Next** Check the shortcut target against the verified versioned package at future local handoffs. [Portable build workflow](docs/windows-release.md#build-portable-windows-packages)
+
+### 2026-11-28 - Workspace cleanup - Retained the latest five local branches and betas
+
+- **Changed** Removed 16 merged local branch references and 28 old worktree registrations. Moved nine older package folders and 28 versioned build folders to the sibling `AstroMosaic_v1-cleanup-2026-11-28` archive with a restoration manifest. Preserved the alternate beta 25 commit under `refs/archive/windows-builds/beta25-original`.
+- **Checked** Kept the five local branches by tip commit date, the five beta 28–32 desktop and CLI pairs, and the beta 32 shortcut target. The ten launcher checksums matched their build records. Git tags and pending project edits were preserved. [Windows verification](docs/windows-release.md#verification-status)
+
+### 2026-11-28 - Phase 10 review and local beta 33 verification
+
+- **Changed** Charged optional detector outlines against the memory remaining after the preview raster, reused desktop calibration guidance in export review, and corrected zooming out after 1:1 on small previews. Published the Phase 10 evidence and its outline measurement script with the application changes.
+- **Checked** All three regressions failed before the fixes and passed afterward. The offscreen suite passed 292 tests with 11 skips. Native Windows passed 19 tests and two additional CPU and OpenGL zoom cases at simulated 150%. Ruff, scoped mypy, the Poetry lock check, and the M17, PA4 and SKY-07 outline baseline replays passed.
+- **Verified** Built the desktop and CLI from clean commit `ec1bac7f97b30db82ca2205cc0287316884dc884`. The portable M17 replay retained the raster under the outline limit and reduced its visible width from 69 to 57 px after 1:1. The copied desktop showed the calibration guidance and the CLI validated both panels. Updated the local shortcut to beta 33. [Windows build record](docs/windows-release.md#verification-status)
+- **Next** Track slow project storage and early export size checks in [Q-041](questions_open_topics.md#q-041---slow-project-storage-can-block-desktop-input) and [Q-042](questions_open_topics.md#q-042---export-review-checks-the-output-byte-limit-after-confirmation).

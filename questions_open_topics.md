@@ -173,6 +173,24 @@ This register tracks unresolved decisions, problems, and risks. It is not a work
 - **Next action / responsibility** Measure first-frame latency with cold files on representative local and external storage. Track foreground import scanning separately from sky preview. The first original TIFF preview took 14.45 s while the repeat took 2.35 s on this workstation.
 - **Closure condition** Verify improvement on representative real projects with cold and warm measurements, documented peak memory, responsive cancellation, and unchanged reference WCS, coverage, and export results.
 
+### Q-041 - Slow project storage can block desktop input
+
+- **Status / priority** Open / P2
+- **Opened / updated** 2026-11-28
+- **Affected workflow** Open Project, Recent Projects, project-file drops and Remove Unavailable Projects.
+- **Impact and evidence** Project loading and recent-path checks run on the GUI thread. During an M17 replay, injected file access latency of 300 ms delayed a 10 ms GUI timer until 306 ms.
+- **Next action / responsibility** Move the file work into cancellable desktop jobs and preserve the existing save or discard choice. Check input response and availability feedback with delayed and disconnected storage. [Workspace intake](docs/phase-10.md#10c-workspace-restore-and-project-start)
+- **Closure condition** Project opening and recent-path verification stay responsive during slow or unavailable file access and never replace a project after cancellation.
+
+### Q-042 - Export review checks the output byte limit after confirmation
+
+- **Status / priority** Open / P3
+- **Opened / updated** 2026-11-28
+- **Affected workflow** Desktop export review when the estimated output exceeds the project byte limit.
+- **Impact and evidence** M17 review offered scientific output formats with a one-byte limit. The FITS writer rejected the confirmed export before creating a file.
+- **Next action / responsibility** Share destination-independent output-size limits with export review and keep exact format and destination checks in the writers. [Export review](docs/phase-10.md#10g-export-review)
+- **Closure condition** Review reports options that cannot fit before the file picker opens. Changing the budget or format yields consistent decisions in the review and actual export.
+
 ## Resolved Topics
 
 ### Q-040 - Desktop shortcut opens the legacy panel list
@@ -182,6 +200,44 @@ This register tracks unresolved decisions, problems, and risks. It is not a work
 - **Affected workflow** Opening AstroMosaic from the Windows desktop shortcut.
 - **Impact and evidence** The shortcut targeted `dist/windows/AstroMosaic/AstroMosaic.exe`. That package carried `0.1.0` metadata, and its launch exposed the **Project panels** list. The beta 32 package opened M17 and exposed the **Panel control table** with two rows.
 - **Resolution** Pointed the desktop shortcut and its working directory to the versioned beta 32 package. Launched the saved shortcut and verified the executable path and window title. Matched the launcher checksum and source commit to the build record. [Portable build workflow](docs/windows-release.md#build-portable-windows-packages)
+
+### Q-039 - Desktop density at 100% Windows scaling
+
+- **Status / priority** Resolved / P2
+- **Opened / updated** 2026-11-28
+- **Affected workflow** Desktop text and control density in Panels and Preview.
+- **Impact and evidence** Both displays reported a device pixel ratio of 1.0 and 96 logical DPI. Windows supplied 9 pt Segoe UI in this session, while beta 31 applied the beta 26 minimum of 12 pt across widgets. On the copied launcher, Plate Solve measured 31 px high and the filename filter 29 px. A source-only replay using the Windows font measured 26 and 24 px respectively. The panel row stayed at its 32 px minimum. [Theme font and padding](src/astromosaic/ui/appearance.py) · [Panel row sizing](src/astromosaic/ui/panel_table.py)
+- **Resolution** Beta 32 uses the system font and reduces control padding and the panel row minimum. At 100%, the default Plate Solve button is 24 px high and panel rows are 26 px high. The source replay with a 14 pt system font grew the rows to 34 px. Compact native replays passed with the standard and enlarged fonts. [Workspace baseline](docs/phase-10a-baseline.md#workspace-measurements)
+
+### Q-038 - Plate solve summary omits the missing sky mask
+
+- **Status / priority** Resolved / P2
+- **Opened / updated** 2026-11-27 / 2026-11-28
+- **Affected phase** Phase 10D desktop Plate Solve summary.
+- **Impact and evidence** Beta 28 showed only the failed-panel count when mixed panels lacked masks. The individual outcomes carried the prerequisite.
+- **Resolution** Beta 31 reports the mask requirement in the batch summary and main status and keeps each outcome accessible from Plate Solve Details. The two real Test1 panels replayed without masks reported two failures and displayed the mask guidance. Both source hashes matched after replay. [Windows evidence](docs/phase-10.md#10h-local-windows-results) · [Mask workflow](docs/phase-3d.md#desktop-workflow)
+
+### Q-037 - Sky panel outline accuracy and resource bounds
+
+- **Status / priority** Resolved / P1
+- **Opened / updated** 2026-11-27 / 2026-11-28
+- **Affected phase** Phase 10A reference checks and Phase 10F sky panel outlines and selection.
+- **Impact and evidence** Detector outlines need the resolved preview mapping, including distortion, fitted shifts and crop. 10A froze the comparison inputs and limits. [Outline baseline](docs/phase-10a-baseline.md#outline-accuracy-and-resource-limits)
+- **Resolution** Beta 31 uses the prepared WCS, fitted shift and crop for bounded outlines. The largest measured error was 0.034657 output px. The replay of 20 real mappings peaked at 13.50 ms and 91,155 Python-traced bytes. Native CPU and OpenGL showed the same placement and hit order, and the guard checks covered unsafe geometry and stale results. [Windows evidence](docs/phase-10.md#10h-local-windows-results)
+
+### Q-036 - Desktop keyboard access and compact layout
+
+- **Status / priority** Resolved / P1
+- **Opened / updated** 2026-11-27
+- **Affected workflow** Panel selection and editing, preview navigation and crop, settings dialogs, and compact Windows workspaces.
+- **Impact and evidence** The baseline audit found a Tab loop in the populated panel table, pointer-only preview navigation, and three kinds of settings path fields without accessible names. With enlarged text and the Command Panel open, the main window required 761 logical px of height in the tested layout. [Desktop UI audit](docs/desktop-ui-audit.md)
+- **Progress** Beta 21 verified bidirectional table traversal, cell keyboard editing and keyboard preview navigation with both CPU and OpenGL. [Windows keyboard verification](progression.md#2026-11-27---windows-handoff---verified-beta-21-keyboard-navigation)
+- **Progress** Beta 22 verified the accessible settings names and bidirectional Plate Solve Settings tab order in the Windows runtime. [Windows settings verification](progression.md#2026-11-27---windows-handoff---verified-beta-22-settings-accessibility)
+- **Progress** Beta 23 verified keyboard crop movement, resize, pan, cancel and apply with native CPU and OpenGL. [Windows crop verification](progression.md#2026-11-27---windows-handoff---verified-beta-23-keyboard-crop)
+- **Progress** Beta 24 fit the M17 workspace into 800 × 650 logical px with the dock open, 14 pt text and 150% simulated Qt scaling. The command entry, transcript, preview and job controls remained visible in the copied package. [Compact layout verification](progression.md#2026-11-27---windows-handoff---verified-beta-24-compact-workspace)
+- **Progress** Beta 25 verified dashed disabled borders, a two-line row selection marker and a three-mark divider grip in the Windows build. Both themes passed at 100% and 150% simulated scaling. [Appearance verification](progression.md#2026-11-27---windows-handoff---verified-beta-25-workspace-appearance)
+- **Progress** Beta 26 verified a 12 pt text floor, scalable headings and six priority columns with a complete M17 panel row in the 630 × 650 standard and 800 × 650 enlarged layouts. [Typography verification](progression.md#2026-11-27---windows-handoff---verified-beta-26-desktop-typography)
+- **Resolution** Beta 27 verified localized decimal input and next-step preview guidance in the Windows bundle. Windows Narrator spoke the panel table selection, preview name, attachment controls and ICC controls. Forward and reverse traversal through the Plate Solve Settings groups was announced in order. All three settings dialogs closed with Escape. [Beta 27 verification](progression.md#2026-11-27---windows-handoff---verified-beta-27-desktop-audit-workflows) · [Narrator walkthrough](docs/desktop-ui-audit.md#windows-narrator-walkthrough)
 
 ### Q-032 - Desktop edit history budget
 

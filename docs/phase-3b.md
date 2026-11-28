@@ -20,7 +20,7 @@ The saved manifest holds the settings and paths needed to reproduce a job. Files
 
 ## Panel Control Table
 
-The table shows one row per project panel above the mosaic preview. Drag the divider to resize these two areas. **Overview** groups file names, sky inclusion, WCS, blend weight, band, focal length, camera, image dimensions, and the latest solve result. Choose **Optics** to compare effective and embedded measurements, **Files** to inspect references and source details, or **All properties** for every available column. Missing measurements appear as a dash.
+The **Panels** view shows one row per project panel. Use the left menu to switch between **Panels** and **Preview**. **Overview** groups file names, sky inclusion, WCS, blend weight, band, focal length, camera, image dimensions, and the latest solve result. Choose **Optics** to compare effective and embedded measurements, **Files** to inspect references and source details, or **All properties** for every available column. Missing measurements appear as a dash. [Desktop workspace controls](guide.md#run-the-desktop-app)
 
 Double-click a weight, band, focal length or pixel size to edit the selected panel. Clear a band or optical edit to restore its inherited value. Toggle **Sky** to include or skip the panel in the sky layer. **Panel Settings** contains the foreground override and attachments. **More** contains relinking, sky mask editing, and panel removal. Save the project to retain panel edits.
 

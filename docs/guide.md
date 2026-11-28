@@ -35,7 +35,7 @@ The actual zoom percentage measures device pixels per output pixel. **Fit View**
 
 The panel control table opens in **Overview**. Choose **Optics**, **Files**, or **All properties** to compare additional columns. Use **Tab** and **Shift+Tab** to leave the table and the arrow keys to move between cells. Press **F2** or double-click to edit a weight, band, focal length, or pixel size. Press **Space** on the **Sky** checkbox to toggle inclusion in the sky layer. The desktop starts in dark mode. Choose **View → Theme** to switch between dark and light appearances. [Panel controls](phase-3b.md#panel-control-table)
 
-**Overview** places the WCS and solve result together before the optics columns. Body text starts at 12 pt and uses larger sizes reported by Qt. Section headings and the job percentage scale with the body text.
+**Overview** places the WCS and solve result together before the optics columns. Section headings and the job percentage scale with the system text size.
 
 The desktop uses the system text size. Panel rows grow when the system font needs more space. The panel name stays visible during horizontal scrolling. Combine the filename, sky band and WCS filters to narrow the table. **Clear Filters** restores all rows. The Plate Solve summary shows reuse, new solutions, failures and unprocessed panels. Resolve a displayed prerequisite such as a missing sky mask, or select the panel and open **Plate Solve Details** to inspect its attempts.
 
