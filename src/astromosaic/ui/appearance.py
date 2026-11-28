@@ -27,6 +27,8 @@ _STYLE = """
     QHeaderView::section { background: palette(button); color: palette(button-text);
         padding: 2px 6px; border: 0; border-right: 1px solid palette(mid);
         border-bottom: 1px solid palette(mid); }
+    QLabel#pinnedPanelHeader { background: palette(button); color: palette(button-text);
+        border-right: 1px solid palette(mid); border-bottom: 1px solid palette(mid); }
     QListWidget#workspaceNavigation { border: 1px solid palette(mid); border-radius: 4px; }
     QListWidget#workspaceNavigation:focus { border-color: palette(link); }
     QListWidget#workspaceNavigation::item { padding: 6px 7px; border-left: 3px solid transparent; }

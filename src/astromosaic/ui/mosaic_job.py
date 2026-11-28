@@ -56,6 +56,7 @@ from astromosaic.storage.project import (
     render_project_photo,
     solve_project_panels,
 )
+from astromosaic.ui.export_review import ExportDescription, ExportRequest
 from astromosaic.ui.preview_compute import create_preview_surface, open_preview_sampler
 from astromosaic.ui.preview_state import PreviewOverview, PreviewRequest, PreviewResult
 
@@ -151,8 +152,20 @@ class PanelIntakeJob(BackgroundJob[tuple[FileReference, ...]]):
         return tuple(sources)
 
 
+class ExportReviewJob(BackgroundJob[ExportDescription]):
+    label = "export review"
+
+    def __init__(self, request: ExportRequest, parent: QObject) -> None:
+        super().__init__(parent)
+        self.request = request
+
+    def perform(self, context: JobContext) -> ExportDescription:
+        return self.request.review(context)
+
+
 class PlateSolveJob(_ProjectJob[None]):
     solve_progress = Signal(int, str)
+    batch_progress = Signal(str)
     label = "plate solve"
     _eligibility_percent = 10
 
@@ -177,7 +190,21 @@ class PlateSolveJob(_ProjectJob[None]):
         self.queued_at = monotonic()
         self.queue_seconds = self.eligibility_seconds = self.elapsed_seconds = 0.0
         self.total = 0
+        self.scope = 1 if selected_panel is not None else len(project.sky_indices())
+        self.reused: int | None = None
         self.outcomes: list[PanelSolveOutcome] = []
+
+    def summary(self, *, active: int | None = None) -> str:
+        if self.reused is None:
+            return f"WCS eligibility scan incomplete · {self.scope} unprocessed."
+        solved = sum(outcome.sidecar is not None for outcome in self.outcomes)
+        completed = len(self.outcomes)
+        remaining = self.total - completed
+        counts = f"{self.reused} reused · {solved} solved · {completed - solved} failed"
+        if active is None:
+            return f"{counts} · {remaining} unprocessed."
+        name = self.project.panels[active].source.path.name
+        return f"{counts} · {max(0, remaining - 1)} waiting · {name}"
 
     def _checking(self, checked: int, total: int) -> None:
         now = monotonic()
@@ -188,6 +215,7 @@ class PlateSolveJob(_ProjectJob[None]):
             self._eligibility_percent * checked // total,
             f"Plate Solve · Checking sky panels for reusable WCS ({checked:,} of {total:,})",
         )
+        self.batch_progress.emit(f"Checking WCS eligibility · {checked} of {total} checked.")
 
     def _panel_progress(self, ordinal: int, index: int, percent: int, phase: str) -> None:
         progress = self._eligibility_percent + (
@@ -197,6 +225,7 @@ class PlateSolveJob(_ProjectJob[None]):
         self.solve_progress.emit(
             progress, f"Plate Solve · Panel {ordinal + 1:,} of {self.total:,} · {name}\n{phase}"
         )
+        self.batch_progress.emit(self.summary(active=index))
 
     def _solve_step(self, ordinal: int, index: int, step: SolveStep) -> None:
         if step.phase == "publish":
@@ -233,6 +262,7 @@ class PlateSolveJob(_ProjectJob[None]):
             finally:
                 self.eligibility_seconds = monotonic() - started
             self.total = len(indices)
+            self.reused = self.scope - self.total
             for outcome in solve_project_panels(
                 self.project,
                 indices,
@@ -345,6 +375,7 @@ class PreviewJob(_ProjectJob[PreviewResult]):
             suggested_rotation=preview.suggested_rotation,
             photo=preview.photo,
             overview_edge=self.adaptive_edge or 0,
+            outlines=preview.outlines,
         )
 
 

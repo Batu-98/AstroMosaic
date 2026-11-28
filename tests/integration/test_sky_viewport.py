@@ -278,7 +278,7 @@ def test_overlap_toggle_recolors_the_displayed_detail(
         np.testing.assert_allclose(highlighted[1], highlighted[0], atol=1, rtol=0)
         assert highlighted[2:] == before[2:]
         assert viewport.detail == region and viewport.image_rect() == rect
-        assert viewport._backend.text().endswith(" · 1:1")
+        assert "native samples" in viewport._backend.text().casefold()
 
         window.overlap_check.click()
         assert row_colors() == before

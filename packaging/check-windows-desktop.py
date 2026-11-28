@@ -117,9 +117,15 @@ def wait_for(
 
 
 def export(window: ProjectWindow, destination: Path) -> None:
-    with patch.object(QFileDialog, "getSaveFileName", return_value=(str(destination), "")):
+    from astromosaic.ui.export_review import FITS, TIFF, XISF
+
+    output = next(item for item in (FITS, TIFF, XISF) if destination.suffix.lower() in item.suffixes)
+    with (
+        patch.object(QFileDialog, "getSaveFileName", return_value=(str(destination), "")),
+        patch.object(window, "_confirm_export_review", return_value=output),
+    ):
         window.start_button.click()
-    assert window.job is not None, window.status.text()
+        wait_for(window, lambda: window.job is None)
 
 
 def check_layer(window: ProjectWindow, directory: Path, layer: Layer, backend: str) -> int:
@@ -295,16 +301,19 @@ def check_zea(window: ProjectWindow, directory: Path, backend: str) -> int:
 
 
 def check_xisf(window: ProjectWindow, directory: Path, backend: str) -> int:
+    from astromosaic.ui.export_review import XISF
+
     project = window.project
     window.layer_box.setCurrentText("Sky")
     reference = preview_project_layer(project, "sky", JobContext())
     destination = directory / "Interchange sky.xisf"
-    with patch.object(
-        QFileDialog,
-        "getSaveFileName",
-        return_value=(str(destination.with_suffix("")), "XISF mosaic (*.xisf)"),
-    ) as dialog:
+    with (
+        patch.object(QFileDialog, "getSaveFileName",
+                     return_value=(str(destination.with_suffix("")), "")) as dialog,
+        patch.object(window, "_confirm_export_review", return_value=XISF),
+    ):
         window.start_button.click()
+        wait_for(window, lambda: window.job is None)
         assert "*.xisf" in dialog.call_args.args[-1]
     wait_for(window, lambda: window.job is None)
     assert destination.is_file(), window.status.text()

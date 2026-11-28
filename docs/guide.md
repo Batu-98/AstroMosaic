@@ -31,9 +31,17 @@ Enter decimal values in desktop settings and panel cells using your system decim
 
 Use **Resolution Scale** in the preview toolbar to choose **25%**, **50%**, **75%**, or **100%** of the normal overview resolution. The default is **50%**. [Preview geometry](phase-3c.md#geometry-and-display)
 
+The actual zoom percentage measures device pixels per output pixel. **Fit View** shows the full grid and **1:1** shows one output pixel per device pixel around the current view center. The preview reports when native samples are visible alongside or in place of overview samples.
+
 The panel control table opens in **Overview**. Choose **Optics**, **Files**, or **All properties** to compare additional columns. Use **Tab** and **Shift+Tab** to leave the table and the arrow keys to move between cells. Press **F2** or double-click to edit a weight, band, focal length, or pixel size. Press **Space** on the **Sky** checkbox to toggle inclusion in the sky layer. The desktop starts in dark mode. Choose **View → Theme** to switch between dark and light appearances. [Panel controls](phase-3b.md#panel-control-table)
 
 **Overview** places the WCS and solve result together before the optics columns. Body text starts at 12 pt and uses larger sizes reported by Qt. Section headings and the job percentage scale with the body text.
+
+The panel name stays visible during horizontal scrolling. Combine the filename, sky band and WCS filters to narrow the table. **Clear Filters** restores all rows. The Plate Solve summary shows reuse, new solutions, failures and unprocessed panels. Resolve a displayed prerequisite such as a missing sky mask, or select the panel and open **Plate Solve Details** to inspect its attempts.
+
+Enable **Panel Outlines** on a sky preview to see projected detector boundaries. Selecting inside an outline highlights the corresponding panel. **Show in Panels** reveals the selected row, and **Clear Filters** reveals rows hidden by the current filters. The outlines describe detector geometry. The mosaic coverage display shows valid samples and mask holes.
+
+Desktop export opens a review before the file dialog. Check the effective grid, dimensions, crop, file format and coverage there. Photo TIFF review also shows the profile and tone, and composition review identifies the layer contribution raster. Explicit command-line and session export paths continue to write through the same export jobs.
 
 The desktop opens on **Panels** and restores its last window bounds and Command Panel arrangement. The first launch opens maximized. Choose **View → Reset Workspace** for the default layout. Use the left menu or its Up and Down keys to switch between **Panels** and **Preview**. Tab from the menu returns to the last available control in the selected view. Select **View → Preview Focus Mode** or press **Ctrl+Shift+F** from Preview to hide the Command Panel. Exit the mode from the same menu, the shortcut, or **Exit Focus Mode**.
 

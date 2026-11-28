@@ -196,11 +196,16 @@ def _export(
     app: QApplication, window: ProjectWindow, path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from PySide6.QtWidgets import QFileDialog
+    from astromosaic.ui.export_review import FITS, TIFF, XISF
 
     with monkeypatch.context() as patch:
         patch.setattr(QFileDialog, "getSaveFileName", lambda *args, **kwargs: (str(path), ""))
+        patch.setattr(window, "_confirm_export_review", lambda _review: next(
+            output_format for output_format in (FITS, TIFF, XISF)
+            if path.suffix.casefold() in output_format.suffixes
+        ))
         window.start_button.click()
-    _wait(app, lambda: window.job is None)
+        _wait(app, lambda: window.job is None)
     assert window.status.text().startswith(f"Saved {path.name}"), window.status.text()
 
 

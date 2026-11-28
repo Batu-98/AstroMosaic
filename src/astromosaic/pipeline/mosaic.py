@@ -30,6 +30,7 @@ from astromosaic.geometry import (
     sky_output_wcs,
 )
 from astromosaic.geometry.footprint import PixelBounds, raster_bounds, tan_footprint, zea_footprint
+from astromosaic.geometry.outline import DetectorOutline, OutlineBudget
 from astromosaic.io import TIFF_SUFFIXES, XISF_SUFFIX, PanelSource, SkyMask, open_panel
 from astromosaic.io.fits_export import open_fits_mosaic, validate_fits_output_suffix
 from astromosaic.photometry import PanelCorrection
@@ -154,6 +155,7 @@ class PreviewFrame:
     suggested_rotation: float | None = None
     tone_levels: tuple[float, float] | None = None
     photo: PhotoReport | None = None
+    outlines: tuple[DetectorOutline, ...] = ()
 
 
 class _RasterPanel(Protocol):
@@ -743,6 +745,7 @@ def preflight_sky_mosaic(
     context: JobContext = DEFAULT_JOB_CONTEXT,
     filter_overrides: Mapping[int, str] | None = None,
     photo_inputs: PhotoInputs | None = None,
+    intent: SkyRenderIntent = "scientific",
 ) -> SkyPreflight:
     """Check scientific sky metadata and refinement eligibility without preparing tiles."""
     with _open_sky_mosaic(
@@ -754,22 +757,21 @@ def preflight_sky_mosaic(
         assume_surface_brightness=assume_surface_brightness,
         sky_masks=sky_masks,
         wcs_sidecars=wcs_sidecars,
-        refinement=None,
+        refinement=refinement if intent == "photo" else None,
         context=context,
         filter_overrides=filter_overrides,
         photo_inputs=photo_inputs,
+        intent=intent,
     ) as sky:
         # Check that the calibrated metadata can be represented in the export header.
-        _export_header(
-            spec.output_wcs(),
-            sky.panels,
-            filter_name,
-            assume_surface_brightness,
-            filter_overrides or {},
-            paths,
-        )
-        if refinement is not None:
-            validate_refinement_inputs([panel.source for panel in sky.panels])
+        output_wcs = spec.output_wcs()
+        if intent == "scientific":
+            _export_header(
+                output_wcs, sky.panels, filter_name, assume_surface_brightness,
+                filter_overrides or {}, paths,
+            )
+            if refinement is not None:
+                validate_refinement_inputs([panel.source for panel in sky.panels])
         context.check_cancelled()
         return SkyPreflight(len(sky.panels), sky.crop.width, sky.crop.height, sky.channels)
 
@@ -1237,6 +1239,7 @@ def preview_mosaic(
     inspect_crop: bool = False,
     photo_inputs: PhotoInputs | None = None,
     interpolate: PreviewInterpolator | None = None,
+    include_outlines: bool = False,
 ) -> PreviewFrame:
     """Sample the saved or fitted sky grid without opening an output file."""
     with _prepare_mosaic(
@@ -1260,6 +1263,17 @@ def preview_mosaic(
         raster = mosaic.raster(interpolate)
         if window is not None:
             return replace(_preview_detail(raster, window, context), visual_only=mosaic.visual_only)
+        outlines: tuple[DetectorOutline, ...] = ()
+        if include_outlines:
+            budget = OutlineBudget(mosaic.spec.max_working_bytes)
+            outlines = tuple(
+                budget.prepare(
+                    path, panel.geometry, mosaic.target,
+                    (panel.source.descriptor.width, panel.source.descriptor.height),
+                    panel.correction.shift if panel.correction else (0.0, 0.0), context,
+                )
+                for path, panel in zip(paths, mosaic.panels, strict=True)
+            )
         return replace(_preview_raster(
             raster,
             context,
@@ -1268,4 +1282,5 @@ def preview_mosaic(
             visual_only=mosaic.visual_only,
             adaptive_edge=adaptive_edge,
             resolution_scale=resolution_scale,
-        ), suggested_crop=mosaic.suggested_crop, suggested_rotation=mosaic.suggested_rotation)
+        ), suggested_crop=mosaic.suggested_crop, suggested_rotation=mosaic.suggested_rotation,
+            outlines=outlines)

@@ -1,6 +1,7 @@
 """Share pan, zoom, and stretch controls across the two preview surfaces."""
 
 from math import ceil, floor, sqrt
+from pathlib import Path
 
 from PySide6.QtCore import QEvent, QObject, QPointF, QRectF, Qt, QTimer, Signal, Slot
 from PySide6.QtGui import (
@@ -12,6 +13,8 @@ from PySide6.QtGui import (
     QPainterPath,
     QPaintEvent,
     QPen,
+    QPolygonF,
+    QTransform,
     QWheelEvent,
 )
 from PySide6.QtWidgets import (
@@ -36,6 +39,7 @@ from astromosaic.display import (
     highlight_overlap,
     stretch_rgba,
 )
+from astromosaic.geometry.outline import DetectorOutline
 from astromosaic.photometry.photo import PhotoTone
 from astromosaic.pipeline.mosaic import MAX_DETAIL_PIXELS, MAX_OVERVIEW_EDGE
 from astromosaic.ui.appearance import ResponsiveRow
@@ -109,6 +113,7 @@ class SkyViewport(QWidget):
     view_changed = Signal()
     crop_changed = Signal(object)
     crop_cancelled = Signal()
+    outline_selected = Signal(object)
 
     def __init__(self, *, use_gpu: bool = True) -> None:
         super().__init__()
@@ -119,11 +124,15 @@ class SkyViewport(QWidget):
         self._zoom = 1.0
         self._pan = QPointF()
         self._drag: QPointF | None = None
+        self._press: QPointF | None = None
         self._crop: Region | None = None
         self._editing_crop = False
         self._crop_drag: CropDrag | None = None
         self._detail: tuple[Region, DisplayFrame] | None = None
         self._detail_image = QImage()
+        self._outline_paths: dict[Path, QPainterPath] = {}
+        self._selected_outline: Path | None = None
+        self._outlines_visible = False
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -146,6 +155,10 @@ class SkyViewport(QWidget):
         self.fit_button = QPushButton("Fit View")
         self.fit_button.clicked.connect(self.fit)
         navigation_row.addWidget(self.fit_button)
+        self.actual_size_button = QPushButton("1:1")
+        self.actual_size_button.setAccessibleName("Actual size, one device pixel per output pixel")
+        self.actual_size_button.clicked.connect(self.actual_size)
+        navigation_row.addWidget(self.actual_size_button)
         self.resolution_box = QComboBox()
         self.resolution_box.setAccessibleName("Preview resolution scale")
         self.resolution_box.setToolTip("Percentage of the normal viewport-based preview resolution")
@@ -176,7 +189,11 @@ class SkyViewport(QWidget):
         controls.addStretch()
         self._backend = QLabel()
         controls.addWidget(self._backend)
+        self._zoom_readout = QLabel()
+        self._zoom_readout.setAccessibleName("Actual preview zoom")
+        navigation_row.addWidget(self._zoom_readout)
         layout.addWidget(ResponsiveRow(navigation, controls))
+        self.view_changed.connect(self._update_readout)
         self.set_frame(None)
 
     @property
@@ -215,6 +232,34 @@ class SkyViewport(QWidget):
         self.canvas.unsetCursor()
         self.canvas.update()
 
+    def set_outlines(self, outlines: tuple[DetectorOutline, ...]) -> None:
+        self._outline_paths.clear()
+        for outline in outlines:
+            if outline.vertices is not None:
+                path = QPainterPath()
+                path.addPolygon(QPolygonF([QPointF(x, y) for x, y in outline.vertices]))
+                path.closeSubpath()
+                self._outline_paths[outline.source] = path
+        self.canvas.update()
+
+    def show_outlines(self, visible: bool) -> None:
+        self._outlines_visible = visible
+        self.canvas.update()
+
+    def select_outline(self, source: Path | None) -> None:
+        self._selected_outline = source
+        self.canvas.update()
+
+    def _pick_outline(self, point: QPointF) -> None:
+        frame = self._frame
+        image = self.image_rect()
+        if not self._outlines_visible or self._editing_crop or frame is None or not image.contains(point):
+            return
+        at = output_point(point, image, frame.output_size)
+        hits = [source for source, path in self._outline_paths.items() if path.contains(at)]
+        if hits:
+            self.outline_selected.emit(self._selected_outline if self._selected_outline in hits else hits[0])
+
     def focus_crop(self) -> None:
         self._surface.setFocus(Qt.FocusReason.OtherFocusReason)
 
@@ -225,13 +270,13 @@ class SkyViewport(QWidget):
 
     def set_detail(self, region: Region, frame: DisplayFrame) -> None:
         self._detail = region, frame
-        self._backend.setText(f"{self.backend} · 1:1")
+        self._update_readout()
         self._update_display()
 
     def clear_detail(self) -> None:
         self._detail = None
         self._detail_image = QImage()
-        self._backend.setText(self.backend if self._frame is not None else "")
+        self._update_readout()
         self.canvas.update()
 
     def overview_edge(self) -> int:
@@ -250,12 +295,13 @@ class SkyViewport(QWidget):
         frame = self._frame
         if (
             frame is None or frame.size == frame.output_size
-            or self._zoom <= 1.0 or frame.tone_levels is None
+            or frame.tone_levels is None
         ):
             return None
         image = self.image_rect()
         size = frame.output_size
-        if image.width() * self.canvas.devicePixelRatioF() / size[0] < 0.55:
+        physical_zoom = image.width() * self.canvas.devicePixelRatioF() / size[0]
+        if physical_zoom < 0.55 or (self._zoom <= 1.0 and physical_zoom < 0.99999):
             return None
         visible = image.intersected(QRectF(self.canvas.rect()))
         if visible.isEmpty():
@@ -296,6 +342,7 @@ class SkyViewport(QWidget):
         )
         self._update_keyboard_help()
         self.fit_button.setEnabled(frame is not None)
+        self.actual_size_button.setEnabled(frame is not None)
         self.tone_box.setVisible(frame is not None and frame.photo_levels is not None)
         self._select_canvas()
 
@@ -318,11 +365,50 @@ class SkyViewport(QWidget):
             self._pages.setCurrentWidget(self._raster)
         elif self._gl is not None:
             self._pages.setCurrentWidget(self._gl)
-        self._backend.setText(
-            f"{self.backend} · 1:1" if self._detail is not None
-            else self.backend if frame is not None else ""
-        )
+        self._update_readout()
         self._update_display()
+
+    @Slot()
+    def _update_readout(self) -> None:
+        frame = self._frame
+        if frame is None:
+            self._backend.clear()
+            self._zoom_readout.clear()
+            return
+        zoom = 100 * self.image_rect().width() * self.canvas.devicePixelRatioF() / frame.output_size[0]
+        self._zoom_readout.setText(f"{self.locale().toString(zoom, 'f', 1)}%")
+        self._zoom_readout.setToolTip("Device pixels per output pixel, expressed as a percentage.")
+        if frame.size == frame.output_size:
+            source = "Native samples"
+        elif self._detail is not None and screen_rect(
+            self._detail[0], self.image_rect(), frame.output_size
+        ).intersects(QRectF(self.canvas.rect())):
+            source = "Overview + native samples"
+        else:
+            source = "Overview"
+        self._backend.setText(f"{self.backend} · {source}")
+
+    @Slot()
+    def actual_size(self) -> None:
+        frame = self._frame
+        if frame is None:
+            return
+        width, height = frame.output_size
+        canvas = self.canvas
+        fit = min(canvas.width() / width, canvas.height() / height)
+        if fit <= 0:
+            return
+        image = self.image_rect()
+        center = QRectF(canvas.rect()).center()
+        at = output_point(center, image, frame.output_size)
+        scale = 1 / canvas.devicePixelRatioF()
+        self._zoom = scale / fit
+        self._pan = QPointF(
+            (width / 2 - min(width, max(0, at.x()))) * scale,
+            (height / 2 - min(height, max(0, at.y()))) * scale,
+        )
+        canvas.update()
+        self.view_changed.emit()
 
     @Slot()
     def _check_context(self) -> None:
@@ -367,6 +453,7 @@ class SkyViewport(QWidget):
         self._zoom = 1.0
         self._pan = QPointF()
         self._drag = None
+        self._press = None
         self.canvas.unsetCursor()
         self.clear_detail()
         self.canvas.update()
@@ -487,9 +574,13 @@ class SkyViewport(QWidget):
         if event.button() == Qt.MouseButton.LeftButton:
             if kind == QEvent.Type.MouseButtonPress:
                 self._drag = event.position()
+                self._press = event.position()
                 self.canvas.setCursor(Qt.CursorShape.ClosedHandCursor)
                 return True
             if kind == QEvent.Type.MouseButtonRelease:
+                if self._press is not None and (event.position() - self._press).manhattanLength() < QApplication.startDragDistance():
+                    self._pick_outline(event.position())
+                self._press = None
                 self._drag = None
                 self.canvas.unsetCursor()
                 return True
@@ -533,7 +624,7 @@ class SkyViewport(QWidget):
         return False
 
     def _paint_gl_overlay(self) -> None:
-        if self._crop is not None or self._detail is not None:
+        if self._crop is not None or self._detail is not None or self._outlines_visible:
             painter = QPainter(self.canvas)
             try:
                 self.paint_overlay(painter)
@@ -549,6 +640,22 @@ class SkyViewport(QWidget):
             rect = screen_rect(self._detail[0], image, size)
             painter.fillRect(rect, QColor(*BACKGROUND_RGB))
             painter.drawImage(rect, self._detail_image)
+        if self._outlines_visible and self._outline_paths and not image.isEmpty():
+            painter.save()
+            painter.setClipRect(image)
+            transform = QTransform().translate(image.x(), image.y()).scale(
+                image.width() / size[0], image.height() / size[1]
+            )
+            for source, path in self._outline_paths.items():
+                selected = source == self._selected_outline
+                edge = transform.map(path)
+                painter.setPen(QPen(QColor(0, 0, 0, 210), 4 if selected else 3))
+                painter.drawPath(edge)
+                painter.setPen(QPen(QColor(255, 225, 123) if selected else QColor(163, 237, 227),
+                                    2 if selected else 1.3,
+                                    Qt.PenStyle.SolidLine if selected else Qt.PenStyle.DashLine))
+                painter.drawPath(edge)
+            painter.restore()
         if self._crop is None or image.isEmpty():
             return
         bounds = screen_rect(self._crop, image, size)

@@ -292,6 +292,12 @@ def test_desktop_plate_solve_skips_reusable_wcs_and_retries_unsolved_panels(
         window.preview_button.click()
         wait_for(lambda: window.job is None)
         assert window.viewport.frame is not None
+        from astromosaic.ui.export_review import FITS, TIFF, XISF
+
+        monkeypatch.setattr(window, "_confirm_export_review", lambda _review: next(
+            output_format for output_format in (FITS, TIFF, XISF)
+            if output.suffix.casefold() in output_format.suffixes
+        ))
         window.start_button.click()
         wait_for(lambda: window.job is None)
         assert output.is_file(), window.status.text()

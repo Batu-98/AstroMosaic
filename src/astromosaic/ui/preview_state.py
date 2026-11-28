@@ -6,6 +6,7 @@ from dataclasses import dataclass, replace
 
 from astromosaic.core import Region
 from astromosaic.display import DisplayFrame
+from astromosaic.geometry.outline import DetectorOutline
 from astromosaic.pipeline.mosaic import RenderSpec
 from astromosaic.pipeline.photo_fit import PhotoReport
 from astromosaic.storage.project import Layer, MosaicProject
@@ -34,6 +35,7 @@ class PreviewResult:
     suggested_rotation: float | None = None
     photo: PhotoReport | None = None
     overview_edge: int = 0
+    outlines: tuple[DetectorOutline, ...] = ()
 
 
 @dataclass(frozen=True, slots=True, eq=False)
@@ -45,6 +47,7 @@ class PreviewOverview:
     fitted: bool
     suggested_rotation: float | None
     overview_edge: int
+    outlines: tuple[DetectorOutline, ...] = ()
 
     @property
     def fitted_grid(self) -> RenderSpec | None:
@@ -159,6 +162,7 @@ class PreviewState:
             fitted is not None,
             result.suggested_rotation,
             result.overview_edge,
+            result.outlines,
         )
         return self._overview
 

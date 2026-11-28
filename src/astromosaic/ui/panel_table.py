@@ -9,14 +9,17 @@ from PySide6.QtCore import (
     QEvent,
     QModelIndex,
     QPersistentModelIndex,
+    QPoint,
+    QRect,
     QSize,
     Qt,
     QTimer,
     Signal,
 )
-from PySide6.QtGui import QFont, QPainter, QPalette
+from PySide6.QtGui import QFont, QPainter, QPaintEvent, QPalette, QResizeEvent
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QLabel,
     QLineEdit,
     QStyle,
     QStyledItemDelegate,
@@ -359,6 +362,36 @@ class _PanelDelegate(QStyledItemDelegate):
             super().setEditorData(editor, index)
 
 
+class _PinnedPanelCells(QWidget):
+    """Paint the first column over the scrolled area of the same item view."""
+
+    def __init__(self, table: "PanelTable") -> None:
+        super().__init__(table.viewport())
+        self.table = table
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+
+    def paintEvent(self, event: QPaintEvent) -> None:
+        table = self.table
+        painter = QPainter(self)
+        painter.fillRect(event.rect(), table.palette().color(QPalette.ColorRole.Base))
+        y = event.rect().top()
+        while y <= event.rect().bottom() and (row := table.rowAt(y)) >= 0:
+            index = table.properties.index(row, 0)
+            option = QStyleOptionViewItem()
+            table.initViewItemOption(option)
+            option.rect = QRect(0, table.rowViewportPosition(row), self.width() - 1, table.rowHeight(row) - 1)
+            if row % 2:
+                option.features |= QStyleOptionViewItem.ViewItemFeature.Alternate
+            if table.selectionModel().isSelected(index):
+                option.state |= QStyle.StateFlag.State_Selected
+            table.itemDelegate().paint(painter, option, index)
+            painter.fillRect(0, option.rect.bottom() + 1, self.width(), 1,
+                             table.palette().color(QPalette.ColorRole.Mid))
+            y = option.rect.bottom() + 2
+        painter.fillRect(self.width() - 1, 0, 1, self.height(), table.palette().color(QPalette.ColorRole.Mid))
+        painter.end()
+
+
 class PanelTable(QTableView):
     def __init__(self) -> None:
         super().__init__()
@@ -381,6 +414,19 @@ class PanelTable(QTableView):
         self.horizontalHeader().setDefaultAlignment(
             Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
         )
+        self._pinned_cells = _PinnedPanelCells(self)
+        self._pinned_header = QLabel("Panel", self.horizontalHeader().viewport())
+        self._pinned_header.setObjectName("pinnedPanelHeader")
+        self._pinned_header.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self._pinned_header.setIndent(6)
+        self._pinned_cells.hide()
+        self._pinned_header.hide()
+        self.horizontalScrollBar().valueChanged.connect(self._update_pin)
+        self.verticalScrollBar().valueChanged.connect(self._pinned_cells.update)
+        self.horizontalHeader().sectionResized.connect(self._update_pin)
+        self.selectionModel().selectionChanged.connect(lambda: self._pinned_cells.update())
+        self.properties.dataChanged.connect(lambda: self._pinned_cells.update())
+        self.properties.modelReset.connect(self._update_pin)
         self._resize_for_font()
         self.show_view("Overview")
 
@@ -423,3 +469,37 @@ class PanelTable(QTableView):
 
     def cell(self, row: int, name: str) -> QModelIndex:
         return self.properties.index(row, COLUMNS.index(name))
+
+    def _update_pin(self) -> None:
+        width = min(self.columnWidth(0), self.viewport().width())
+        self._pinned_cells.setGeometry(0, 0, width, self.viewport().height())
+        self._pinned_header.setGeometry(0, 0, width, self.horizontalHeader().height())
+        visible = self.horizontalScrollBar().value() > 0
+        for widget in (self._pinned_cells, self._pinned_header):
+            widget.setVisible(visible)
+            if visible:
+                widget.raise_()
+                widget.update()
+
+    def resizeEvent(self, event: QResizeEvent) -> None:
+        super().resizeEvent(event)
+        self._update_pin()
+
+    def indexAt(self, point: QPoint) -> QModelIndex:
+        if self.horizontalScrollBar().value() > 0 and 0 <= point.x() < self.columnWidth(0):
+            return self.properties.index(self.rowAt(point.y()), 0)
+        return super().indexAt(point)
+
+    def visualRect(self, index: _Index) -> QRect:
+        rect = super().visualRect(index)
+        if index.column() == 0 and rect.isValid():
+            rect.moveLeft(0)
+        return rect
+
+    def scrollTo(self, index: _Index, hint: QAbstractItemView.ScrollHint = QAbstractItemView.ScrollHint.EnsureVisible) -> None:
+        super().scrollTo(index, hint)
+        if index.column() > 0 and self.horizontalScrollBar().value() > 0:
+            offset = self.columnWidth(0) - self.columnViewportPosition(index.column())
+            if offset > 0:
+                bar = self.horizontalScrollBar()
+                bar.setValue(bar.value() - offset)

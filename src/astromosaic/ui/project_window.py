@@ -31,6 +31,7 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QListWidget,
     QListWidgetItem,
     QMainWindow,
@@ -64,10 +65,17 @@ from astromosaic.storage.project import (
 from astromosaic.ui.appearance import ResponsiveRow, add_theme_menu
 from astromosaic.ui.command_panel import CommandPanel
 from astromosaic.ui.edit_history import EditHistory
+from astromosaic.ui.export_review import (
+    ExportDescription,
+    ExportRequest,
+    ExportReview,
+    OutputFormat,
+)
 from astromosaic.ui.foreground_details import ForegroundAlignmentDetails
 from astromosaic.ui.mask_editor import MaskEditor
 from astromosaic.ui.mosaic_job import (
     CompositionProposalJob,
+    ExportReviewJob,
     ForegroundAlignmentJob,
     ForegroundAlignmentReport,
     ForegroundJob,
@@ -101,9 +109,6 @@ from astromosaic.ui.workspace_settings import (
 )
 
 _PROJECT_FILTER = "AstroMosaic project (*.astromosaic)"
-_TIFF_FILTER = "TIFF mosaic (*.tiff *.tif)"
-_FITS_FILTER = "FITS mosaic (*.fits *.fit *.fts)"
-_XISF_FILTER = "XISF mosaic (*.xisf)"
 _GPU_ACCELERATION_SETTING = "preview/gpuAcceleration"
 _PANELS, _PREVIEW = range(2)
 _PANEL_SUFFIXES = frozenset((".fits", ".fit", ".fts", ".tif", ".tiff", ".xisf"))
@@ -111,6 +116,7 @@ _Button = QMessageBox.StandardButton
 _Job = (
     MosaicJob
     | PanelIntakeJob
+    | ExportReviewJob
     | PreviewJob
     | ForegroundJob
     | MaskEditorJob
@@ -170,10 +176,12 @@ class ProjectWindow(QMainWindow):
         self._inspections: tuple[PanelInspection, ...] = ()
         self._solved_panels: tuple[ProjectPanel, ...] = ()
         self._solve_outcomes: dict[int, PanelSolveOutcome] = {}
+        self._selected_panel: Path | None = None
         self._foreground_report: ForegroundAlignmentReport | None = None
         self._foreground_panels: tuple[ProjectPanel, ...] | None = None
         self._panel_dialog: tuple[int, PanelSettings] | None = None
         self._preview_state = PreviewState()
+        self._preview_needs_panels = True
         self._selected_sky_band: str | None = None
         self._detail_job: PreviewDetailJob | None = None
         self._live_ready = False
@@ -296,6 +304,7 @@ class ProjectWindow(QMainWindow):
         self.viewport.view_changed.connect(self._view_changed)
         self.viewport.crop_changed.connect(self._show_crop_bounds)
         self.viewport.crop_cancelled.connect(self._restore_crop_preview)
+        self.viewport.outline_selected.connect(self._select_preview_panel)
         self._editor = QWidget(body)
         controls = QVBoxLayout(self._editor)
         controls.setContentsMargins(0, 0, 0, 2)
@@ -338,6 +347,44 @@ class ProjectWindow(QMainWindow):
         more.setMenu(more_menu)
         buttons.addWidget(more)
         controls.addWidget(ResponsiveRow(main_panel_controls, buttons))
+        filter_name = QWidget()
+        filter_name_row = QHBoxLayout(filter_name)
+        filter_name_row.setContentsMargins(0, 0, 0, 0)
+        self.filename_filter = QLineEdit()
+        self.filename_filter.setAccessibleName("Filter panels by filename")
+        self.filename_filter.setPlaceholderText("Filter filename")
+        self.filename_filter.setClearButtonEnabled(True)
+        self.filename_filter.textChanged.connect(self._filter_panels)
+        filter_name_row.addWidget(self.filename_filter)
+        filter_choices = QHBoxLayout()
+        self.band_filter = QComboBox()
+        self.band_filter.setAccessibleName("Filter panels by sky band")
+        self.band_filter.addItem("All bands", None)
+        self.band_filter.currentIndexChanged.connect(self._filter_panels)
+        filter_choices.addWidget(self.band_filter)
+        self.wcs_filter = QComboBox()
+        self.wcs_filter.setAccessibleName("Filter panels by WCS state")
+        self.wcs_filter.addItem("All WCS states", None)
+        for state in ("Embedded", "Sidecar", "Missing", "Invalid", "Unavailable", "Checking…"):
+            self.wcs_filter.addItem(state, state)
+        self.wcs_filter.currentIndexChanged.connect(self._filter_panels)
+        filter_choices.addWidget(self.wcs_filter)
+        self.clear_filters_button = QPushButton("Clear Filters")
+        self.clear_filters_button.clicked.connect(self._clear_panel_filters)
+        filter_choices.addWidget(self.clear_filters_button)
+        self.panel_filters = ResponsiveRow(filter_name, filter_choices)
+        controls.addWidget(self.panel_filters)
+        solve_feedback = QHBoxLayout()
+        self.solve_summary = QLabel()
+        self.solve_summary.setTextFormat(Qt.TextFormat.PlainText)
+        self.solve_summary.setWordWrap(True)
+        self.solve_summary.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        solve_feedback.addWidget(self.solve_summary, 1)
+        self.solve_summary_details = QPushButton("Plate Solve Details…")
+        self.solve_summary_details.clicked.connect(self._plate_solve_details)
+        solve_feedback.addWidget(self.solve_summary_details)
+        controls.addLayout(solve_feedback)
+        self._set_solve_summary("")
         self.panels = PanelTable()
         self.table_view.currentTextChanged.connect(self.panels.show_view)
         self.panels.properties.panelEdited.connect(self._update_panel)
@@ -363,8 +410,12 @@ class ProjectWindow(QMainWindow):
         self.auto_frame_check.setToolTip("Fit the preview to the solved sky panels.")
         self.auto_frame_check.toggled.connect(self._set_auto_frame)
         heading_layout.addWidget(self.auto_frame_check)
+        self.panel_outlines = QCheckBox("Panel Outlines")
+        self.panel_outlines.setToolTip("Show each panel's projected detector boundary.")
+        self.panel_outlines.toggled.connect(self._update_outlines)
         preview_header = QHBoxLayout()
         preview_header.addStretch()
+        preview_header.addWidget(self.panel_outlines)
         self.band_label = QLabel("Sky band")
         self.band_box = QComboBox()
         self.band_box.setAccessibleName("Sky band")
@@ -396,6 +447,11 @@ class ProjectWindow(QMainWindow):
         self.edit_crop_button.clicked.connect(self._start_crop)
         grid_controls.addWidget(self.edit_crop_button)
         preview_layout.addLayout(grid_controls)
+        self.outline_status = QLabel()
+        self.outline_status.setTextFormat(Qt.TextFormat.PlainText)
+        self.outline_status.setWordWrap(True)
+        self.outline_status.hide()
+        preview_layout.addWidget(self.outline_status)
         self.crop_controls = QWidget(preview)
         crop_row = QHBoxLayout(self.crop_controls)
         crop_row.setContentsMargins(0, 0, 0, 0)
@@ -444,7 +500,7 @@ class ProjectWindow(QMainWindow):
         left_layout.addWidget(self.settings_button)
         left_layout.addWidget(self.overlap_check)
         self.show_panels_button = QPushButton("Show Panels")
-        self.show_panels_button.clicked.connect(lambda: self.navigation.setCurrentRow(_PANELS))
+        self.show_panels_button.clicked.connect(self._show_preview_panel)
         left_layout.addWidget(self.show_panels_button)
         actions.addStretch()
         actions.addWidget(self.layer_box)
@@ -606,6 +662,7 @@ class ProjectWindow(QMainWindow):
 
     def _refresh_restored_project(self, summary: str) -> None:
         self._revision += 1
+        self._set_solve_summary("")
         self._invalidate_panel_inspection()
         self._refresh(self.panels.currentIndex().row())
         self._report_operation(summary)
@@ -613,6 +670,8 @@ class ProjectWindow(QMainWindow):
     def _refresh(self, selected: int = -1) -> None:
         if self._solved_panels is not self.project.panels:
             self._solved_panels = ()
+            if self._solve_outcomes and not isinstance(self.job, PlateSolveJob):
+                self._set_solve_summary("")
             self._solve_outcomes.clear()
         rows = [
             panel_row(
@@ -623,15 +682,15 @@ class ProjectWindow(QMainWindow):
             )
             for index, panel in enumerate(self.project.panels)
         ]
-        self.panels.properties.refresh(rows)
-        self.panel_heading.setText(f"Panels ({len(rows)})" if rows else "Panels")
+        with QSignalBlocker(self.panels.selectionModel()):
+            self.panels.properties.refresh(rows)
+            if 0 <= selected < len(rows):
+                self._selected_panel = rows[selected].panel.source.path
+            elif all(row.panel.source.path != self._selected_panel for row in rows):
+                self._selected_panel = rows[0].panel.source.path if rows else None
+            self._refresh_panel_filters()
         self._refresh_project_start()
         linked = all(row.linked for row in rows)
-        if rows:
-            current = self.panels.currentIndex()
-            row = max(0, min(selected, len(rows) - 1))
-            if current.row() != row:
-                self.panels.selectRow(row)
         self._refresh_bands()
         if self._preview_state.is_stale(self._preview_selection(), linked=linked):
             self._clear_preview()
@@ -646,6 +705,56 @@ class ProjectWindow(QMainWindow):
         self._start_panel_inspection()
         if self._live_pending and not self._is_running():
             self._preview_timer.start()
+
+    def _refresh_panel_filters(self) -> None:
+        last = self.band_filter.currentData()
+        bands = {row.values["Band"] for row in self.panels.properties.rows}
+        bands.add(last)
+        with QSignalBlocker(self.band_filter):
+            self.band_filter.clear()
+            self.band_filter.addItem("All bands", None)
+            for band in sorted(value for value in bands if isinstance(value, str)):
+                self.band_filter.addItem(band, band)
+            self.band_filter.setCurrentIndex(max(0, self.band_filter.findData(last)))
+        self._filter_panels()
+
+    @Slot()
+    def _filter_panels(self) -> None:
+        name = self.filename_filter.text().strip().casefold()
+        band, wcs = self.band_filter.currentData(), self.wcs_filter.currentData()
+        rows = self.panels.properties.rows
+        self.panel_filters.setVisible(bool(rows))
+        visible = 0
+        selected = -1
+        with QSignalBlocker(self.panels.selectionModel()):
+            for index, row in enumerate(rows):
+                path = row.panel.source.path
+                matches = (
+                    name in path.name.casefold() and (band is None or row.values["Band"] == band)
+                    and (wcs is None or row.values["WCS"] == wcs)
+                )
+                self.panels.setRowHidden(index, not matches)
+                visible += matches
+                if matches and path == self._selected_panel:
+                    selected = index
+            if selected < 0:
+                self.panels.selectionModel().clear()
+            elif self.panels.currentIndex().row() != selected:
+                self.panels.selectRow(selected)
+        active = bool(name) or band is not None or wcs is not None
+        count = f"{visible}/{len(rows)}" if active else str(len(rows))
+        self.panel_heading.setText(f"Panels ({count})" if rows else "Panels")
+        self.clear_filters_button.setEnabled(active)
+        self.panels.viewport().update()
+        self._selection_changed()
+
+    @Slot()
+    def _clear_panel_filters(self) -> None:
+        with QSignalBlocker(self.filename_filter), QSignalBlocker(self.band_filter), QSignalBlocker(self.wcs_filter):
+            self.filename_filter.clear()
+            self.band_filter.setCurrentIndex(0)
+            self.wcs_filter.setCurrentIndex(0)
+        self._filter_panels()
 
     def _panel_inspection(self, index: int) -> PanelInspection | None:
         if self._inspected_panels is self.project.panels and 0 <= index < len(self._inspections):
@@ -776,6 +885,7 @@ class ProjectWindow(QMainWindow):
         self.overlap_check.setVisible(layer == "composition")
         self.overlap_check.setEnabled(frame is not None and frame.common_coverage is not None)
         self.auto_frame_check.setVisible(layer == "sky")
+        self.panel_outlines.setVisible(layer == "sky")
         self.auto_frame_check.setEnabled(idle and layer == "sky")
         with QSignalBlocker(self.auto_frame_check):
             self.auto_frame_check.setChecked(self.project.auto_frame_preview)
@@ -841,7 +951,7 @@ class ProjectWindow(QMainWindow):
         self.grid_summary.setText(summary)
         references_ready = self._references_ready(layer, self._sky_band())
         ready = ready and references_ready
-        self.show_panels_button.setVisible(not ready and not cropping)
+        self._preview_needs_panels = not ready
         photo = self._photo_preview_ready()
         self.start_button.setText("Export Photo Mosaic…" if photo else "Export Mosaic…")
         self.start_button.setEnabled(idle and ready)
@@ -875,6 +985,7 @@ class ProjectWindow(QMainWindow):
         else:
             hint = summary
         self.viewport.set_empty_hint(hint)
+        self._update_outlines()
 
     def _set_primary_action(self, button: QPushButton | None) -> None:
         previous = self._primary_action
@@ -906,6 +1017,9 @@ class ProjectWindow(QMainWindow):
     def _selection_changed(self) -> None:
         index = self.panels.currentIndex().row()
         rows = self.panels.properties.rows
+        if 0 <= index < len(rows):
+            self._selected_panel = rows[index].panel.source.path
+        self.viewport.select_outline(self._selected_panel)
         selected = 0 <= index < len(rows) and not self._is_running()
         editable = selected and self._preview_state.crop is None
         source_ready = editable and rows[index].source_linked
@@ -929,6 +1043,41 @@ class ProjectWindow(QMainWindow):
                 or (info is not None and info.wcs_status in ("Embedded", "Sidecar"))
             )
         )
+        self.solve_summary_details.setEnabled(self.solve_details_action.isEnabled())
+
+    @Slot(object)
+    def _select_preview_panel(self, path: Path) -> None:
+        self._selected_panel = path
+        self._filter_panels()
+
+    @Slot()
+    def _show_preview_panel(self) -> None:
+        self.navigation.setCurrentRow(_PANELS)
+        index = self.panels.currentIndex()
+        if index.isValid():
+            self.panels.scrollTo(index)
+            self.panels.setFocus()
+        elif self._selected_panel is not None and self.clear_filters_button.isEnabled():
+            self.status.setText("The selected panel is hidden. Choose Clear Filters to reveal it.")
+            self.clear_filters_button.setFocus()
+
+    @Slot()
+    def _update_outlines(self) -> None:
+        if not hasattr(self, "show_panels_button"):
+            return
+        selection = self._preview_selection()
+        visible = self.panel_outlines.isChecked() and selection.layer == "sky"
+        self.viewport.show_outlines(visible)
+        overview = self._preview_state.current(selection)
+        missing = [f"{item.source.name}: {item.reason}" for item in overview.outlines
+                   if item.reason] if visible and overview else []
+        self.outline_status.setText(missing[0] if missing else "")
+        self.outline_status.setToolTip("\n".join(missing))
+        self.outline_status.setVisible(bool(missing))
+        self.show_panels_button.setText("Show in Panels" if visible else "Show Panels")
+        self.show_panels_button.setVisible(
+            (visible or self._preview_needs_panels) and self._preview_state.crop is None
+        )
 
     def _confirm_discard(self) -> bool:
         if self.project == self._saved:
@@ -950,6 +1099,8 @@ class ProjectWindow(QMainWindow):
         self._foreground_panels = None
         self._solved_panels = ()
         self._solve_outcomes.clear()
+        self._selected_panel = None
+        self._set_solve_summary("")
         self._selected_sky_band = None
         self._invalidate_panel_inspection()
         self._history = EditHistory(project)
@@ -959,6 +1110,7 @@ class ProjectWindow(QMainWindow):
         self.progress.setValue(0)
         self._show_job_progress(False)
         self._refresh()
+        self._clear_panel_filters()
 
     def _new(self) -> None:
         if self._confirm_discard():
@@ -1499,11 +1651,23 @@ class ProjectWindow(QMainWindow):
             directory = self.project_path.with_name(f"{self.project_path.name}.wcs")
         options = replace(load_plate_solve_settings(), revalidate=selected_panel is not None)
         job = PlateSolveJob(self.project, options, directory, self, selected_panel=selected_panel)
+        self._set_solve_summary("Checking WCS eligibility…")
+        job.batch_progress.connect(self._plate_solve_batch_progress)
         message = "Preparing plate solve for sky panels that need a WCS…"
         if selected_panel is not None:
             name = self.project.panels[selected_panel].source.path.name
             message = f"Revalidating plate solution for {name}…"
         self._launch_job(job, message)
+
+    @Slot(str)
+    def _plate_solve_batch_progress(self, text: str) -> None:
+        if self.sender() is self.job and self.cancel_button.isEnabled():
+            self._set_solve_summary(text)
+
+    def _set_solve_summary(self, text: str) -> None:
+        self.solve_summary.setText(text)
+        self.solve_summary.setVisible(bool(text))
+        self.solve_summary_details.setVisible(bool(text))
 
     def _photo_preview_ready(self) -> bool:
         return self._preview_state.photo_overview(self._preview_selection()) is not None
@@ -1517,24 +1681,61 @@ class ProjectWindow(QMainWindow):
     def _choose_export_path(self, *, photo: bool) -> None:
         if self._is_running() or not self.project.panels:
             return
-        name, selected = QFileDialog.getSaveFileName(
-            self,
-            "Export Photo Mosaic" if photo else "Render Mosaic",
-            "",
-            _TIFF_FILTER if photo else f"{_TIFF_FILTER};;{_FITS_FILTER};;{_XISF_FILTER}",
+        request = self._export_request(photo=photo)
+        if request is None:
+            self._report_operation("Build a covered sRGB sky preview before exporting a photo.")
+            return
+        self._launch_job(ExportReviewJob(request, self), "Checking export settings…")
+
+    def _export_request(self, *, photo: bool) -> ExportRequest | None:
+        selection = self._preview_selection()
+        if not photo:
+            return ExportRequest(selection.project, selection.layer, selection.band)
+        overview = self._preview_state.photo_overview(selection)
+        if overview is None:
+            return None
+        return ExportRequest(selection.project, selection.layer, selection.band,
+                             overview.grid, self.viewport.photo_tone())
+
+    def _confirm_export_review(self, description: ExportDescription) -> OutputFormat | None:
+        dialog = ExportReview(description, self)
+        try:
+            return dialog.output if dialog.exec() else None
+        finally:
+            dialog.deleteLater()
+
+    def _finish_export_review(self, job: ExportReviewJob) -> None:
+        if job.cancellation_requested or self._close_after_job:
+            self._report_operation("Export review cancelled.")
+            return
+        if job.result is None:
+            self._report_operation("Export review failed.", detail=job.error or "No result was returned.")
+            return
+        revision = self._revision
+        photo = job.request.photo_grid is not None
+        output = self._confirm_export_review(job.result)
+        if output is None:
+            self._report_operation("Export review cancelled.")
+            return
+        name, _ = QFileDialog.getSaveFileName(
+            self, "Export Photo Mosaic" if photo else "Render Mosaic", "", output.file_filter,
             options=QFileDialog.Option.DontConfirmOverwrite,
         )
         if not name:
+            self._report_operation("Export destination selection cancelled.")
             return
-        path = Path(name)
-        if not path.suffix:
-            path = path.with_suffix(
-                {_FITS_FILTER: ".fits", _XISF_FILTER: ".xisf"}.get(selected, ".tiff")
-            )
+        if revision != self._revision or job.request != self._export_request(photo=photo):
+            self._report_operation("Export settings changed. Review the export again.")
+            return
+        try:
+            path = output.destination(Path(name))
+        except ValueError as error:
+            self._report_operation("Invalid export destination.", detail=str(error))
+            return
         if photo:
             self._export_photo_to(path)
         else:
-            self._export_to(path, self._layer(), self._sky_band())
+            self._export_to(path, job.request.layer, job.request.band)
 
     def _export_photo_to(self, path: Path) -> None:
         overview = self._preview_state.photo_overview(self._preview_selection())
@@ -1572,6 +1773,8 @@ class ProjectWindow(QMainWindow):
         self.overlap_check.setEnabled(False)
         self.viewport.set_crop(None)
         self.viewport.set_frame(None)
+        self.viewport.set_outlines(())
+        self._update_outlines()
 
     @Slot(bool)
     def _toggle_live_preview(self, enabled: bool) -> None:
@@ -1638,7 +1841,8 @@ class ProjectWindow(QMainWindow):
 
     @Slot()
     def _refresh_adaptive_preview(self) -> None:
-        if self.pages.currentIndex() != _PREVIEW or self._is_running() or self._close_after_job:
+        if (self.pages.currentIndex() != _PREVIEW or self._is_running() or self._close_after_job
+            or QApplication.activeModalWidget() is not None):
             return
         selection = self._preview_selection()
         edge = self.viewport.overview_edge()
@@ -1854,6 +2058,9 @@ class ProjectWindow(QMainWindow):
         assert frame is not None
         self.overlap_check.setEnabled(frame.common_coverage is not None)
         self._paint_display()
+        overview = self._preview_state.current(self._preview_selection())
+        self.viewport.set_outlines(overview.outlines if overview is not None else ())
+        self._update_outlines()
         if self._layer() == "sky":
             draft = self._preview_state.crop
             crop = Region(0, 0, *frame.output_size) if draft is None else draft.grid.output_region()
@@ -2183,6 +2390,8 @@ class ProjectWindow(QMainWindow):
             self._refresh(self.panels.currentIndex().row())
         elif isinstance(job, PreviewJob):
             self._finish_preview(job)
+        elif isinstance(job, ExportReviewJob):
+            self._finish_export_review(job)
         elif isinstance(job, PanelIntakeJob):
             if job.result is not None and not job.cancellation_requested:
                 self.navigation.setCurrentRow(_PANELS)
@@ -2237,6 +2446,13 @@ class ProjectWindow(QMainWindow):
         if not job.cancelled and job.error is None:
             self.progress.setValue(100)
         summary = f"{solved} solved, {completed - solved} failed."
+        mask_needed = any(
+            outcome.error and "Apply a sky mask or mark the panel Sky only" in outcome.error
+            for outcome in job.outcomes
+        )
+        guidance = " Apply a sky mask to affected panels." if mask_needed else ""
+        terminal = "Cancelled. " if job.cancelled else f"Stopped. {job.error} " if job.error else ""
+        self._set_solve_summary(terminal + job.summary() + guidance)
         self.status.setToolTip(
             f"Batch elapsed {job.elapsed_seconds:.2f} s. Queue {job.queue_seconds:.2f} s. "
             f"Eligibility check {job.eligibility_seconds:.2f} s."
@@ -2248,7 +2464,7 @@ class ProjectWindow(QMainWindow):
         elif not job.total:
             self._report_operation("All sky panels already have a usable WCS.")
         else:
-            self._report_operation(f"Plate solve finished. {summary}")
+            self._report_operation(f"Plate solve finished. {summary}{guidance}")
         self._set_solve_elapsed(job.elapsed_seconds)
         self._show_job_progress(True, timed=True)
 
@@ -2436,6 +2652,8 @@ class ProjectWindow(QMainWindow):
             self.job.cancel()
             self.cancel_button.setEnabled(False)
             self.status.setText(f"Cancelling {self.job.label}…")
+            if isinstance(self.job, PlateSolveJob):
+                self._set_solve_summary("Cancelling Plate Solve…")
         else:
             self.command_panel.cancel()
 

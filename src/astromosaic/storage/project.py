@@ -716,6 +716,7 @@ def preview_project(
         window=window,
         inspect_crop=inspect_crop,
         interpolate=interpolate,
+        include_outlines=allow_visual,
         **_verified_inputs(project, context, band, use_photo=allow_visual),
     )
 
@@ -1004,6 +1005,23 @@ def render_project_layer(
         raise FileExistsError(f"The output file already exists: {destination}")
     with _project_layer(project, layer, context) as raster:
         return _write_raster(raster, destination, context)
+
+
+def inspect_project_export(
+    project: MosaicProject, layer: Layer, band: str | None,
+    photo_grid: RenderSpec | None, context: JobContext,
+) -> SkyPreflight:
+    """Resolve the dimensions and channel layout without opening an output file."""
+    if photo_grid is not None:
+        return preflight_sky_mosaic(
+            spec=photo_grid, context=context, intent="photo",
+            **_verified_inputs(project, context, band, use_photo=True),
+        )
+    if layer == "sky":
+        return validate_project_sky(project, context, band=band)
+    with _project_layer(project, layer, context) as raster:
+        context.check_cancelled()
+        return SkyPreflight(raster.panel_count, *raster.size, raster.channels)
 
 
 def _portable_path(path: Path, directory: Path) -> str:

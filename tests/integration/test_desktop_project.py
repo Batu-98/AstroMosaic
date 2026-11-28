@@ -335,6 +335,7 @@ def test_photo_desktop_session_and_cli_share_the_fitted_grid_and_tone(
                 assert button.width() >= button.sizeHint().width()
         assert window.viewport.tone_box.currentText() == "Preserve Tone"
         monkeypatch.setattr(QFileDialog, "getSaveFileName", lambda *a, **kw: (str(desktop), ""))
+        monkeypatch.setattr(window, "_confirm_export_review", lambda review: review.formats[0])
         window.start_button.click()
         wait_idle()
         assert desktop.is_file(), window.status.text()
@@ -566,6 +567,7 @@ def test_desktop_project_roundtrip_progress_cancel_and_retry(
     )
 
     window = ProjectWindow()
+    monkeypatch.setattr(window, "_confirm_export_review", lambda review: review.formats[0])
     entered = Event()
     release = Event()
     main_thread = get_ident()
@@ -1013,19 +1015,22 @@ def test_desktop_composition_propose_edit_and_export(
     destination = tmp_path / "composition.fits"
     monkeypatch.setattr(QFileDialog, "getOpenFileName", lambda *a, **kw: (str(manifest), ""))
     monkeypatch.setattr(QFileDialog, "getSaveFileName", lambda *a, **kw: (str(destination), ""))
+    from astromosaic.ui.export_review import FITS
     window = ProjectWindow(use_gpu=False)
 
     def wait_for_job() -> None:
-        job = window.job
-        if job is None:
+        if window.job is None:
             return
         loop = QEventLoop()
         timer = QTimer()
+        poll = QTimer()
         timer.setSingleShot(True)
         timer.timeout.connect(loop.quit)
-        job.finished.connect(loop.quit)
+        poll.timeout.connect(lambda: loop.quit() if window.job is None else None)
+        poll.start(10)
         timer.start(8_000)
         loop.exec()
+        poll.stop()
         assert window.job is None, window.status.text()
 
     def edit() -> None:
@@ -1077,6 +1082,7 @@ def test_desktop_composition_propose_edit_and_export(
         assert highlighted is not None and not np.array_equal(highlighted.rgba, preview.rgba)
         window.overlap_check.setChecked(False)
         assert window.viewport.frame is preview
+        monkeypatch.setattr(window, "_confirm_export_review", lambda _review: FITS)
         window.start_button.click()
         wait_for_job()
         assert destination.exists(), window.status.text()
