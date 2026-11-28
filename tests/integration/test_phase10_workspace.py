@@ -167,6 +167,34 @@ def test_detector_outlines_follow_sampled_wcs_and_crop(fixture: str) -> None:
         assert np.linalg.norm(distance - projection[..., None] * chord, axis=-1).max() < 0.25
 
 
+def test_tight_preview_budget_keeps_raster_when_outlines_cannot_fit() -> None:
+    manifest = _ROOT / "sky01-m17-atlas/project.astromosaic"
+    if not manifest.is_file():
+        pytest.skip("Prepare the real M17 reference.")
+    project = load_project(manifest)
+    spec = replace(project.render, crop=Region(7, 9, 68, 56), tile_size=8, max_working_bytes=110_000)
+    frame = preview_project(
+        replace(project, render=spec, auto_frame_preview=False), JobContext(), allow_visual=True
+    )
+    assert frame.tile.valid.any()
+    assert frame.peak_reserved_bytes <= spec.max_working_bytes
+    assert len(frame.outlines) == len(project.panels)
+    assert all(outline.vertices is None and "resource limit" in outline.reason for outline in frame.outlines)
+
+
+def test_export_review_reports_desktop_calibration_guidance(workspace, tmp_path: Path) -> None:
+    app, window = workspace
+    source = tmp_path / "missing-brightness.fits"
+    write_smoke_panel(source)
+    fits.delval(source, "BUNIT")
+    project = MosaicProject((ProjectPanel(FileReference.capture(source)),))
+    window._set_project(project, None)
+    _settle(app, window)
+    window.scientific_export.trigger()
+    _settle(app, window)
+    assert "Declare a common surface-brightness scale in Mosaic Settings." in window.status.text()
+
+
 def test_review_keeps_output_and_history_untouched_until_confirmed(
     workspace,
     tmp_path: Path,

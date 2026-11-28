@@ -29,7 +29,9 @@ class OutlineBudget:
     def __init__(self, working_bytes: int) -> None:
         self.deadline = monotonic() + _TIME_LIMIT
         self.vertices = _MAX_BATCH_VERTICES
-        self.bytes = min(working_bytes, _MAX_BYTES)
+        self.limit = min(working_bytes, _MAX_BYTES)
+        self.bytes = self.limit
+        self.peak_reserved_bytes = 0
 
     def prepare(
         self,
@@ -46,10 +48,14 @@ class OutlineBudget:
             if monotonic() >= self.deadline:
                 return DetectorOutline(path, reason="Outline preparation reached its time limit.")
             count = 4 * intervals
-            if count > self.vertices or count * 768 > self.bytes:
+            scratch_bytes = count * 768
+            if count > self.vertices or scratch_bytes > self.bytes:
                 return DetectorOutline(
                     path, reason="Outline preparation reached its resource limit."
                 )
+            self.peak_reserved_bytes = max(
+                self.peak_reserved_bytes, self.limit - self.bytes + scratch_bytes
+            )
             t = np.linspace(0, 1, 2 * intervals + 1)
             zeros, ones = np.zeros_like(t), np.ones_like(t)
             x = np.concatenate((t, ones, 1 - t, zeros)) * width - 0.5

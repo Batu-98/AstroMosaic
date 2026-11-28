@@ -196,6 +196,7 @@ def _export(
     app: QApplication, window: ProjectWindow, path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from PySide6.QtWidgets import QFileDialog
+
     from astromosaic.ui.export_review import FITS, TIFF, XISF
 
     with monkeypatch.context() as patch:

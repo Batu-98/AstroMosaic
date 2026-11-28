@@ -1263,18 +1263,7 @@ def preview_mosaic(
         raster = mosaic.raster(interpolate)
         if window is not None:
             return replace(_preview_detail(raster, window, context), visual_only=mosaic.visual_only)
-        outlines: tuple[DetectorOutline, ...] = ()
-        if include_outlines:
-            budget = OutlineBudget(mosaic.spec.max_working_bytes)
-            outlines = tuple(
-                budget.prepare(
-                    path, panel.geometry, mosaic.target,
-                    (panel.source.descriptor.width, panel.source.descriptor.height),
-                    panel.correction.shift if panel.correction else (0.0, 0.0), context,
-                )
-                for path, panel in zip(paths, mosaic.panels, strict=True)
-            )
-        return replace(_preview_raster(
+        frame = _preview_raster(
             raster,
             context,
             on_proxy,
@@ -1282,5 +1271,28 @@ def preview_mosaic(
             visual_only=mosaic.visual_only,
             adaptive_edge=adaptive_edge,
             resolution_scale=resolution_scale,
-        ), suggested_crop=mosaic.suggested_crop, suggested_rotation=mosaic.suggested_rotation,
-            outlines=outlines)
+        )
+        frame = replace(
+            frame, suggested_crop=mosaic.suggested_crop, suggested_rotation=mosaic.suggested_rotation
+        )
+        if not include_outlines:
+            return frame
+
+        retained_bytes = (
+            frame.tile.pixels.nbytes + frame.tile.valid.nbytes
+            + raster.footprint_bytes + raster.profile_bytes
+        )
+        budget = OutlineBudget(mosaic.spec.max_working_bytes - retained_bytes)
+        outlines = tuple(
+            budget.prepare(
+                path, panel.geometry, mosaic.target,
+                (panel.source.descriptor.width, panel.source.descriptor.height),
+                panel.correction.shift if panel.correction else (0.0, 0.0), context,
+            )
+            for path, panel in zip(paths, mosaic.panels, strict=True)
+        )
+        return replace(
+            frame,
+            peak_reserved_bytes=max(frame.peak_reserved_bytes, retained_bytes + budget.peak_reserved_bytes),
+            outlines=outlines,
+        )

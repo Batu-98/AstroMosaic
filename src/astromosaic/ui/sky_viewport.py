@@ -554,8 +554,9 @@ class SkyViewport(QWidget):
         width, height = self._frame.output_size
         fit = min(canvas.width() / width, canvas.height() / height)
         physical = max(fit * canvas.devicePixelRatioF(), 1e-12)
+        minimum = min(0.5, 0.5 / physical)
         limit = max(128.0, 4.0 / physical)
-        zoom = min(limit, max(0.5, self._zoom * 1.2**steps))
+        zoom = min(limit, max(minimum, self._zoom * 1.2**steps))
         toward = anchor - QRectF(canvas.rect()).center()
         self._pan = toward + (self._pan - toward) * (zoom / self._zoom)
         self._zoom = zoom

@@ -1709,7 +1709,7 @@ class ProjectWindow(QMainWindow):
             self._report_operation("Export review cancelled.")
             return
         if job.result is None:
-            self._report_operation("Export review failed.", detail=job.error or "No result was returned.")
+            self._report_render_failure("Export review failed.", job)
             return
         revision = self._revision
         photo = job.request.photo_grid is not None
@@ -2664,7 +2664,7 @@ class ProjectWindow(QMainWindow):
         self.status.setText(message)
         self.command_panel.append_summary(summary)
 
-    def _report_render_failure(self, summary: str, job: MosaicJob | PreviewJob) -> None:
+    def _report_render_failure(self, summary: str, job: ExportReviewJob | MosaicJob | PreviewJob) -> None:
         requirement = job.calibration_requirement
         if requirement is not None:
             self._report_operation(f"{summary} {_CALIBRATION_GUIDANCE[requirement]}")
