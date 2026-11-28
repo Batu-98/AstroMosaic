@@ -175,6 +175,14 @@ This register tracks unresolved decisions, problems, and risks. It is not a work
 
 ## Resolved Topics
 
+### Q-040 - Desktop shortcut opens the legacy panel list
+
+- **Status / priority** Resolved / P2
+- **Opened / updated** 2026-11-28
+- **Affected workflow** Opening AstroMosaic from the Windows desktop shortcut.
+- **Impact and evidence** The shortcut targeted `dist/windows/AstroMosaic/AstroMosaic.exe`. That package carried `0.1.0` metadata, and its launch exposed the **Project panels** list. The beta 32 package opened M17 and exposed the **Panel control table** with two rows.
+- **Resolution** Pointed the desktop shortcut and its working directory to the versioned beta 32 package. Launched the saved shortcut and verified the executable path and window title. Matched the launcher checksum and source commit to the build record. [Portable build workflow](docs/windows-release.md#build-portable-windows-packages)
+
 ### Q-032 - Desktop edit history budget
 
 - **Status / priority** Resolved / P1

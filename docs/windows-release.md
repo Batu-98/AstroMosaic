@@ -30,7 +30,7 @@ Get-FileHash -Algorithm SHA256 "dist/*-${releaseVersion}-windows-x64.zip"
 
 The builder includes the application license, `THIRD_PARTY_NOTICES.md`, wheel and supplemental notices in `ThirdParty`, and a list of the bundled native files. The index uses the PyInstaller archive, bundled extension modules and installed wheel metadata to record component versions for each launcher. Review the inventory when the lockfile, Python provider or PyInstaller build changes. [Build script](../packaging/build-windows.ps1) · [Supplemental notice provenance](../packaging/notices/README.md)
 
-Give each successive local beta its own version and folder. Record the exact source commit with the executable and verify the version in the desktop title and the CLI output. Open the executable from its matching folder so Windows loads the bundled `_internal` runtime.
+Give each successive local beta its own version and folder. Record the exact source commit with the executable and verify the version in the desktop title and the CLI output. Open the executable from its matching folder so Windows loads the bundled `_internal` runtime. Point desktop shortcuts to the verified versioned folder. The unversioned `dist/windows/AstroMosaic` build output can contain an older launcher.
 
 ## Third-party source and runtime materials
 

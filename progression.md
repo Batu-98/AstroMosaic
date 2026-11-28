@@ -1936,3 +1936,9 @@ Copy this format into a new entry immediately above this template, preserving ch
 - **Built** The desktop and CLI came from clean commit `f7035a89ef478a8f9be7a2d5018cfaa419cd34bc` using `poetry.lock`. Both launchers reported `0.1.0b20`. Their versioned folders retain the matching runtimes, build times and launcher SHA-256 values. [Build records](docs/windows-release.md#verification-status)
 - **Verified** The copied desktop replay matched all three source workflows with CPU and OpenGL. The copied CLI matched the saved scientific, photo and mixed edits. Source verification passed 275 offscreen tests, 11 native tests and five isolated OpenCV checks. [Acceptance results](docs/phase-9.md#9d-windows-acceptance-results)
 - **Handoff** The guide includes the shortcuts, session lifetime and retention limits. Public portable distribution stays tracked in Q-005. [Desktop guide](docs/guide.md#run-the-desktop-app) · [Distribution tracking](questions_open_topics.md#q-005---application-licensing-and-distribution-model)
+
+### 2026-11-28 - Desktop launch - Corrected the shortcut to the panel table
+
+- **Diagnosed** The Windows desktop shortcut opened the unversioned build output. Its older executable exposed **Project panels** as a list. The versioned beta 32 executable opened the M17 project and exposed **Panel control table** as a table with two rows.
+- **Verified** Retargeted the shortcut and its working directory to the versioned beta 32 package. Launching the saved shortcut opened the expected executable and showed `0.1.0b32 (Beta)` in its title. The launcher checksum matched the build record. All ten focused source tests passed. [Shortcut finding](questions_open_topics.md#q-040---desktop-shortcut-opens-the-legacy-panel-list)
+- **Next** Check the shortcut target against the verified versioned package at future local handoffs. [Portable build workflow](docs/windows-release.md#build-portable-windows-packages)
