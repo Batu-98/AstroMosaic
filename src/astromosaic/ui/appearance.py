@@ -7,7 +7,7 @@ from PySide6.QtWidgets import QApplication, QBoxLayout, QHBoxLayout, QMenu, QWid
 _STYLE = """
     QWidget { font-size: BODY_SIZE; }
     QLabel[sectionTitle="true"] { font-size: HEADING_SIZE; font-weight: 600; }
-    QPushButton, QToolButton, QComboBox { padding: 4px 10px; border: 1px solid palette(mid);
+    QPushButton, QToolButton, QComboBox { padding: 3px 8px; border: 1px solid palette(mid);
         border-radius: 4px; background: palette(button); color: palette(button-text); }
     QComboBox { padding-right: 18px; }
     QToolButton { padding-right: 15px; }
@@ -31,7 +31,7 @@ _STYLE = """
         border-right: 1px solid palette(mid); border-bottom: 1px solid palette(mid); }
     QListWidget#workspaceNavigation { border: 1px solid palette(mid); border-radius: 4px; }
     QListWidget#workspaceNavigation:focus { border-color: palette(link); }
-    QListWidget#workspaceNavigation::item { padding: 6px 7px; border-left: 3px solid transparent; }
+    QListWidget#workspaceNavigation::item { padding: 4px 7px; border-left: 3px solid transparent; }
     QListWidget#workspaceNavigation::item:selected {
         border-left: 3px solid palette(accent); background: palette(highlight);
         color: palette(highlighted-text);
@@ -91,11 +91,9 @@ def apply_theme(name: str) -> None:
     app.styleHints().setColorScheme(Qt.ColorScheme.Dark if dark else Qt.ColorScheme.Light)
     font = QFontDatabase.systemFont(QFontDatabase.SystemFont.GeneralFont)
     if font.pointSizeF() > 0:
-        font.setPointSizeF(max(12.0, font.pointSizeF()))
         body_size = f"{font.pointSizeF():g}pt"
         heading_size = f"{font.pointSizeF() * 1.125:g}pt"
     else:
-        font.setPixelSize(max(16, font.pixelSize()))
         body_size = f"{font.pixelSize()}px"
         heading_size = f"{round(font.pixelSize() * 1.125)}px"
     app.setFont(font)

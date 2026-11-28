@@ -149,10 +149,13 @@ def test_workspace_control_states_have_distinct_shapes(
         window.close()
 
 
-def test_panel_grid_edits_and_appearance(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("system_font_size", (9, 14))
+def test_panel_grid_edits_and_appearance(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, system_font_size: int
+) -> None:
     pytest.importorskip("PySide6")
     from PySide6.QtCore import QSettings, Qt
-    from PySide6.QtGui import QAction, QPalette
+    from PySide6.QtGui import QAction, QFont, QFontDatabase, QPalette
     from PySide6.QtTest import QTest
     from PySide6.QtWidgets import QApplication, QLineEdit
 
@@ -165,6 +168,14 @@ def test_panel_grid_edits_and_appearance(tmp_path: Path, monkeypatch: pytest.Mon
     if not isinstance(app, QApplication):
         app = QApplication([])
     app.setQuitOnLastWindowClosed(False)
+    system_font = QFontDatabase.systemFont
+
+    def font_at_size(role: QFontDatabase.SystemFont) -> QFont:
+        font = system_font(role)
+        font.setPointSize(system_font_size)
+        return font
+
+    monkeypatch.setattr(QFontDatabase, "systemFont", font_at_size)
     settings = QSettings(str(tmp_path / "appearance.ini"), QSettings.Format.IniFormat)
     window = ProjectWindow(use_gpu=False, preferences=settings)
     source = tmp_path / "science.fits"
@@ -188,8 +199,11 @@ def test_panel_grid_edits_and_appearance(tmp_path: Path, monkeypatch: pytest.Mon
         table = window.panels
         window.resize(800, 650)
         app.processEvents()
-        assert table.font().pointSizeF() == app.font().pointSizeF()
-        assert table.font().pointSizeF() >= 12 or table.font().pixelSize() >= 16
+        assert table.font().pointSizeF() == app.font().pointSizeF() == system_font_size
+        assert window.plate_solve_button.font().pointSizeF() == system_font_size
+        assert table.rowHeight(0) >= table.fontMetrics().height() + 8
+        if system_font_size == 9:
+            assert table.rowHeight(0) < 32
         assert table.viewport().height() >= table.rowHeight(0)
         critical_columns = ("Panel", "Sky", "WCS", "Solve result", "Weight", "Band")
         assert COLUMNS[: len(critical_columns)] == critical_columns

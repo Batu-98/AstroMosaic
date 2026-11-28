@@ -450,7 +450,7 @@ class PanelTable(QTableView):
             return
         self._column_font = font
         metrics = self.fontMetrics()
-        self.verticalHeader().setDefaultSectionSize(max(32, metrics.height() + 8))
+        self.verticalHeader().setDefaultSectionSize(max(26, metrics.height() + 8))
         header = self.horizontalHeader()
         status_labels = {
             "WCS": ("Unavailable", "Checking…"),

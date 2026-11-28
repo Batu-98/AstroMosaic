@@ -37,7 +37,7 @@ The panel control table opens in **Overview**. Choose **Optics**, **Files**, or 
 
 **Overview** places the WCS and solve result together before the optics columns. Body text starts at 12 pt and uses larger sizes reported by Qt. Section headings and the job percentage scale with the body text.
 
-The panel name stays visible during horizontal scrolling. Combine the filename, sky band and WCS filters to narrow the table. **Clear Filters** restores all rows. The Plate Solve summary shows reuse, new solutions, failures and unprocessed panels. Resolve a displayed prerequisite such as a missing sky mask, or select the panel and open **Plate Solve Details** to inspect its attempts.
+The desktop uses the system text size. Panel rows grow when the system font needs more space. The panel name stays visible during horizontal scrolling. Combine the filename, sky band and WCS filters to narrow the table. **Clear Filters** restores all rows. The Plate Solve summary shows reuse, new solutions, failures and unprocessed panels. Resolve a displayed prerequisite such as a missing sky mask, or select the panel and open **Plate Solve Details** to inspect its attempts.
 
 Enable **Panel Outlines** on a sky preview to see projected detector boundaries. Selecting inside an outline highlights the corresponding panel. **Show in Panels** reveals the selected row, and **Clear Filters** reveals rows hidden by the current filters. The outlines describe detector geometry. The mosaic coverage display shows valid samples and mask holes.
 
